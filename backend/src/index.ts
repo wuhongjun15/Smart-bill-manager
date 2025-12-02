@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+import rateLimit from 'express-rate-limit';
 
 // Catch and log any initialization errors
 process.on('uncaughtException', (error) => {
@@ -53,6 +54,24 @@ try {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Rate limiting for auth endpoints (stricter limits)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // Limit each IP to 20 requests per windowMs
+  message: { success: false, message: '请求过于频繁，请稍后再试' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// General rate limiting for API
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 100, // Limit each IP to 100 requests per minute
+  message: { success: false, message: '请求过于频繁，请稍后再试' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -67,22 +86,22 @@ if (!fs.existsSync(uploadsDir)) {
 // Serve uploaded files
 app.use('/uploads', express.static(uploadsDir));
 
-// Auth routes (public)
-app.use('/api/auth', authRoutes);
+// Auth routes (public) with stricter rate limiting
+app.use('/api/auth', authLimiter, authRoutes);
 
 // Health check (public)
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Protected API Routes
-app.use('/api/payments', authMiddleware, paymentRoutes);
-app.use('/api/invoices', authMiddleware, invoiceRoutes);
-app.use('/api/email', authMiddleware, emailRoutes);
-app.use('/api/dingtalk', authMiddleware, dingtalkRoutes);
+// Protected API Routes with rate limiting
+app.use('/api/payments', apiLimiter, authMiddleware, paymentRoutes);
+app.use('/api/invoices', apiLimiter, authMiddleware, invoiceRoutes);
+app.use('/api/email', apiLimiter, authMiddleware, emailRoutes);
+app.use('/api/dingtalk', apiLimiter, authMiddleware, dingtalkRoutes);
 
 // Dashboard summary (protected)
-app.get('/api/dashboard', authMiddleware, (req, res) => {
+app.get('/api/dashboard', apiLimiter, authMiddleware, (req, res) => {
   try {
     const today = new Date();
     const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();

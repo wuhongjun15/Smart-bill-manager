@@ -1,10 +1,26 @@
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
+import crypto from 'crypto';
 import db from '../models/database';
 
-// Get JWT secret from environment or use a default for development
-const JWT_SECRET = process.env.JWT_SECRET || 'smart-bill-manager-secret-key-change-in-production';
+// Get JWT secret from environment or generate one if not in production
+const getJwtSecret = (): string => {
+  const envSecret = process.env.JWT_SECRET;
+  if (envSecret) {
+    return envSecret;
+  }
+  
+  // In production, require JWT_SECRET to be set
+  if (process.env.NODE_ENV === 'production') {
+    console.warn('⚠️ WARNING: JWT_SECRET not set in production. Using generated secret (will change on restart).');
+  }
+  
+  // Generate a random secret for development/testing
+  return crypto.randomBytes(32).toString('hex');
+};
+
+const JWT_SECRET = getJwtSecret();
 const JWT_EXPIRES_IN = '7d';
 
 export interface User {
@@ -149,16 +165,46 @@ export const authService = {
     return count.count > 0;
   },
 
+  // Generate a secure random password using rejection sampling to avoid bias
+  generateSecurePassword(length: number = 12): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    const charsLength = chars.length;
+    // Calculate the maximum value that doesn't introduce bias
+    const maxValid = Math.floor(256 / charsLength) * charsLength;
+    
+    let password = '';
+    while (password.length < length) {
+      const randomByte = crypto.randomBytes(1)[0];
+      // Rejection sampling: reject values that would cause bias
+      if (randomByte < maxValid) {
+        password += chars[randomByte % charsLength];
+      }
+    }
+    return password;
+  },
+
   // Create default admin user if no users exist
   async ensureAdminExists(): Promise<void> {
     if (!this.hasUsers()) {
+      // Use environment variable for admin password or generate a random one
+      const adminPassword = process.env.ADMIN_PASSWORD || this.generateSecurePassword();
+      const isRandomPassword = !process.env.ADMIN_PASSWORD;
+      
       console.log('No users found, creating default admin user...');
-      const result = await this.register('admin', 'admin123', 'admin@localhost');
+      const result = await this.register('admin', adminPassword, 'admin@localhost');
       if (result.success) {
         // Update role to admin
         db.prepare('UPDATE users SET role = ? WHERE username = ?').run('admin', 'admin');
-        console.log('Default admin user created: username=admin, password=admin123');
-        console.log('⚠️ Please change the default password after first login!');
+        console.log('=========================================');
+        console.log('Default admin user created:');
+        console.log('  Username: admin');
+        if (isRandomPassword) {
+          console.log(`  Password: ${adminPassword}`);
+          console.log('⚠️ IMPORTANT: Save this password! It will not be shown again.');
+        } else {
+          console.log('  Password: (from ADMIN_PASSWORD environment variable)');
+        }
+        console.log('=========================================');
       }
     }
   }

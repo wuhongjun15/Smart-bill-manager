@@ -109,10 +109,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               </Button>
             </Form.Item>
           </Form>
-
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            默认账户: admin / admin123
-          </Text>
         </Space>
       </Card>
     </div>

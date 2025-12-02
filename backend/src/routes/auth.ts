@@ -49,7 +49,7 @@ router.post('/register', async (req: Request, res: Response) => {
     res.status(201).json(result);
   } catch (error) {
     console.error('Register error:', error);
-    res.status(500).json({ success: false, message: '注册失败', error: String(error) });
+    res.status(500).json({ success: false, message: '注册失败，请稍后重试' });
   }
 });
 
@@ -71,7 +71,7 @@ router.post('/login', async (req: Request, res: Response) => {
     res.json(result);
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ success: false, message: '登录失败', error: String(error) });
+    res.status(500).json({ success: false, message: '登录失败，请稍后重试' });
   }
 });
 
@@ -92,7 +92,8 @@ router.get('/me', authMiddleware, (req: Request, res: Response) => {
 
     res.json({ success: true, data: user });
   } catch (error) {
-    res.status(500).json({ success: false, message: '获取用户信息失败', error: String(error) });
+    console.error('Get user error:', error);
+    res.status(500).json({ success: false, message: '获取用户信息失败' });
   }
 });
 
@@ -133,7 +134,8 @@ router.post('/change-password', authMiddleware, async (req: Request, res: Respon
 
     res.json(result);
   } catch (error) {
-    res.status(500).json({ success: false, message: '修改密码失败', error: String(error) });
+    console.error('Change password error:', error);
+    res.status(500).json({ success: false, message: '修改密码失败，请稍后重试' });
   }
 });
 
