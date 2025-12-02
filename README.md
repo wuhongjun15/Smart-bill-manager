@@ -54,9 +54,28 @@
 
 ## 📦 快速开始
 
-### 方式一：Docker 部署（推荐）
+### 方式一：使用预构建镜像（最简单）
 
-使用 Docker 可以快速部署整个应用，无需安装 Node.js 环境。
+直接从 GitHub Container Registry 拉取预构建的 Docker 镜像，无需克隆代码。
+
+```bash
+# 拉取最新镜像
+docker pull ghcr.io/tuoro/smart-bill-manager:latest
+
+# 运行容器
+docker run -d \
+  --name smart-bill-manager \
+  -p 80:80 \
+  -v smart-bill-data:/app/backend/data \
+  -v smart-bill-uploads:/app/backend/uploads \
+  ghcr.io/tuoro/smart-bill-manager:latest
+```
+
+访问 http://localhost 即可使用。
+
+### 方式二：Docker Compose 部署（推荐）
+
+使用 Docker Compose 可以更方便地管理容器和数据卷。
 
 #### 环境要求
 - Docker >= 20.10
@@ -64,10 +83,22 @@
 
 #### 部署步骤
 
-1. **克隆仓库**
-```bash
-git clone https://github.com/tuoro/Smart-bill-manager.git
-cd Smart-bill-manager
+1. **创建 docker-compose.yml 文件**
+```yaml
+services:
+  smart-bill-manager:
+    image: ghcr.io/tuoro/smart-bill-manager:latest
+    container_name: smart-bill-manager
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - app-data:/app/backend/data
+      - app-uploads:/app/backend/uploads
+
+volumes:
+  app-data:
+  app-uploads:
 ```
 
 2. **启动服务**
@@ -90,10 +121,40 @@ docker-compose down
 
 6. **数据持久化**
 数据库和上传文件存储在 Docker 卷中：
-- `backend-data`: 数据库文件
-- `backend-uploads`: 上传的文件
+- `app-data`: 数据库文件
+- `app-uploads`: 上传的文件
 
-### 方式二：本地开发
+### 方式三：从源码构建
+
+如果需要自定义或开发，可以从源码构建镜像。
+
+1. **克隆仓库**
+```bash
+git clone https://github.com/tuoro/Smart-bill-manager.git
+cd Smart-bill-manager
+```
+
+2. **构建并启动**
+```bash
+docker-compose up -d --build
+```
+
+或者单独构建镜像：
+
+```bash
+# 构建镜像
+docker build -t smart-bill-manager .
+
+# 运行容器
+docker run -d \
+  --name smart-bill-manager \
+  -p 80:80 \
+  -v smart-bill-data:/app/backend/data \
+  -v smart-bill-uploads:/app/backend/uploads \
+  smart-bill-manager
+```
+
+### 方式四：本地开发
 
 #### 环境要求
 - Node.js >= 18
@@ -192,7 +253,7 @@ Smart-bill-manager/
 │   │   └── utils/          # 工具函数
 │   ├── uploads/            # 上传文件存储
 │   ├── data/               # SQLite数据库
-│   └── Dockerfile          # 后端 Docker 配置
+│   └── Dockerfile          # 后端单独 Docker 配置
 ├── frontend/               # 前端应用
 │   ├── src/
 │   │   ├── App.tsx        # 主应用
@@ -200,8 +261,11 @@ Smart-bill-manager/
 │   │   ├── services/      # API服务
 │   │   └── types/         # TypeScript类型
 │   ├── public/            # 静态资源
-│   ├── Dockerfile          # 前端 Docker 配置
-│   └── nginx.conf          # Nginx 配置
+│   ├── Dockerfile          # 前端单独 Docker 配置
+│   └── nginx.conf          # 前端单独 Nginx 配置
+├── Dockerfile              # 统一 Docker 配置（前后端合一）
+├── nginx.conf              # 统一 Nginx 配置
+├── supervisord.conf        # Supervisor 进程管理配置
 ├── docker-compose.yml      # Docker Compose 配置
 └── README.md
 ```

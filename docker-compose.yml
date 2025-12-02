@@ -1,45 +1,26 @@
 services:
-  backend:
+  smart-bill-manager:
     build:
-      context: ./backend
+      context: .
       dockerfile: Dockerfile
-    container_name: smart-bill-backend
-    restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-      - PORT=3001
-    volumes:
-      - backend-data:/app/data
-      - backend-uploads:/app/uploads
-    networks:
-      - smart-bill-network
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/api/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1))"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: smart-bill-frontend
+    container_name: smart-bill-manager
     restart: unless-stopped
     ports:
       - "80:80"
-    depends_on:
-      backend:
-        condition: service_healthy
-    networks:
-      - smart-bill-network
-
-networks:
-  smart-bill-network:
-    driver: bridge
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - app-data:/app/backend/data
+      - app-uploads:/app/backend/uploads
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
-  backend-data:
+  app-data:
     driver: local
-  backend-uploads:
+  app-uploads:
     driver: local
