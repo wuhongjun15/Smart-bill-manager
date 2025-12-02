@@ -4,7 +4,7 @@
 # ============================================
 # Stage 1: Build Frontend
 # ============================================
-FROM node:20-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -23,7 +23,7 @@ RUN npx tsc -b && npx vite build
 # ============================================
 # Stage 2: Build Backend
 # ============================================
-FROM node:20-alpine AS backend-builder
+FROM node:24-alpine AS backend-builder
 
 WORKDIR /app/backend
 
