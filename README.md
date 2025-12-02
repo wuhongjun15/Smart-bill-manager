@@ -54,9 +54,28 @@
 
 ## 📦 快速开始
 
-### 方式一：Docker 部署（推荐）
+### 方式一：使用预构建镜像（最简单）
 
-使用 Docker 可以快速部署整个应用，前后端合并在一个镜像中，无需安装 Node.js 环境。
+直接从 GitHub Container Registry 拉取预构建的 Docker 镜像，无需克隆代码。
+
+```bash
+# 拉取最新镜像
+docker pull ghcr.io/tuoro/smart-bill-manager:latest
+
+# 运行容器
+docker run -d \
+  --name smart-bill-manager \
+  -p 80:80 \
+  -v smart-bill-data:/app/backend/data \
+  -v smart-bill-uploads:/app/backend/uploads \
+  ghcr.io/tuoro/smart-bill-manager:latest
+```
+
+访问 http://localhost 即可使用。
+
+### 方式二：Docker Compose 部署（推荐）
+
+使用 Docker Compose 可以更方便地管理容器和数据卷。
 
 #### 环境要求
 - Docker >= 20.10
@@ -64,10 +83,22 @@
 
 #### 部署步骤
 
-1. **克隆仓库**
-```bash
-git clone https://github.com/tuoro/Smart-bill-manager.git
-cd Smart-bill-manager
+1. **创建 docker-compose.yml 文件**
+```yaml
+services:
+  smart-bill-manager:
+    image: ghcr.io/tuoro/smart-bill-manager:latest
+    container_name: smart-bill-manager
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - app-data:/app/backend/data
+      - app-uploads:/app/backend/uploads
+
+volumes:
+  app-data:
+  app-uploads:
 ```
 
 2. **启动服务**
@@ -93,9 +124,22 @@ docker-compose down
 - `app-data`: 数据库文件
 - `app-uploads`: 上传的文件
 
-#### 单独构建镜像
+### 方式三：从源码构建
 
-如果需要单独构建 Docker 镜像：
+如果需要自定义或开发，可以从源码构建镜像。
+
+1. **克隆仓库**
+```bash
+git clone https://github.com/tuoro/Smart-bill-manager.git
+cd Smart-bill-manager
+```
+
+2. **构建并启动**
+```bash
+docker-compose up -d --build
+```
+
+或者单独构建镜像：
 
 ```bash
 # 构建镜像
@@ -110,7 +154,7 @@ docker run -d \
   smart-bill-manager
 ```
 
-### 方式二：本地开发
+### 方式四：本地开发
 
 #### 环境要求
 - Node.js >= 18
