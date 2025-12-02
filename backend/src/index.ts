@@ -2,17 +2,75 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
+import rateLimit from 'express-rate-limit';
 
-import paymentRoutes from './routes/payments';
-import invoiceRoutes from './routes/invoices';
-import emailRoutes from './routes/email';
-import dingtalkRoutes from './routes/dingtalk';
-import { paymentService } from './services/paymentService';
-import { invoiceService } from './services/invoiceService';
-import { emailService } from './services/emailService';
+// Catch and log any initialization errors
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+console.log('Starting Smart Bill Manager...');
+console.log('Environment:', process.env.NODE_ENV);
+console.log('Working directory:', process.cwd());
+console.log('__dirname:', __dirname);
+
+// Import routes and services with error handling
+let authRoutes: express.Router;
+let authMiddleware: typeof import('./routes/auth').authMiddleware;
+let paymentRoutes: express.Router;
+let invoiceRoutes: express.Router;
+let emailRoutes: express.Router;
+let dingtalkRoutes: express.Router;
+let paymentService: typeof import('./services/paymentService').paymentService;
+let invoiceService: typeof import('./services/invoiceService').invoiceService;
+let emailService: typeof import('./services/emailService').emailService;
+let authService: typeof import('./services/authService').authService;
+
+try {
+  console.log('Loading routes and services...');
+  const authModule = require('./routes/auth');
+  authRoutes = authModule.default;
+  authMiddleware = authModule.authMiddleware;
+  paymentRoutes = require('./routes/payments').default;
+  invoiceRoutes = require('./routes/invoices').default;
+  emailRoutes = require('./routes/email').default;
+  dingtalkRoutes = require('./routes/dingtalk').default;
+  paymentService = require('./services/paymentService').paymentService;
+  invoiceService = require('./services/invoiceService').invoiceService;
+  emailService = require('./services/emailService').emailService;
+  authService = require('./services/authService').authService;
+  console.log('Routes and services loaded successfully');
+} catch (error) {
+  console.error('Failed to load routes or services:', error);
+  process.exit(1);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Rate limiting for auth endpoints (stricter limits)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // Limit each IP to 20 requests per windowMs
+  message: { success: false, message: '请求过于频繁，请稍后再试' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// General rate limiting for API
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 100, // Limit each IP to 100 requests per minute
+  message: { success: false, message: '请求过于频繁，请稍后再试' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Middleware
 app.use(cors());
@@ -28,19 +86,22 @@ if (!fs.existsSync(uploadsDir)) {
 // Serve uploaded files
 app.use('/uploads', express.static(uploadsDir));
 
-// API Routes
-app.use('/api/payments', paymentRoutes);
-app.use('/api/invoices', invoiceRoutes);
-app.use('/api/email', emailRoutes);
-app.use('/api/dingtalk', dingtalkRoutes);
+// Auth routes (public) with stricter rate limiting
+app.use('/api/auth', authLimiter, authRoutes);
 
-// Health check
+// Health check (public)
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Dashboard summary
-app.get('/api/dashboard', (req, res) => {
+// Protected API Routes with rate limiting
+app.use('/api/payments', apiLimiter, authMiddleware, paymentRoutes);
+app.use('/api/invoices', apiLimiter, authMiddleware, invoiceRoutes);
+app.use('/api/email', apiLimiter, authMiddleware, emailRoutes);
+app.use('/api/dingtalk', apiLimiter, authMiddleware, dingtalkRoutes);
+
+// Dashboard summary (protected)
+app.get('/api/dashboard', apiLimiter, authMiddleware, (req, res) => {
   try {
     const today = new Date();
     const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1).toISOString();
@@ -85,11 +146,23 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`🚀 Smart Bill Manager API running on port ${PORT}`);
-  console.log(`📊 Dashboard: http://localhost:${PORT}`);
-  console.log(`📬 Email monitoring ready`);
-  console.log(`🤖 DingTalk webhook ready at /api/dingtalk/webhook`);
+// Initialize application
+const startApp = async () => {
+  // Ensure default admin exists
+  await authService.ensureAdminExists();
+
+  app.listen(PORT, () => {
+    console.log(`🚀 Smart Bill Manager API running on port ${PORT}`);
+    console.log(`📊 Dashboard: http://localhost:${PORT}`);
+    console.log(`📬 Email monitoring ready`);
+    console.log(`🤖 DingTalk webhook ready at /api/dingtalk/webhook`);
+    console.log(`🔐 Auth system enabled`);
+  });
+};
+
+startApp().catch((error) => {
+  console.error('Failed to start application:', error);
+  process.exit(1);
 });
 
 export default app;
