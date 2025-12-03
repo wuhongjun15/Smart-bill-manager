@@ -182,6 +182,15 @@ func (s *OCRService) extractTextFromPDF(pdfPath string) (string, error) {
 func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 	fmt.Printf("[OCR] Converting PDF to images for OCR: %s\n", pdfPath)
 
+	// Validate PDF file exists and is a regular file
+	fileInfo, err := os.Stat(pdfPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to access PDF file: %w", err)
+	}
+	if !fileInfo.Mode().IsRegular() {
+		return "", fmt.Errorf("PDF path is not a regular file")
+	}
+
 	// Create temporary directory for images
 	tempDir, err := os.MkdirTemp("", "pdf-ocr-*")
 	if err != nil {
@@ -191,6 +200,7 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 
 	// Use pdftoppm to convert PDF to PNG images
 	// pdftoppm -png -r 300 input.pdf outputPrefix
+	// Note: exec.Command properly escapes arguments, preventing shell injection
 	outputPrefix := filepath.Join(tempDir, "page")
 	cmd := exec.Command("pdftoppm", "-png", "-r", "300", pdfPath, outputPrefix)
 	if err := cmd.Run(); err != nil {
@@ -199,7 +209,10 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 
 	// Find generated image files
 	files, err := filepath.Glob(filepath.Join(tempDir, "page-*.png"))
-	if err != nil || len(files) == 0 {
+	if err != nil {
+		return "", fmt.Errorf("failed to glob image files: %w", err)
+	}
+	if len(files) == 0 {
 		return "", fmt.Errorf("no images generated from PDF")
 	}
 
