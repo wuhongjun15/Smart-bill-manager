@@ -206,7 +206,7 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 	for pageNum := 0; pageNum < numPages; pageNum++ {
 		fmt.Printf("[OCR] Processing page %d/%d\n", pageNum+1, numPages)
 
-		// Render page to image at 300 DPI for good OCR quality
+		// Render page to image for OCR
 		img, err := doc.Image(pageNum)
 		if err != nil {
 			fmt.Printf("[OCR] Failed to render page %d: %v\n", pageNum+1, err)
@@ -220,11 +220,12 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 			continue
 		}
 		tempFilePath := tempFile.Name()
+		// Ensure cleanup happens even if we return early
+		defer os.Remove(tempFilePath)
 
 		// Encode image as PNG
 		if err := png.Encode(tempFile, img); err != nil {
 			tempFile.Close()
-			os.Remove(tempFilePath)
 			fmt.Printf("[OCR] Failed to encode page %d as PNG: %v\n", pageNum+1, err)
 			continue
 		}
@@ -233,9 +234,6 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 		// Perform OCR on the image
 		client.SetImage(tempFilePath)
 		text, err := client.Text()
-
-		// Clean up temp file
-		os.Remove(tempFilePath)
 
 		if err != nil {
 			fmt.Printf("[OCR] OCR failed for page %d: %v\n", pageNum+1, err)
