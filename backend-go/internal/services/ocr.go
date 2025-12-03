@@ -114,31 +114,60 @@ func (s *OCRService) isGarbledText(text string) bool {
 	return validRatio < 0.5
 }
 
-// RecognizePDF extracts text from PDF, using OCR if necessary
+// extractTextWithPdftotext uses poppler's pdftotext for better CID font support
+func (s *OCRService) extractTextWithPdftotext(pdfPath string) (string, error) {
+	fmt.Printf("[OCR] Attempting text extraction with pdftotext: %s\n", pdfPath)
+
+	// Check if pdftotext is available
+	_, err := exec.LookPath("pdftotext")
+	if err != nil {
+		return "", fmt.Errorf("pdftotext not found in PATH: %w", err)
+	}
+
+	// Run pdftotext with -layout flag to preserve layout
+	// Output to stdout using "-" as output file
+	cmd := exec.Command("pdftotext", "-layout", "-enc", "UTF-8", pdfPath, "-")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("pdftotext execution failed: %w", err)
+	}
+
+	text := string(output)
+	fmt.Printf("[OCR] pdftotext extracted %d characters\n", len(text))
+	return text, nil
+}
+
+// RecognizePDF extracts text from PDF, using multiple fallback methods
 func (s *OCRService) RecognizePDF(pdfPath string) (string, error) {
 	fmt.Printf("[OCR] Starting PDF recognition for: %s\n", pdfPath)
 
-	// First try to extract text directly from PDF
-	text, err := s.extractTextFromPDF(pdfPath)
+	// Method 1: Try pdftotext first (best CID font support)
+	text, err := s.extractTextWithPdftotext(pdfPath)
+	if err == nil && !s.isGarbledText(text) && strings.TrimSpace(text) != "" {
+		fmt.Printf("[OCR] Successfully extracted %d characters using pdftotext\n", len(text))
+		return text, nil
+	}
 	if err != nil {
-		fmt.Printf("[OCR] Direct text extraction failed: %v\n", err)
-		// If direct extraction fails, convert PDF to images and use OCR
-		return s.pdfToImageOCR(pdfPath)
+		fmt.Printf("[OCR] pdftotext extraction failed: %v\n", err)
+	} else {
+		fmt.Printf("[OCR] pdftotext result was empty or garbled, trying next method\n")
 	}
 
-	if strings.TrimSpace(text) == "" {
-		fmt.Printf("[OCR] No text found in PDF, attempting OCR conversion\n")
-		return s.pdfToImageOCR(pdfPath)
+	// Method 2: Try ledongthuc/pdf library
+	text, err = s.extractTextFromPDF(pdfPath)
+	if err == nil && !s.isGarbledText(text) && strings.TrimSpace(text) != "" {
+		fmt.Printf("[OCR] Successfully extracted %d characters using pdf library\n", len(text))
+		return text, nil
+	}
+	if err != nil {
+		fmt.Printf("[OCR] PDF library extraction failed: %v\n", err)
+	} else {
+		fmt.Printf("[OCR] PDF library result was empty or garbled, trying OCR\n")
 	}
 
-	// Check if extracted text is garbled (common with embedded fonts)
-	if s.isGarbledText(text) {
-		fmt.Printf("[OCR] Detected garbled text, falling back to OCR\n")
-		return s.pdfToImageOCR(pdfPath)
-	}
-
-	fmt.Printf("[OCR] Successfully extracted %d characters from PDF\n", len(text))
-	return text, nil
+	// Method 3: Fall back to OCR (convert PDF to images)
+	fmt.Printf("[OCR] Falling back to image-based OCR\n")
+	return s.pdfToImageOCR(pdfPath)
 }
 
 // extractTextFromPDF extracts text from a PDF file

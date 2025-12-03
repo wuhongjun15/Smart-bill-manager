@@ -1,6 +1,7 @@
 package services
 
 import (
+	"os/exec"
 	"testing"
 )
 
@@ -466,3 +467,32 @@ func TestPdfToImageOCR_ErrorHandling(t *testing.T) {
 	}
 	t.Logf("Correctly returned error for empty path: %v", err)
 }
+
+func TestExtractTextWithPdftotext(t *testing.T) {
+	service := NewOCRService()
+
+	// Test that pdftotext method is available
+	_, err := exec.LookPath("pdftotext")
+	if err != nil {
+		t.Skip("pdftotext not available, skipping test")
+	}
+
+	// Test with non-existent file
+	_, err = service.extractTextWithPdftotext("/nonexistent/file.pdf")
+	if err == nil {
+		t.Error("Expected error for non-existent file, got nil")
+	}
+	t.Logf("Correctly returned error for non-existent file: %v", err)
+
+	// Test with empty path
+	_, err = service.extractTextWithPdftotext("")
+	if err == nil {
+		t.Error("Expected error for empty path, got nil")
+	}
+	t.Logf("Correctly returned error for empty path: %v", err)
+
+	// Note: Testing with a real PDF file would require creating test fixtures
+	// In a real scenario, you would create a test PDF with CID fonts and verify
+	// that pdftotext extracts the text correctly
+}
+
