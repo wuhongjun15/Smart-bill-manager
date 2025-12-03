@@ -27,9 +27,9 @@ FROM golang:1.24-alpine AS backend-builder
 
 WORKDIR /app/backend
 
-# Install build dependencies including Tesseract
+# Install build dependencies including Tesseract and poppler-utils
 # Note: tesseract-ocr-dev requires leptonica-dev, and pkgconfig helps with library discovery
-RUN apk add --no-cache gcc g++ musl-dev tesseract-ocr-dev leptonica-dev pkgconfig ca-certificates
+RUN apk add --no-cache gcc g++ musl-dev tesseract-ocr-dev leptonica-dev pkgconfig ca-certificates poppler-utils
 
 # Copy go mod files
 COPY backend-go/go.mod backend-go/go.sum ./
@@ -48,10 +48,10 @@ RUN CGO_ENABLED=1 GOOS=linux go build -o server ./cmd/server
 # ============================================
 FROM nginx:alpine AS production
 
-# Install supervisor, SQLite runtime, and Tesseract with language packs  
+# Install supervisor, SQLite runtime, Tesseract with language packs, and poppler-utils
 # Note: Alpine's tesseract-ocr package includes basic language data
 # Additional language data can be installed via tesseract-ocr-data-* packages or downloaded manually
-RUN apk add --no-cache supervisor tesseract-ocr ca-certificates && \
+RUN apk add --no-cache supervisor tesseract-ocr ca-certificates poppler-utils && \
     apk add --no-cache tesseract-ocr-data-chi_sim tesseract-ocr-data-eng 2>/dev/null || \
     (apk add --no-cache wget && \
      TESSDATA_DIR=/usr/share/tessdata && \
