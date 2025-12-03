@@ -35,6 +35,12 @@ var (
 	// Compiled regex patterns for better performance
 	amountRegex = regexp.MustCompile(amountPattern)
 	taxIDRegex  = regexp.MustCompile(taxIDPatternWithBoundary)
+
+	// Date patterns - compiled once for performance
+	datePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`\d{4}[/年\-]\s*\d{1,2}[/月\-]\s*\d{1,2}[日]?`),
+		regexp.MustCompile(`\d{4}\s+\d{2}\s+\d{2}`),
+	}
 )
 
 func NewOCRService() *OCRService {
@@ -370,12 +376,8 @@ func (s *OCRService) extractTaxIDs(text string) []string {
 
 // extractDates finds date patterns
 func (s *OCRService) extractDates(text string) []string {
-	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`\d{4}[/年\-]\s*\d{1,2}[/月\-]\s*\d{1,2}[日]?`),
-		regexp.MustCompile(`\d{4}\s+\d{2}\s+\d{2}`),
-	}
 	var dates []string
-	for _, re := range patterns {
+	for _, re := range datePatterns {
 		dates = append(dates, re.FindAllString(text, -1)...)
 	}
 	return dates
