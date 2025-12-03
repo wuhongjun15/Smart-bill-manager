@@ -448,3 +448,21 @@ func TestIsGarbledText(t *testing.T) {
 	result := service.isGarbledText(edgeCaseText)
 	t.Logf("Edge case (50%% valid) detected as garbled: %v", result)
 }
+
+func TestPdfToImageOCR_ErrorHandling(t *testing.T) {
+	service := NewOCRService()
+
+	// Test with non-existent file
+	_, err := service.RecognizePDF("/nonexistent/file.pdf")
+	if err == nil {
+		t.Error("Expected error for non-existent file, got nil")
+	}
+	t.Logf("Correctly returned error for non-existent file: %v", err)
+
+	// Test with empty path
+	_, err = service.RecognizePDF("")
+	if err == nil {
+		t.Error("Expected error for empty path, got nil")
+	}
+	t.Logf("Correctly returned error for empty path: %v", err)
+}

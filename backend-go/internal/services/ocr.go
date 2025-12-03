@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image/png"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
 
+	"github.com/gen2brain/go-fitz"
 	"github.com/ledongthuc/pdf"
 	"github.com/otiai10/gosseract/v2"
 )
@@ -176,12 +179,82 @@ func (s *OCRService) extractTextFromPDF(pdfPath string) (string, error) {
 
 // pdfToImageOCR converts PDF pages to images and performs OCR
 func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
-	// For scanned PDFs without text, we would need to convert pages to images
-	// and then perform OCR. This is a placeholder for that functionality.
-	// In a production system, you might use tools like pdfcpu to extract images
-	// or convert PDF pages to images using ImageMagick or similar.
+	fmt.Printf("[OCR] Converting PDF to images for OCR: %s\n", pdfPath)
 
-	return "", fmt.Errorf("scanned PDF OCR is not yet fully implemented - please use text-based PDFs or convert scanned PDFs to image files (JPG/PNG) and upload those instead")
+	// Open the PDF document using go-fitz (MuPDF-based)
+	doc, err := fitz.New(pdfPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to open PDF for image conversion: %w", err)
+	}
+	defer doc.Close()
+
+	numPages := doc.NumPage()
+	fmt.Printf("[OCR] PDF has %d pages to convert\n", numPages)
+
+	if numPages == 0 {
+		return "", fmt.Errorf("PDF has no pages")
+	}
+
+	// Initialize gosseract client for OCR
+	client := gosseract.NewClient()
+	defer client.Close()
+	client.SetLanguage("chi_sim", "eng")
+
+	var allText strings.Builder
+
+	// Process each page
+	for pageNum := 0; pageNum < numPages; pageNum++ {
+		fmt.Printf("[OCR] Processing page %d/%d\n", pageNum+1, numPages)
+
+		// Render page to image at 300 DPI for good OCR quality
+		img, err := doc.Image(pageNum)
+		if err != nil {
+			fmt.Printf("[OCR] Failed to render page %d: %v\n", pageNum+1, err)
+			continue
+		}
+
+		// Create temporary file for the image
+		tempFile, err := os.CreateTemp("", "pdf-page-*.png")
+		if err != nil {
+			fmt.Printf("[OCR] Failed to create temp file for page %d: %v\n", pageNum+1, err)
+			continue
+		}
+		tempFilePath := tempFile.Name()
+
+		// Encode image as PNG
+		if err := png.Encode(tempFile, img); err != nil {
+			tempFile.Close()
+			os.Remove(tempFilePath)
+			fmt.Printf("[OCR] Failed to encode page %d as PNG: %v\n", pageNum+1, err)
+			continue
+		}
+		tempFile.Close()
+
+		// Perform OCR on the image
+		client.SetImage(tempFilePath)
+		text, err := client.Text()
+
+		// Clean up temp file
+		os.Remove(tempFilePath)
+
+		if err != nil {
+			fmt.Printf("[OCR] OCR failed for page %d: %v\n", pageNum+1, err)
+			continue
+		}
+
+		fmt.Printf("[OCR] Extracted %d characters from page %d\n", len(text), pageNum+1)
+		allText.WriteString(text)
+		allText.WriteString("\n")
+	}
+
+	result := allText.String()
+	fmt.Printf("[OCR] Total OCR text extracted: %d characters from %d pages\n", len(result), numPages)
+
+	if strings.TrimSpace(result) == "" {
+		return "", fmt.Errorf("no text could be extracted from PDF images")
+	}
+
+	return result, nil
 }
 
 // ParsePaymentScreenshot extracts payment information from OCR text
