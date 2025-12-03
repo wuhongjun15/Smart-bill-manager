@@ -643,10 +643,10 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		regexp.MustCompile(`收款方[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`收款人[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`转账给([^\s¥￥\n]+)`),
-		// Merchant full name
-		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n]+)`),
+		// Merchant full name - stop at common delimiters
+		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n收单机构支付方式]+?)[\s]*(?:收单机构|支付方式|\n|$)`),
 		// Merchant name after 商品
-		regexp.MustCompile(`商品[：:]?[\s]*([^\s(（]+)`),
+		regexp.MustCompile(`商品[：:]?[\s]*([^\s(（\n]+)`),
 	}
 	for _, re := range merchantRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
@@ -666,7 +666,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		// Chinese format: 2025年10月23日 14:59:46
 		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{2}:[\d]{2}:[\d]{2})`),
 		// Generic Chinese date-time format (after preprocessing)
-		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{1,2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{2}:[\d]{2}:[\d]{2})`),
 		// Date only format
 		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)`),
 	}
@@ -736,7 +736,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 		regexp.MustCompile(`商家[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`收款方[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`付款给([^\s¥￥\n]+)`),
-		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n]+)`),
+		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n收单机构支付方式]+?)[\s]*(?:收单机构|支付方式|\n|$)`),
 	}
 	for _, re := range merchantRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
@@ -819,7 +819,7 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 	merchantRegexes := []*regexp.Regexp{
 		regexp.MustCompile(`收款人[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`收款账户[：:]?[\s]*([^\s¥￥\n]+)`),
-		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n]+)`),
+		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n收单机构支付方式]+?)[\s]*(?:收单机构|支付方式|\n|$)`),
 	}
 	for _, re := range merchantRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
