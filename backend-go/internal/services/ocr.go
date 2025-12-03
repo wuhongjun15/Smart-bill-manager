@@ -545,7 +545,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		// Look for company/store name followed by tax ID on next line
 		// Company indicators: 公司, 商店, 企业, 中心, 厂, 店, etc.
 		companyBeforeTaxIDRegex := regexp.MustCompile(fmt.Sprintf(`([^\n\r]*(?:公司|商店|企业|中心|厂|店|行|社|院|局|部)[^\n\r]*)[\s\n\r]+(%s)`, taxIDPattern))
-		if match := companyBeforeTaxIDRegex.FindStringSubmatch(text); len(match) > 1 {
+		if match := companyBeforeTaxIDRegex.FindStringSubmatch(text); len(match) > 2 {
 			seller := strings.TrimSpace(match[1])
 			// Validate it's not too short and doesn't contain obvious non-name content
 			if len(seller) > 3 && seller != "个人" {
