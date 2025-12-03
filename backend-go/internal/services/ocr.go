@@ -30,6 +30,12 @@ const (
 
 	// taxIDPatternWithBoundary for structured extraction (word boundaries for better matching)
 	taxIDPatternWithBoundary = `\b[A-Z0-9]{15,20}\b`
+
+	// MinValidAmount is the minimum amount threshold for payment extraction
+	MinValidAmount = 1.0
+
+	// MaxMerchantNameLength is the maximum allowed length for merchant names
+	MaxMerchantNameLength = 50
 )
 
 var (
@@ -48,6 +54,10 @@ var (
 		regexp.MustCompile(`\d{4}[/年\-]\s*\d{1,2}[/月\-]\s*\d{1,2}[日]?`),
 		regexp.MustCompile(`\d{4}\s+\d{2}\s+\d{2}`),
 	}
+
+	// Payment parsing - compiled regex patterns for reuse
+	negativeAmountRegex   = regexp.MustCompile(`[-−][\s]*[¥￥]?[\s]*([\d,]+\.?\d*)`)
+	merchantFullNameRegex = regexp.MustCompile(`商户全称[：:]?[\s]*([^\n收单机构支付方式]+?)[\s]*(?:收单机构|支付方式|\n|$)`)
 )
 
 func NewOCRService() *OCRService {
@@ -622,7 +632,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 	// Extract amount with support for negative numbers: ¥123.45, -1700.00, -¥1700.00
 	amountRegexes := []*regexp.Regexp{
 		// Negative amount with optional currency symbol: -1700.00 or -¥1700.00
-		regexp.MustCompile(`[-−][\s]*[¥￥]?[\s]*([\d,]+\.?\d*)`),
+		negativeAmountRegex,
 		// Standard format with currency symbol: ¥123.45
 		regexp.MustCompile(`[¥￥][\s]*[-−]?[\s]*([\d,]+\.?\d*)`),
 		regexp.MustCompile(`金额[：:]?[\s]*[¥￥]?[\s]*[-−]?[\s]*([\d,]+\.?\d*)`),
@@ -643,8 +653,8 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		regexp.MustCompile(`收款方[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`收款人[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`转账给([^\s¥￥\n]+)`),
-		// Merchant full name - stop at common delimiters
-		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n收单机构支付方式]+?)[\s]*(?:收单机构|支付方式|\n|$)`),
+		// Merchant full name - use shared regex
+		merchantFullNameRegex,
 		// Merchant name after 商品
 		regexp.MustCompile(`商品[：:]?[\s]*([^\s(（\n]+)`),
 	}
@@ -717,7 +727,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 	// Extract amount with support for negative numbers
 	amountRegexes := []*regexp.Regexp{
 		// Negative amount with optional currency symbol
-		regexp.MustCompile(`[-−][\s]*[¥￥]?[\s]*([\d,]+\.?\d*)`),
+		negativeAmountRegex,
 		regexp.MustCompile(`[¥￥][\s]*[-−]?[\s]*([\d,]+\.?\d*)`),
 		regexp.MustCompile(`金额[：:]?[\s]*[¥￥]?[\s]*[-−]?[\s]*([\d,]+\.?\d*)`),
 		regexp.MustCompile(`付款金额[：:]?[\s]*[¥￥]?[\s]*[-−]?[\s]*([\d,]+\.?\d*)`),
@@ -736,7 +746,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 		regexp.MustCompile(`商家[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`收款方[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`付款给([^\s¥￥\n]+)`),
-		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n收单机构支付方式]+?)[\s]*(?:收单机构|支付方式|\n|$)`),
+		merchantFullNameRegex,
 	}
 	for _, re := range merchantRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
@@ -801,7 +811,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) {
 	// Extract amount with support for negative numbers
 	amountRegexes := []*regexp.Regexp{
-		regexp.MustCompile(`[-−][\s]*[¥￥]?[\s]*([\d,]+\.?\d*)`),
+		negativeAmountRegex,
 		regexp.MustCompile(`金额[：:]?[\s]*[¥￥]?[\s]*[-−]?[\s]*([\d,]+\.?\d*)`),
 		regexp.MustCompile(`转账金额[：:]?[\s]*[¥￥]?[\s]*[-−]?[\s]*([\d,]+\.?\d*)`),
 		regexp.MustCompile(`交易金额[：:]?[\s]*[¥￥]?[\s]*[-−]?[\s]*([\d,]+\.?\d*)`),
@@ -819,7 +829,7 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 	merchantRegexes := []*regexp.Regexp{
 		regexp.MustCompile(`收款人[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`收款账户[：:]?[\s]*([^\s¥￥\n]+)`),
-		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n收单机构支付方式]+?)[\s]*(?:收单机构|支付方式|\n|$)`),
+		merchantFullNameRegex,
 	}
 	for _, re := range merchantRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
@@ -878,7 +888,7 @@ func (s *OCRService) extractAmount(text string, data *PaymentExtractedData) {
 
 	for _, re := range patterns {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
-			if amount := parseAmount(match[1]); amount != nil && *amount > 1 {
+			if amount := parseAmount(match[1]); amount != nil && *amount > MinValidAmount {
 				data.Amount = amount
 				return
 			}
@@ -892,7 +902,7 @@ func (s *OCRService) extractGenericMerchant(text string, data *PaymentExtractedD
 	shopNameRegex := regexp.MustCompile(`([^\n]+(?:店|行|公司|商户|超市|餐厅|饭店|有限公司))`)
 	if match := shopNameRegex.FindStringSubmatch(text); len(match) > 1 {
 		merchant := strings.TrimSpace(match[1])
-		if merchant != "" && len(merchant) < 50 {
+		if merchant != "" && len(merchant) < MaxMerchantNameLength {
 			data.Merchant = &merchant
 		}
 	}
