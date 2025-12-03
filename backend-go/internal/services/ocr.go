@@ -353,20 +353,26 @@ func (s *OCRService) mergeExtractionResults(pdftotextResult, ocrResult string) s
 
 // extractAmounts finds monetary amounts in text
 func (s *OCRService) extractAmounts(text string) []string {
-	re := regexp.MustCompile(`[¥￥]\s*[\d,]+\.?\d*`)
+	// Match amounts with ¥ or ￥ symbol, supporting:
+	// - Amounts with or without decimals: ¥100 or ¥100.00
+	// - Amounts with commas: ¥1,234.56
+	// - Amounts must have at least one digit
+	re := regexp.MustCompile(`[¥￥]\s*\d+(?:,\d{3})*(?:\.\d{1,2})?`)
 	return re.FindAllString(text, -1)
 }
 
 // extractTaxIDs finds Chinese unified social credit codes
+// Note: This pattern is intentionally broad to catch variations in OCR output
+// Real validation should be done in the parsing layer with checksum verification
 func (s *OCRService) extractTaxIDs(text string) []string {
-	re := regexp.MustCompile(`[A-Z0-9]{15,20}`)
+	re := regexp.MustCompile(`\b[A-Z0-9]{15,20}\b`)
 	return re.FindAllString(text, -1)
 }
 
 // extractDates finds date patterns
 func (s *OCRService) extractDates(text string) []string {
 	patterns := []*regexp.Regexp{
-		regexp.MustCompile(`\d{4}[-/年]\s*\d{1,2}[-/月]\s*\d{1,2}[日]?`),
+		regexp.MustCompile(`\d{4}[/年\-]\s*\d{1,2}[/月\-]\s*\d{1,2}[日]?`),
 		regexp.MustCompile(`\d{4}\s+\d{2}\s+\d{2}`),
 	}
 	var dates []string
