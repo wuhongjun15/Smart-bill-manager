@@ -15,6 +15,11 @@ import (
 // OCRService provides OCR functionality
 type OCRService struct{}
 
+const (
+	// taxIDPattern matches Chinese unified social credit codes (15-20 alphanumeric characters)
+	taxIDPattern = `[A-Z0-9]{15,20}`
+)
+
 func NewOCRService() *OCRService {
 	return &OCRService{}
 }
@@ -410,8 +415,9 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	}
 	
 	// If not found, try to match standalone 20+ digit invoice numbers (electronic invoice format)
+	// Limit to 25 digits to avoid matching unintended long sequences
 	if data.InvoiceNumber == nil {
-		standaloneNumRegex := regexp.MustCompile(`\b(\d{20,})\b`)
+		standaloneNumRegex := regexp.MustCompile(`\b(\d{20,25})\b`)
 		if match := standaloneNumRegex.FindStringSubmatch(text); len(match) > 1 {
 			invoiceNum := match[1]
 			data.InvoiceNumber = &invoiceNum
@@ -460,8 +466,9 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	
 	// If not found, try to find amount after Chinese character amount (e.g., "叁仟零捌拾圆整" followed by "¥3080.00")
 	// This handles the electronic invoice format where the amount appears after the Chinese text
+	// Include both simplified (万) and traditional (萬) characters
 	if data.Amount == nil {
-		chineseAmountRegex := regexp.MustCompile(`[零壹贰叁肆伍陆柒捌玖拾佰仟万亿]+圆整[\s\n\r]*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`)
+		chineseAmountRegex := regexp.MustCompile(`[零壹贰叁肆伍陆柒捌玖拾佰仟万萬亿]+圆整[\s\n\r]*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`)
 		if match := chineseAmountRegex.FindStringSubmatch(text); len(match) > 1 {
 			if amount := parseAmount(match[1]); amount != nil {
 				data.Amount = amount
@@ -505,8 +512,8 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	// Look for seller section and extract tax ID followed by name
 	// Format: "销售方信息 统一社会信用代码/纳税人识别号：92310109MA1KMFLM1K 名称：上海市虹口区鹏侠百货商店"
 	if data.SellerName == nil {
-		// Match tax ID (15-20 alphanumeric characters) followed by company name
-		sellerSectionRegex := regexp.MustCompile(`(?s)销.*?售.*?方.*?信.*?息.*?统一社会信用代码/纳税人识别号[：:]?\s*[\n\r]?\s*([A-Z0-9]{15,20})[\s\n\r]+名称[：:]?\s*[\n\r]?\s*([^\n\r]+)`)
+		// Match tax ID followed by company name
+		sellerSectionRegex := regexp.MustCompile(fmt.Sprintf(`(?s)销.*?售.*?方.*?信.*?息.*?统一社会信用代码/纳税人识别号[：:]?\s*[\n\r]?\s*(%s)[\s\n\r]+名称[：:]?\s*[\n\r]?\s*([^\n\r]+)`, taxIDPattern))
 		if match := sellerSectionRegex.FindStringSubmatch(text); len(match) > 2 {
 			seller := strings.TrimSpace(match[2])
 			if seller != "" && seller != "购" && seller != "买" && seller != "方" {
@@ -519,10 +526,11 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	// This handles cases where the seller info appears without explicit section markers
 	if data.SellerName == nil {
 		// Look for patterns like: tax ID on one line, then "名称：" followed by name
-		flexibleSellerRegex := regexp.MustCompile(`\b([A-Z0-9]{15,20})\b[\s\n\r]+名称[：:]?\s*[\n\r]?\s*([^\n\r]+)`)
+		flexibleSellerRegex := regexp.MustCompile(fmt.Sprintf(`\b(%s)\b[\s\n\r]+名称[：:]?\s*[\n\r]?\s*([^\n\r]+)`, taxIDPattern))
 		if match := flexibleSellerRegex.FindStringSubmatch(text); len(match) > 2 {
 			seller := strings.TrimSpace(match[2])
-			// Additional validation: check if this looks like a company name (Chinese characters or reasonable length)
+			// Additional validation: check if this looks like a company name
+			// Sellers should not be "个人" (individual) - that would be a buyer
 			if seller != "" && len(seller) > 2 && seller != "个人" {
 				data.SellerName = &seller
 			}
