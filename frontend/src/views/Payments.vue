@@ -483,6 +483,7 @@ const savingOcrResult = ref(false)
 const screenshotFileList = ref<UploadFile[]>([])
 const ocrResult = ref<OcrExtractedData | null>(null)
 const ocrFormRef = ref<FormInstance>()
+const uploadedPaymentId = ref<string | null>(null)
 
 // Linked invoices state
 const linkedInvoicesModalVisible = ref(false)
@@ -683,7 +684,11 @@ const handleScreenshotUpload = async () => {
     const file = screenshotFileList.value[0].raw as File
     const res = await paymentApi.uploadScreenshot(file)
     if (res.data.success && res.data.data) {
-      const { extracted } = res.data.data
+      const { payment, extracted } = res.data.data
+      
+      // Save payment ID for later update
+      uploadedPaymentId.value = payment.id
+      
       ocrResult.value = extracted
       
       // Fill OCR form with extracted data
@@ -724,8 +729,15 @@ const handleSaveOcrResult = async () => {
         transaction_time: dayjs(ocrForm.transaction_time).toISOString()
       }
 
-      await paymentApi.create(payload)
-      ElMessage.success('支付记录创建成功')
+      // Update the existing payment record instead of creating a new one
+      if (uploadedPaymentId.value) {
+        await paymentApi.update(uploadedPaymentId.value, payload)
+        ElMessage.success('支付记录更新成功')
+      } else {
+        await paymentApi.create(payload)
+        ElMessage.success('支付记录创建成功')
+      }
+      
       cancelScreenshotUpload()
       loadPayments()
       loadStats()
@@ -739,6 +751,16 @@ const handleSaveOcrResult = async () => {
 }
 
 const cancelScreenshotUpload = () => {
+  // If user cancels, delete the created payment record
+  if (uploadedPaymentId.value) {
+    paymentApi.delete(uploadedPaymentId.value).catch((error) => {
+      // Log deletion errors for debugging, but don't show to user
+      console.error('Failed to delete payment record:', error)
+    })
+  }
+  
+  // Clear all state
+  uploadedPaymentId.value = null
   screenshotFileList.value = []
   ocrResult.value = null
   ocrForm.amount = 0
