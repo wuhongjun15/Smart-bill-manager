@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"image/png"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
 
-	"github.com/gen2brain/go-fitz"
 	"github.com/ledongthuc/pdf"
 	"github.com/otiai10/gosseract/v2"
 )
@@ -181,19 +182,31 @@ func (s *OCRService) extractTextFromPDF(pdfPath string) (string, error) {
 func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 	fmt.Printf("[OCR] Converting PDF to images for OCR: %s\n", pdfPath)
 
-	// Open the PDF document using go-fitz (MuPDF-based)
-	doc, err := fitz.New(pdfPath)
+	// Create temporary directory for images
+	tempDir, err := os.MkdirTemp("", "pdf-ocr-*")
 	if err != nil {
-		return "", fmt.Errorf("failed to open PDF for image conversion: %w", err)
+		return "", fmt.Errorf("failed to create temp dir: %w", err)
 	}
-	defer doc.Close()
+	defer os.RemoveAll(tempDir)
 
-	numPages := doc.NumPage()
-	fmt.Printf("[OCR] PDF has %d pages to convert\n", numPages)
-
-	if numPages == 0 {
-		return "", fmt.Errorf("PDF has no pages")
+	// Use pdftoppm to convert PDF to PNG images
+	// pdftoppm -png -r 300 input.pdf outputPrefix
+	outputPrefix := filepath.Join(tempDir, "page")
+	cmd := exec.Command("pdftoppm", "-png", "-r", "300", pdfPath, outputPrefix)
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to convert PDF to images with pdftoppm: %w", err)
 	}
+
+	// Find generated image files
+	files, err := filepath.Glob(filepath.Join(tempDir, "page-*.png"))
+	if err != nil || len(files) == 0 {
+		return "", fmt.Errorf("no images generated from PDF")
+	}
+
+	// Sort files to ensure page order
+	sort.Strings(files)
+
+	fmt.Printf("[OCR] PDF converted to %d images\n", len(files))
 
 	// Initialize gosseract client for OCR
 	client := gosseract.NewClient()
@@ -202,51 +215,26 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 
 	var allText strings.Builder
 
-	// Process each page
-	for pageNum := 0; pageNum < numPages; pageNum++ {
-		fmt.Printf("[OCR] Processing page %d/%d\n", pageNum+1, numPages)
-
-		// Render page to image for OCR
-		img, err := doc.Image(pageNum)
-		if err != nil {
-			fmt.Printf("[OCR] Failed to render page %d: %v\n", pageNum+1, err)
-			continue
-		}
-
-		// Create temporary file for the image
-		tempFile, err := os.CreateTemp("", "pdf-page-*.png")
-		if err != nil {
-			fmt.Printf("[OCR] Failed to create temp file for page %d: %v\n", pageNum+1, err)
-			continue
-		}
-		tempFilePath := tempFile.Name()
-		// Ensure cleanup happens even if we return early
-		defer os.Remove(tempFilePath)
-
-		// Encode image as PNG
-		if err := png.Encode(tempFile, img); err != nil {
-			tempFile.Close()
-			fmt.Printf("[OCR] Failed to encode page %d as PNG: %v\n", pageNum+1, err)
-			continue
-		}
-		tempFile.Close()
+	// Process each image
+	for i, imgPath := range files {
+		fmt.Printf("[OCR] Processing page %d/%d\n", i+1, len(files))
 
 		// Perform OCR on the image
-		client.SetImage(tempFilePath)
+		client.SetImage(imgPath)
 		text, err := client.Text()
 
 		if err != nil {
-			fmt.Printf("[OCR] OCR failed for page %d: %v\n", pageNum+1, err)
+			fmt.Printf("[OCR] OCR failed for page %d: %v\n", i+1, err)
 			continue
 		}
 
-		fmt.Printf("[OCR] Extracted %d characters from page %d\n", len(text), pageNum+1)
+		fmt.Printf("[OCR] Extracted %d characters from page %d\n", len(text), i+1)
 		allText.WriteString(text)
 		allText.WriteString("\n")
 	}
 
 	result := allText.String()
-	fmt.Printf("[OCR] Total OCR text extracted: %d characters from %d pages\n", len(result), numPages)
+	fmt.Printf("[OCR] Total OCR text extracted: %d characters from %d pages\n", len(result), len(files))
 
 	if strings.TrimSpace(result) == "" {
 		return "", fmt.Errorf("no text could be extracted from PDF images")
