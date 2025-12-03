@@ -30,7 +30,7 @@
           placeholder="请输入新密码 (至少6位)"
           show-password
           autocomplete="new-password"
-          @input="checkPasswordStrength"
+          @input="updatePasswordStrength"
         />
         <div v-if="form.newPassword" class="password-strength">
           <span :class="['strength-indicator', passwordStrength.level]">
@@ -63,6 +63,7 @@
 import { ref, reactive, watch } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { authApi } from '@/api/auth'
+import { checkPasswordStrength, type PasswordStrength } from '@/utils/password'
 
 interface Props {
   modelValue: boolean
@@ -85,22 +86,13 @@ const form = reactive({
   confirmPassword: ''
 })
 
-const passwordStrength = ref({
+const passwordStrength = ref<PasswordStrength>({
   level: 'weak',
   text: '弱'
 })
 
-const checkPasswordStrength = () => {
-  const pwd = form.newPassword
-  if (pwd.length < 6) {
-    passwordStrength.value = { level: 'weak', text: '弱' }
-  } else if (pwd.length < 10) {
-    passwordStrength.value = { level: 'medium', text: '中等' }
-  } else if (pwd.length >= 10 && /[A-Z]/.test(pwd) && /[0-9]/.test(pwd) && /[^A-Za-z0-9]/.test(pwd)) {
-    passwordStrength.value = { level: 'strong', text: '强' }
-  } else {
-    passwordStrength.value = { level: 'medium', text: '中等' }
-  }
+const updatePasswordStrength = () => {
+  passwordStrength.value = checkPasswordStrength(form.newPassword)
 }
 
 const validateNewPassword = (_rule: any, value: string, callback: any) => {
@@ -202,6 +194,6 @@ const handleSubmit = async () => {
 
 .strength-indicator.strong {
   color: #67c23a;
-  background-color: #f0f9ff;
+  background-color: #f0f9ec;
 }
 </style>
