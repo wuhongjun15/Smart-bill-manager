@@ -439,8 +439,9 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	}
 	
 	// If not found, try to match standalone date format (YYYY年M月D日 or YYYY年MM月DD日)
+	// This is common in electronic invoices where the date appears on its own line
 	if data.InvoiceDate == nil {
-		standaloneDateRegex := regexp.MustCompile(`\b(\d{4}年\d{1,2}月\d{1,2}日)\b`)
+		standaloneDateRegex := regexp.MustCompile(`(\d{4}年\d{1,2}月\d{1,2}日)`)
 		if match := standaloneDateRegex.FindStringSubmatch(text); len(match) > 1 {
 			date := match[1]
 			data.InvoiceDate = &date
@@ -536,6 +537,22 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 			}
 		}
 	}
+	
+	// If still not found, try to find company name appearing BEFORE tax ID
+	// This is common in OCR output where data sequence differs from labels
+	// Pattern: company name (containing 公司/商店/企业/中心/etc.) on one line, followed by tax ID
+	if data.SellerName == nil {
+		// Look for company/store name followed by tax ID on next line
+		// Company indicators: 公司, 商店, 企业, 中心, 厂, 店, etc.
+		companyBeforeTaxIDRegex := regexp.MustCompile(fmt.Sprintf(`([^\n\r]*(?:公司|商店|企业|中心|厂|店|行|社|院|局|部)[^\n\r]*)[\s\n\r]+(%s)`, taxIDPattern))
+		if match := companyBeforeTaxIDRegex.FindStringSubmatch(text); len(match) > 1 {
+			seller := strings.TrimSpace(match[1])
+			// Validate it's not too short and doesn't contain obvious non-name content
+			if len(seller) > 3 && seller != "个人" {
+				data.SellerName = &seller
+			}
+		}
+	}
 
 	// Extract buyer name - handle both inline and newline-separated formats
 	// First try patterns with explicit "购买方" prefix
@@ -548,7 +565,8 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
 			buyer := strings.TrimSpace(match[1])
 			// Filter out section headers like "信息" (information) that might be captured
-			if buyer != "" && buyer != "信" && buyer != "息" {
+			// Also filter out labels like "名称：" or "名称:"
+			if buyer != "" && buyer != "信" && buyer != "息" && buyer != "名称：" && buyer != "名称:" {
 				data.BuyerName = &buyer
 				break
 			}
@@ -563,7 +581,8 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		buyerSectionRegex := regexp.MustCompile(`(?s)购.*?买.*?方.*?信.*?息.*?统一社会信用代码/纳税人识别号[：:]?\s*[\n\r]?\s*([A-Z0-9]*)[\s\n\r]+名称[：:]?\s*[\n\r]?\s*([^\n\r]+)`)
 		if match := buyerSectionRegex.FindStringSubmatch(text); len(match) > 2 {
 			buyer := strings.TrimSpace(match[2])
-			if buyer != "" && buyer != "销" && buyer != "售" && buyer != "方" {
+			// Filter out labels and section markers
+			if buyer != "" && buyer != "销" && buyer != "售" && buyer != "方" && buyer != "名称：" && buyer != "名称:" {
 				data.BuyerName = &buyer
 			}
 		}
@@ -571,11 +590,16 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	
 	// If still not found, try to match "个人" (individual) as a standalone buyer
 	if data.BuyerName == nil {
-		individualRegex := regexp.MustCompile(`\b(个人)\b`)
+		individualRegex := regexp.MustCompile(`(个人)`)
 		if match := individualRegex.FindStringSubmatch(text); len(match) > 1 {
 			buyer := match[1]
 			data.BuyerName = &buyer
 		}
+	}
+	
+	// Final cleanup: if buyer name was set to a label by mistake, clear it
+	if data.BuyerName != nil && (*data.BuyerName == "名称：" || *data.BuyerName == "名称:") {
+		data.BuyerName = nil
 	}
 
 	return data, nil
