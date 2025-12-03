@@ -55,7 +55,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function checkSetupRequired(): Promise<{ setupRequired: boolean } | null> {
     try {
       const res = await authApi.checkSetupRequired()
-      if (res.data.success) {
+      if (res.data.success && res.data.data) {
         return { setupRequired: res.data.data.setupRequired }
       }
       return null

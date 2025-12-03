@@ -77,7 +77,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { User, Lock, Message } from '@element-plus/icons-vue'
@@ -113,7 +113,7 @@ const checkPasswordStrength = () => {
   }
 }
 
-const validatePassword = (rule: any, value: string, callback: any) => {
+const validatePassword = (_rule: any, value: string, callback: any) => {
   if (value === '') {
     callback(new Error('请输入密码'))
   } else if (value.length < 6) {
@@ -123,7 +123,7 @@ const validatePassword = (rule: any, value: string, callback: any) => {
   }
 }
 
-const validateConfirmPassword = (rule: any, value: string, callback: any) => {
+const validateConfirmPassword = (_rule: any, value: string, callback: any) => {
   if (value === '') {
     callback(new Error('请再次输入密码'))
   } else if (value !== form.password) {
@@ -133,7 +133,7 @@ const validateConfirmPassword = (rule: any, value: string, callback: any) => {
   }
 }
 
-const validateEmail = (rule: any, value: string, callback: any) => {
+const validateEmail = (_rule: any, value: string, callback: any) => {
   if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
     callback(new Error('请输入有效的邮箱地址'))
   } else {

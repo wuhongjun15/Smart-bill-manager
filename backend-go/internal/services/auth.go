@@ -5,7 +5,6 @@ import (
 	"log"
 
 	"golang.org/x/crypto/bcrypt"
-	"smart-bill-manager/internal/config"
 	"smart-bill-manager/internal/models"
 	"smart-bill-manager/internal/repository"
 	"smart-bill-manager/internal/utils"
