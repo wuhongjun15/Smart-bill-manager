@@ -873,11 +873,6 @@ func (s *OCRService) extractBuyerAndSellerByPosition(text string) (buyer, seller
 			distToBuyer := abs(entry.position - buyerMarkerIndex)
 			distToSeller := abs(entry.position - sellerMarkerIndex)
 			
-			// Determine which marker comes immediately before this name (if any)
-			// This handles structured invoices where sections are marked by labels
-			var preferredMarker string
-			var preferredDist int
-			
 			// Check which markers come before/after the name
 			buyerBefore := buyerMarkerIndex < entry.position
 			sellerBefore := sellerMarkerIndex < entry.position
@@ -888,13 +883,10 @@ func (s *OCRService) extractBuyerAndSellerByPosition(text string) (buyer, seller
 				// Both markers come before the name - name is after both sections
 				// Pick the closer one
 				if distToBuyer < distToSeller {
-					preferredMarker = "buyer"
-					preferredDist = distToBuyer
+					prefs = append(prefs, preference{idx, "buyer", distToBuyer})
 				} else {
-					preferredMarker = "seller"
-					preferredDist = distToSeller
+					prefs = append(prefs, preference{idx, "seller", distToSeller})
 				}
-				prefs = append(prefs, preference{idx, preferredMarker, preferredDist})
 			} else if buyerBefore && sellerAfter {
 				// Buyer before, seller after - name is between markers
 				// Prefer the first marker (buyer in this case) as names in structured sections
