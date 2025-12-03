@@ -106,7 +106,7 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 	// In a production system, you might use tools like pdfcpu to extract images
 	// or convert PDF pages to images using ImageMagick or similar.
 	
-	return "", fmt.Errorf("scanned PDF OCR requires additional image processing - text-based PDFs work fine")
+	return "", fmt.Errorf("scanned PDF OCR is not yet fully implemented - please use text-based PDFs or convert scanned PDFs to image files (JPG/PNG) and upload those instead")
 }
 
 // ParsePaymentScreenshot extracts payment information from OCR text

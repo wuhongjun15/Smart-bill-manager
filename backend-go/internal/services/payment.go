@@ -132,7 +132,11 @@ func (s *PaymentService) CreateFromScreenshot(input CreateFromScreenshotInput) (
 	}
 
 	// Store extracted data as JSON
-	extractedDataJSON, _ := ExtractedDataToJSON(extracted)
+	extractedDataJSON, err := ExtractedDataToJSON(extracted)
+	if err != nil {
+		// Log the error but continue - extracted data is optional
+		extractedDataJSON = nil
+	}
 
 	// Create payment record with extracted data
 	payment := &models.Payment{
