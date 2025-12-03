@@ -36,6 +36,12 @@ var (
 	// Compiled regex patterns for better performance
 	amountRegex = regexp.MustCompile(amountPattern)
 	taxIDRegex  = regexp.MustCompile(taxIDPatternWithBoundary)
+	
+	// Name pattern for position-based extraction
+	namePositionPattern = regexp.MustCompile(`名\s*称[：:]\s*([^\n\r]+?)(?:\s{3,}|[\n\r]|$)`)
+	
+	// Space-delimited date pattern
+	spaceDelimitedDatePattern = regexp.MustCompile(`开票日期[：:]?\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日`)
 
 	// Date patterns - compiled once for performance
 	datePatterns = []*regexp.Regexp{
@@ -825,8 +831,7 @@ func (s *OCRService) extractBuyerAndSellerByPosition(text string) (buyer, seller
 	// Step 2: Find all "名称：XXX" or "名    称:XXX" patterns with their positions
 	// Support formats: "名称：", "名称:", "名   称：", "名   称:"
 	// Use non-greedy match and stop at 3+ spaces, newline, or end of string
-	namePattern := regexp.MustCompile(`名\s*称[：:]\s*([^\n\r]+?)(?:\s{3,}|[\n\r]|$)`)
-	nameMatches := namePattern.FindAllStringSubmatchIndex(text, -1)
+	nameMatches := namePositionPattern.FindAllStringSubmatchIndex(text, -1)
 
 	// Step 3: Extract names and associate with buyer/seller based on position
 	type nameEntry struct {
@@ -929,13 +934,9 @@ func (s *OCRService) extractBuyerAndSellerByPosition(text string) (buyer, seller
 		}
 		
 		// Sort by distance - closest pairs first
-		for i := 0; i < len(prefs); i++ {
-			for j := i + 1; j < len(prefs); j++ {
-				if prefs[j].score < prefs[i].score {
-					prefs[i], prefs[j] = prefs[j], prefs[i]
-				}
-			}
-		}
+		sort.Slice(prefs, func(i, j int) bool {
+			return prefs[i].score < prefs[j].score
+		})
 		
 		// Greedy assignment
 		assignedNames := make(map[int]bool)
@@ -1045,8 +1046,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 
 	// If not found, try to match space-separated date format: "2025 年07 月02 日"
 	if data.InvoiceDate == nil {
-		spaceDelimitedDateRegex := regexp.MustCompile(`开票日期[：:]?\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日`)
-		if match := spaceDelimitedDateRegex.FindStringSubmatch(text); len(match) > 3 {
+		if match := spaceDelimitedDatePattern.FindStringSubmatch(text); len(match) > 3 {
 			// Reconstruct date: "2025年07月02日"
 			date := fmt.Sprintf("%s年%s月%s日", match[1], match[2], match[3])
 			data.InvoiceDate = &date
