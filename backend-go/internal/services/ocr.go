@@ -36,6 +36,9 @@ const (
 
 	// MaxMerchantNameLength is the maximum allowed length for merchant names
 	MaxMerchantNameLength = 50
+
+	// digitsWhitelist defines characters allowed for digit-only OCR
+	digitsWhitelist = "0123456789.-¥￥,"
 )
 
 var (
@@ -62,6 +65,12 @@ var (
 
 	// Pattern to insert space between Chinese date and time when 日 is directly followed by digits
 	chineseDateTimePattern = regexp.MustCompile(`日(\d)`)
+
+	// Amount detection patterns for merging OCR results
+	amountDetectionPatterns = []*regexp.Regexp{
+		regexp.MustCompile(`-?\d{3,}\.?\d{0,2}`), // Numbers like 1700.00 or -1700.00
+		regexp.MustCompile(`[¥￥]-?\d+\.?\d*`),    // Currency symbol with amount
+	}
 )
 
 func NewOCRService() *OCRService {
@@ -321,18 +330,12 @@ func (s *OCRService) mergeOCRResults(results []string) string {
 		return ""
 	}
 
-	// Find the result that contains amount-like patterns
-	amountPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`-?\d{3,}\.?\d{0,2}`), // Numbers like 1700.00 or -1700.00
-		regexp.MustCompile(`[¥￥]-?\d+\.?\d*`),    // Currency symbol with amount
-	}
-
 	var bestResult string
 	var bestScore int
 
 	for _, result := range results {
 		score := 0
-		for _, pattern := range amountPatterns {
+		for _, pattern := range amountDetectionPatterns {
 			matches := pattern.FindAllString(result, -1)
 			score += len(matches)
 		}
@@ -382,7 +385,7 @@ func (s *OCRService) ocrDigitsOnly(imagePath string) string {
 	client.SetLanguage("eng")
 	client.SetPageSegMode(gosseract.PSM_SINGLE_LINE)
 	// Whitelist only digits and common amount characters
-	client.SetVariable("tessedit_char_whitelist", "0123456789.-¥￥,")
+	client.SetVariable("tessedit_char_whitelist", digitsWhitelist)
 
 	if err := client.SetImage(imagePath); err != nil {
 		return ""
