@@ -96,7 +96,7 @@ func (s *OCRService) RecognizeImage(imagePath string) (string, error) {
 
 	// Set language to Chinese simplified and English
 	client.SetLanguage("chi_sim", "eng")
-	
+
 	// Set page segmentation mode for better recognition of mixed layouts
 	// PSM_AUTO (3): Fully automatic page segmentation, but no OSD
 	client.SetPageSegMode(gosseract.PSM_AUTO)
@@ -116,7 +116,7 @@ func (s *OCRService) RecognizeImage(imagePath string) (string, error) {
 // RecognizeImageEnhanced performs OCR with image preprocessing for better accuracy
 func (s *OCRService) RecognizeImageEnhanced(imagePath string) (string, error) {
 	fmt.Printf("[OCR] Starting enhanced image recognition for: %s\n", imagePath)
-	
+
 	// Create temporary directory for preprocessed image
 	tempDir, err := os.MkdirTemp("", "ocr-enhanced-*")
 	if err != nil {
@@ -125,25 +125,25 @@ func (s *OCRService) RecognizeImageEnhanced(imagePath string) (string, error) {
 		return s.RecognizeImage(imagePath)
 	}
 	defer os.RemoveAll(tempDir)
-	
+
 	// Preprocess image
 	processedPath := s.preprocessImage(imagePath, tempDir, 0)
-	
+
 	client := gosseract.NewClient()
 	defer client.Close()
-	
+
 	client.SetLanguage("chi_sim", "eng")
 	client.SetPageSegMode(gosseract.PSM_AUTO)
-	
+
 	if err := client.SetImage(processedPath); err != nil {
 		return "", fmt.Errorf("failed to set image: %w", err)
 	}
-	
+
 	text, err := client.Text()
 	if err != nil {
 		return "", fmt.Errorf("failed to recognize text: %w", err)
 	}
-	
+
 	fmt.Printf("[OCR] Enhanced recognition extracted %d characters\n", len(text))
 	return text, nil
 }
