@@ -180,20 +180,21 @@ func (s *OCRService) RecognizeImageEnhanced(imagePath string) (string, error) {
 	return text, nil
 }
 
-// RecognizeWithPaddleOCR executes PaddleOCR CLI script for recognition
+// RecognizeWithPaddleOCR executes the paddleocr_cli.py script for OCR recognition
+// The script supports both RapidOCR and PaddleOCR, trying RapidOCR first and falling back to PaddleOCR
 func (s *OCRService) RecognizeWithPaddleOCR(imagePath string) (string, error) {
 	fmt.Printf("[OCR] Running PaddleOCR CLI for: %s\n", imagePath)
-	
+
 	// Find the paddleocr_cli.py script
 	scriptPath := s.findPaddleOCRScript()
 	if scriptPath == "" {
 		return "", fmt.Errorf("paddleocr_cli.py script not found")
 	}
-	
+
 	// Execute Python script
 	ctx, cancel := context.WithTimeout(context.Background(), paddleOCRTimeout)
 	defer cancel()
-	
+
 	cmd := exec.CommandContext(ctx, "python3", scriptPath, imagePath)
 	output, err := cmd.Output()
 	if err != nil {
@@ -204,17 +205,17 @@ func (s *OCRService) RecognizeWithPaddleOCR(imagePath string) (string, error) {
 			return "", fmt.Errorf("failed to execute PaddleOCR: %w", err)
 		}
 	}
-	
+
 	// Parse JSON output
 	var result PaddleOCRResponse
 	if err := json.Unmarshal(output, &result); err != nil {
 		return "", fmt.Errorf("failed to parse PaddleOCR output: %w", err)
 	}
-	
+
 	if !result.Success {
 		return "", fmt.Errorf("PaddleOCR error: %s", result.Error)
 	}
-	
+
 	fmt.Printf("[OCR] PaddleOCR extracted %d lines, %d characters\n", result.LineCount, len(result.Text))
 	return result.Text, nil
 }
@@ -228,56 +229,90 @@ func (s *OCRService) findPaddleOCRScript() string {
 		"/app/scripts/paddleocr_cli.py",
 		"./paddleocr_cli.py",
 	}
-	
+
 	for _, loc := range locations {
 		if _, err := os.Stat(loc); err == nil {
 			return loc
 		}
 	}
-	
+
 	return ""
 }
 
-// isPaddleOCRAvailable checks if PaddleOCR CLI is available
+// checkPythonModule checks if a Python module is available using both python3 and python
+func (s *OCRService) checkPythonModule(moduleName string) bool {
+	// Try with python3 first
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "python3", "-c", fmt.Sprintf("import %s; print('ok')", moduleName))
+	if output, err := cmd.CombinedOutput(); err == nil {
+		fmt.Printf("[OCR] %s is available (python3)\n", moduleName)
+		return true
+	} else {
+		fmt.Printf("[OCR] %s check failed (python3): %v, output: %s\n", moduleName, err, string(output))
+	}
+
+	// Try with python
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+
+	cmd = exec.CommandContext(ctx2, "python", "-c", fmt.Sprintf("import %s; print('ok')", moduleName))
+	if output, err := cmd.CombinedOutput(); err == nil {
+		fmt.Printf("[OCR] %s is available (python)\n", moduleName)
+		return true
+	} else {
+		fmt.Printf("[OCR] %s check failed (python): %v, output: %s\n", moduleName, err, string(output))
+	}
+
+	return false
+}
+
+// isPaddleOCRAvailable checks if RapidOCR or PaddleOCR is available
+// Priority: RapidOCR (rapidocr_onnxruntime) > PaddleOCR (paddleocr)
+// RapidOCR is preferred as it's lighter weight and better suited for Alpine Linux
 func (s *OCRService) isPaddleOCRAvailable() bool {
 	// Check if script exists
 	scriptPath := s.findPaddleOCRScript()
 	if scriptPath == "" {
+		fmt.Printf("[OCR] paddleocr_cli.py script not found\n")
 		return false
 	}
-	
-	// Check if Python and PaddleOCR are available
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	
-	cmd := exec.CommandContext(ctx, "python3", "-c", "import paddleocr; print('ok')")
-	if err := cmd.Run(); err != nil {
-		// Try with "python"
-		cmd = exec.CommandContext(ctx, "python", "-c", "import paddleocr; print('ok')")
-		if err := cmd.Run(); err != nil {
-			return false
-		}
+
+	// First check for RapidOCR (preferred, lighter weight)
+	if s.checkPythonModule("rapidocr_onnxruntime") {
+		return true
 	}
-	
-	return true
+
+	// Fall back to PaddleOCR
+	if s.checkPythonModule("paddleocr") {
+		return true
+	}
+
+	fmt.Printf("[OCR] Neither RapidOCR nor PaddleOCR is available\n")
+	return false
 }
 
 // RecognizePaymentScreenshot performs OCR optimized for payment screenshots
-// It prioritizes PaddleOCR if available, falls back to Tesseract with multiple strategies
+// It prioritizes PaddleOCR/RapidOCR if available, falls back to Tesseract with multiple strategies
 func (s *OCRService) RecognizePaymentScreenshot(imagePath string) (string, error) {
 	fmt.Printf("[OCR] Starting payment screenshot recognition for: %s\n", imagePath)
 
-	// Strategy 1: Try PaddleOCR first (best for Chinese payment screenshots)
+	// Log script path
+	scriptPath := s.findPaddleOCRScript()
+	fmt.Printf("[OCR] Script path: %s\n", scriptPath)
+
+	// Strategy 1: Try PaddleOCR/RapidOCR first (best for Chinese payment screenshots)
 	if s.isPaddleOCRAvailable() {
-		fmt.Printf("[OCR] PaddleOCR service available, using it\n")
+		fmt.Printf("[OCR] RapidOCR/PaddleOCR available, attempting to use it\n")
 		text, err := s.RecognizeWithPaddleOCR(imagePath)
 		if err == nil && strings.TrimSpace(text) != "" {
-			fmt.Printf("[OCR] PaddleOCR succeeded with %d characters\n", len(text))
+			fmt.Printf("[OCR] RapidOCR/PaddleOCR succeeded with %d characters\n", len(text))
 			return text, nil
 		}
-		fmt.Printf("[OCR] PaddleOCR failed or returned empty: %v, falling back to Tesseract\n", err)
+		fmt.Printf("[OCR] RapidOCR/PaddleOCR failed or returned empty: %v, falling back to Tesseract\n", err)
 	} else {
-		fmt.Printf("[OCR] PaddleOCR service not available, using Tesseract\n")
+		fmt.Printf("[OCR] RapidOCR/PaddleOCR not available, using Tesseract\n")
 	}
 
 	// Fallback: Use Tesseract with multiple strategies (existing code)
