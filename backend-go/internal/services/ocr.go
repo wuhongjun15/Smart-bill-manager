@@ -2,9 +2,9 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,9 +42,8 @@ const (
 	// digitsWhitelist defines characters allowed for digit-only OCR
 	digitsWhitelist = "0123456789.-¥￥,"
 
-	// PaddleOCR service configuration
-	defaultPaddleOCRURL = "http://localhost:5000"
-	paddleOCRTimeout    = 30 * time.Second
+	// PaddleOCR CLI configuration
+	paddleOCRTimeout = 60 * time.Second
 )
 
 var (
@@ -181,66 +180,86 @@ func (s *OCRService) RecognizeImageEnhanced(imagePath string) (string, error) {
 	return text, nil
 }
 
-// RecognizeWithPaddleOCR sends image to PaddleOCR service for recognition
+// RecognizeWithPaddleOCR executes PaddleOCR CLI script for recognition
 func (s *OCRService) RecognizeWithPaddleOCR(imagePath string) (string, error) {
-	paddleOCRURL := os.Getenv("PADDLEOCR_URL")
-	if paddleOCRURL == "" {
-		paddleOCRURL = defaultPaddleOCRURL
+	fmt.Printf("[OCR] Running PaddleOCR CLI for: %s\n", imagePath)
+	
+	// Find the paddleocr_cli.py script
+	scriptPath := s.findPaddleOCRScript()
+	if scriptPath == "" {
+		return "", fmt.Errorf("paddleocr_cli.py script not found")
 	}
-
-	// Create request body
-	requestBody := map[string]string{
-		"image_path": imagePath,
-	}
-	jsonBody, err := json.Marshal(requestBody)
+	
+	// Execute Python script
+	ctx, cancel := context.WithTimeout(context.Background(), paddleOCRTimeout)
+	defer cancel()
+	
+	cmd := exec.CommandContext(ctx, "python3", scriptPath, imagePath)
+	output, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
+		// Try with "python" if "python3" fails
+		cmd = exec.CommandContext(ctx, "python", scriptPath, imagePath)
+		output, err = cmd.Output()
+		if err != nil {
+			return "", fmt.Errorf("failed to execute PaddleOCR: %w", err)
+		}
 	}
-
-	// Create HTTP request
-	client := &http.Client{Timeout: paddleOCRTimeout}
-	req, err := http.NewRequest("POST", paddleOCRURL+"/ocr/path", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
+	
+	// Parse JSON output
+	var result PaddleOCRResponse
+	if err := json.Unmarshal(output, &result); err != nil {
+		return "", fmt.Errorf("failed to parse PaddleOCR output: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-
-	// Send request
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("PaddleOCR request failed: %w", err)
+	
+	if !result.Success {
+		return "", fmt.Errorf("PaddleOCR error: %s", result.Error)
 	}
-	defer resp.Body.Close()
-
-	// Parse response
-	var ocrResp PaddleOCRResponse
-	if err := json.NewDecoder(resp.Body).Decode(&ocrResp); err != nil {
-		return "", fmt.Errorf("failed to decode PaddleOCR response: %w", err)
-	}
-
-	if !ocrResp.Success {
-		return "", fmt.Errorf("PaddleOCR error: %s", ocrResp.Error)
-	}
-
-	fmt.Printf("[OCR] PaddleOCR extracted %d lines, %d characters\n", ocrResp.LineCount, len(ocrResp.Text))
-	return ocrResp.Text, nil
+	
+	fmt.Printf("[OCR] PaddleOCR extracted %d lines, %d characters\n", result.LineCount, len(result.Text))
+	return result.Text, nil
 }
 
-// isPaddleOCRAvailable checks if PaddleOCR service is running
-func (s *OCRService) isPaddleOCRAvailable() bool {
-	paddleOCRURL := os.Getenv("PADDLEOCR_URL")
-	if paddleOCRURL == "" {
-		paddleOCRURL = defaultPaddleOCRURL
+// findPaddleOCRScript locates the paddleocr_cli.py script
+func (s *OCRService) findPaddleOCRScript() string {
+	// Check common locations
+	locations := []string{
+		"scripts/paddleocr_cli.py",
+		"../scripts/paddleocr_cli.py",
+		"/app/scripts/paddleocr_cli.py",
+		"./paddleocr_cli.py",
 	}
+	
+	for _, loc := range locations {
+		if _, err := os.Stat(loc); err == nil {
+			return loc
+		}
+	}
+	
+	return ""
+}
 
-	client := &http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(paddleOCRURL + "/health")
-	if err != nil {
+// isPaddleOCRAvailable checks if PaddleOCR CLI is available
+func (s *OCRService) isPaddleOCRAvailable() bool {
+	// Check if script exists
+	scriptPath := s.findPaddleOCRScript()
+	if scriptPath == "" {
 		return false
 	}
-	defer resp.Body.Close()
-
-	return resp.StatusCode == http.StatusOK
+	
+	// Check if Python and PaddleOCR are available
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	cmd := exec.CommandContext(ctx, "python3", "-c", "import paddleocr; print('ok')")
+	if err := cmd.Run(); err != nil {
+		// Try with "python"
+		cmd = exec.CommandContext(ctx, "python", "-c", "import paddleocr; print('ok')")
+		if err := cmd.Run(); err != nil {
+			return false
+		}
+	}
+	
+	return true
 }
 
 // RecognizePaymentScreenshot performs OCR optimized for payment screenshots

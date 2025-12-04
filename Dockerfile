@@ -48,12 +48,14 @@ RUN CGO_ENABLED=1 GOOS=linux go build -o server ./cmd/server
 # ============================================
 FROM nginx:alpine AS production
 
-# Install supervisor, SQLite runtime, Tesseract with language packs, poppler-utils, ImageMagick, and poppler-data
+# Install supervisor, SQLite runtime, Tesseract with language packs, poppler-utils, ImageMagick, poppler-data, Python and PaddleOCR
 # Note: Alpine's tesseract-ocr package includes basic language data
 # Additional language data can be installed via tesseract-ocr-data-* packages or downloaded manually
 # poppler-data provides CJK CMap files for better PDF text extraction
 # imagemagick provides image preprocessing capabilities for better OCR
-RUN apk add --no-cache supervisor tesseract-ocr ca-certificates poppler-utils poppler-data imagemagick && \
+# Python 3 and pip are required for PaddleOCR CLI integration
+RUN apk add --no-cache supervisor tesseract-ocr ca-certificates poppler-utils poppler-data imagemagick \
+    python3 py3-pip && \
     apk add --no-cache tesseract-ocr-data-chi_sim tesseract-ocr-data-eng 2>/dev/null || \
     (apk add --no-cache wget && \
      TESSDATA_DIR=/usr/share/tessdata && \
@@ -64,6 +66,10 @@ RUN apk add --no-cache supervisor tesseract-ocr ca-certificates poppler-utils po
          https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata && \
      apk del wget)
 
+# Install PaddleOCR Python dependencies
+# Note: We install without cache to reduce image size
+RUN pip3 install --no-cache-dir paddlepaddle paddleocr
+
 WORKDIR /app
 
 # Copy built backend binary
@@ -73,7 +79,10 @@ COPY --from=backend-builder /app/backend/server ./backend/server
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 
 # Create necessary directories for backend
-RUN mkdir -p /app/backend/uploads /app/backend/data
+RUN mkdir -p /app/backend/uploads /app/backend/data /app/scripts
+
+# Copy OCR scripts
+COPY scripts/paddleocr_cli.py /app/scripts/
 
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
