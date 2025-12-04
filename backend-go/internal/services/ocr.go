@@ -59,6 +59,9 @@ var (
 	negativeAmountRegex   = regexp.MustCompile(`[-−][\s]*[¥￥]?[\s]*([\d,]+\.?\d*)`)
 	merchantFullNameRegex = regexp.MustCompile(`商户全称[：:]?[\s]*([^\n收单机构支付方式]+?)[\s]*(?:收单机构|支付方式|\n|$)`)
 	merchantGenericRegex  = regexp.MustCompile(`([^\n]+(?:店|行|公司|商户|超市|餐厅|饭店|有限公司))`)
+
+	// Pattern to insert space between Chinese date and time when 日 is directly followed by digits
+	chineseDateTimePattern = regexp.MustCompile(`日(\d)`)
 )
 
 func NewOCRService() *OCRService {
@@ -563,8 +566,9 @@ func removeChineseSpaces(text string) string {
 			if unicode.IsDigit(prev) && (next == '年' || next == '月' || next == '日' || next == '时' || next == '分' || next == '秒') {
 				skipSpace = true
 			}
-			// Skip space if previous is date unit and next is digit
-			if (prev == '年' || prev == '月' || prev == '日') && unicode.IsDigit(next) {
+			// Skip space if previous is date unit (年/月) and next is digit
+			// BUT preserve space after '日' when followed by a digit (likely time)
+			if (prev == '年' || prev == '月') && unicode.IsDigit(next) {
 				skipSpace = true
 			}
 		}
@@ -581,13 +585,31 @@ func removeChineseSpaces(text string) string {
 
 // convertChineseDateToISO converts Chinese date format to ISO format
 // Example: "2025年10月23日 14:59:46" -> "2025-10-23 14:59:46"
+// Example: "2025年10月23日14:59:46" -> "2025-10-23 14:59:46"
 // Example: "2025年10月23日" -> "2025-10-23"
 func convertChineseDateToISO(dateStr string) string {
+	// If 日 is directly followed by a digit (time), insert a space
+	// This handles cases like "2025年10月23日14:59:46" -> "2025年10月23日 14:59:46"
+	dateStr = chineseDateTimePattern.ReplaceAllString(dateStr, "日 $1")
+
 	// Replace Chinese date separators with dashes
 	dateStr = strings.ReplaceAll(dateStr, "年", "-")
 	dateStr = strings.ReplaceAll(dateStr, "月", "-")
 	dateStr = strings.ReplaceAll(dateStr, "日", "")
 	return strings.TrimSpace(dateStr)
+}
+
+// extractTimeFromMatch extracts time string from regex match groups
+// Handles both single capture group and separate date/time capture groups
+func extractTimeFromMatch(match []string) string {
+	var timeStr string
+	if len(match) > 2 && match[2] != "" {
+		// Date and time captured separately, join with space
+		timeStr = match[1] + " " + match[2]
+	} else {
+		timeStr = match[1]
+	}
+	return convertChineseDateToISO(timeStr)
 }
 
 // ParsePaymentScreenshot extracts payment information from OCR text
@@ -709,18 +731,18 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		// Standard format: 2024-01-01 12:00:00
 		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
 		regexp.MustCompile(`转账时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
-		// Chinese format: 2025年10月23日 14:59:46
-		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{2}:[\d]{2}:[\d]{2})`),
-		// Generic Chinese date-time format (after preprocessing)
-		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{2}:[\d]{2}:[\d]{2})`),
+		// Chinese format with optional spaces after 日: matches "2025年10月23日14:59:46" and "2025年10月23日 14:59:46"
+		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{1,2}:[\d]{2}:[\d]{2})`),
+		// Generic Chinese date-time format with space
+		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)\s+([\d]{1,2}:[\d]{2}:[\d]{2})`),
+		// Generic Chinese date-time format without space
+		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)([\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Date only format
 		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)`),
 	}
 	for _, re := range timeRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
-			timeStr := match[1]
-			// Convert Chinese date format to ISO format
-			timeStr = convertChineseDateToISO(timeStr)
+			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
 			break
 		}
@@ -804,14 +826,15 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 	timeRegexes := []*regexp.Regexp{
 		regexp.MustCompile(`创建时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
 		regexp.MustCompile(`付款时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
-		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{2}:[\d]{2}:[\d]{2})`),
+		// Chinese format with space
+		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)\s+([\d]{1,2}:[\d]{2}:[\d]{2})`),
+		// Chinese format without space
+		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)([\d]{1,2}:[\d]{2}:[\d]{2})`),
 		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)`),
 	}
 	for _, re := range timeRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
-			timeStr := match[1]
-			// Convert Chinese date format to ISO format
-			timeStr = convertChineseDateToISO(timeStr)
+			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
 			break
 		}
@@ -894,14 +917,15 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 	timeRegexes := []*regexp.Regexp{
 		regexp.MustCompile(`转账时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
 		regexp.MustCompile(`交易时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
-		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{2}:[\d]{2}:[\d]{2})`),
+		// Chinese format with space
+		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)\s+([\d]{1,2}:[\d]{2}:[\d]{2})`),
+		// Chinese format without space
+		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)([\d]{1,2}:[\d]{2}:[\d]{2})`),
 		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)`),
 	}
 	for _, re := range timeRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
-			timeStr := match[1]
-			// Convert Chinese date format to ISO format
-			timeStr = convertChineseDateToISO(timeStr)
+			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
 			break
 		}
