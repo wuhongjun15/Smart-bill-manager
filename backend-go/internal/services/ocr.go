@@ -180,7 +180,8 @@ func (s *OCRService) RecognizeImageEnhanced(imagePath string) (string, error) {
 	return text, nil
 }
 
-// RecognizeWithPaddleOCR executes PaddleOCR CLI script for recognition
+// RecognizeWithPaddleOCR executes the paddleocr_cli.py script for OCR recognition
+// The script supports both RapidOCR and PaddleOCR, trying RapidOCR first and falling back to PaddleOCR
 func (s *OCRService) RecognizeWithPaddleOCR(imagePath string) (string, error) {
 	fmt.Printf("[OCR] Running PaddleOCR CLI for: %s\n", imagePath)
 
@@ -238,7 +239,38 @@ func (s *OCRService) findPaddleOCRScript() string {
 	return ""
 }
 
-// isPaddleOCRAvailable checks if RapidOCR or PaddleOCR CLI is available
+// checkPythonModule checks if a Python module is available using both python3 and python
+func (s *OCRService) checkPythonModule(moduleName string) bool {
+	// Try with python3 first
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "python3", "-c", fmt.Sprintf("import %s; print('ok')", moduleName))
+	if output, err := cmd.CombinedOutput(); err == nil {
+		fmt.Printf("[OCR] %s is available (python3)\n", moduleName)
+		return true
+	} else {
+		fmt.Printf("[OCR] %s check failed (python3): %v, output: %s\n", moduleName, err, string(output))
+	}
+
+	// Try with python
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel2()
+
+	cmd = exec.CommandContext(ctx2, "python", "-c", fmt.Sprintf("import %s; print('ok')", moduleName))
+	if output, err := cmd.CombinedOutput(); err == nil {
+		fmt.Printf("[OCR] %s is available (python)\n", moduleName)
+		return true
+	} else {
+		fmt.Printf("[OCR] %s check failed (python): %v, output: %s\n", moduleName, err, string(output))
+	}
+
+	return false
+}
+
+// isPaddleOCRAvailable checks if RapidOCR or PaddleOCR is available
+// Priority: RapidOCR (rapidocr_onnxruntime) > PaddleOCR (paddleocr)
+// RapidOCR is preferred as it's lighter weight and better suited for Alpine Linux
 func (s *OCRService) isPaddleOCRAvailable() bool {
 	// Check if script exists
 	scriptPath := s.findPaddleOCRScript()
@@ -247,50 +279,14 @@ func (s *OCRService) isPaddleOCRAvailable() bool {
 		return false
 	}
 
-	// Check if Python is available
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
 	// First check for RapidOCR (preferred, lighter weight)
-	cmd := exec.CommandContext(ctx, "python3", "-c", "import rapidocr_onnxruntime; print('ok')")
-	if output, err := cmd.CombinedOutput(); err == nil {
-		fmt.Printf("[OCR] RapidOCR is available\n")
+	if s.checkPythonModule("rapidocr_onnxruntime") {
 		return true
-	} else {
-		fmt.Printf("[OCR] RapidOCR check failed: %v, output: %s\n", err, string(output))
 	}
 
-	// Try with "python" instead of "python3"
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel2()
-	cmd = exec.CommandContext(ctx2, "python", "-c", "import rapidocr_onnxruntime; print('ok')")
-	if output, err := cmd.CombinedOutput(); err == nil {
-		fmt.Printf("[OCR] RapidOCR is available (python)\n")
+	// Fall back to PaddleOCR
+	if s.checkPythonModule("paddleocr") {
 		return true
-	} else {
-		fmt.Printf("[OCR] RapidOCR check with python failed: %v, output: %s\n", err, string(output))
-	}
-
-	// Fall back to check PaddleOCR
-	ctx3, cancel3 := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel3()
-	cmd = exec.CommandContext(ctx3, "python3", "-c", "import paddleocr; print('ok')")
-	if output, err := cmd.CombinedOutput(); err == nil {
-		fmt.Printf("[OCR] PaddleOCR is available\n")
-		return true
-	} else {
-		fmt.Printf("[OCR] PaddleOCR check failed: %v, output: %s\n", err, string(output))
-	}
-
-	// Try with "python"
-	ctx4, cancel4 := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel4()
-	cmd = exec.CommandContext(ctx4, "python", "-c", "import paddleocr; print('ok')")
-	if output, err := cmd.CombinedOutput(); err == nil {
-		fmt.Printf("[OCR] PaddleOCR is available (python)\n")
-		return true
-	} else {
-		fmt.Printf("[OCR] PaddleOCR check with python failed: %v, output: %s\n", err, string(output))
 	}
 
 	fmt.Printf("[OCR] Neither RapidOCR nor PaddleOCR is available\n")
