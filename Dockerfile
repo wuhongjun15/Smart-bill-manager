@@ -48,16 +48,19 @@ RUN CGO_ENABLED=1 GOOS=linux go build -o server ./cmd/server
 # ============================================
 FROM nginx:alpine AS production
 
-# Install supervisor, SQLite runtime, Tesseract with language packs, poppler-utils, ImageMagick, poppler-data, Python and OCR dependencies
-# Note: Alpine's tesseract-ocr package includes basic language data
-# Additional language data can be installed via tesseract-ocr-data-* packages or downloaded manually
-# poppler-data provides CJK CMap files for better PDF text extraction
-# imagemagick provides image preprocessing capabilities for better OCR
-# Python 3 and pip are required for OCR CLI integration
-RUN apk add --no-cache supervisor tesseract-ocr ca-certificates poppler-utils poppler-data imagemagick \
+# Install packages - split into multiple RUN commands for better debugging
+# Install supervisor first and verify
+RUN apk add --no-cache supervisor && \
+    which supervisord && \
+    ls -la $(which supervisord)
+
+# Install other dependencies
+RUN apk add --no-cache tesseract-ocr ca-certificates poppler-utils poppler-data imagemagick \
     python3 py3-pip \
-    libgl libglib libgomp libstdc++ && \
-    apk add --no-cache tesseract-ocr-data-chi_sim tesseract-ocr-data-eng 2>/dev/null || \
+    libgl libglib libgomp libstdc++
+
+# Install Tesseract language data
+RUN apk add --no-cache tesseract-ocr-data-chi_sim tesseract-ocr-data-eng 2>/dev/null || \
     (apk add --no-cache wget && \
      TESSDATA_DIR=/usr/share/tessdata && \
      mkdir -p $TESSDATA_DIR && \
@@ -67,12 +70,19 @@ RUN apk add --no-cache supervisor tesseract-ocr ca-certificates poppler-utils po
          https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata && \
      apk del wget)
 
-# Install Python OCR dependencies
-# Use --break-system-packages for Alpine's pip
-# If installation fails, continue - Tesseract will be used as fallback
+# Install Python OCR dependencies (optional, will fall back to Tesseract if fails)
 RUN python3 -m pip install --break-system-packages --upgrade pip setuptools wheel 2>/dev/null || true && \
     python3 -m pip install --break-system-packages --no-cache-dir rapidocr_onnxruntime 2>/dev/null || \
     echo "RapidOCR installation skipped - using Tesseract for OCR"
+
+# Ensure supervisord is accessible at /usr/bin/supervisord
+RUN if [ ! -f /usr/bin/supervisord ]; then \
+        SUPERVISOR_PATH=$(which supervisord 2>/dev/null); \
+        if [ -n "$SUPERVISOR_PATH" ]; then \
+            ln -sf "$SUPERVISOR_PATH" /usr/bin/supervisord; \
+        fi; \
+    fi && \
+    test -x /usr/bin/supervisord || (echo "supervisord not found!" && exit 1)
 
 WORKDIR /app
 
