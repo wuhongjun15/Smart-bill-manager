@@ -24,7 +24,7 @@ def main():
     try:
         from rapidocr_onnxruntime import RapidOCR
         ocr = RapidOCR()
-        result, _ = ocr(image_path)
+        result, elapsed_time = ocr(image_path)  # elapsed_time is OCR processing time
         
         lines = []
         full_text_parts = []
@@ -46,8 +46,8 @@ def main():
         
     except ImportError:
         pass  # Fall back to PaddleOCR
-    except Exception as e:
-        # RapidOCR failed, try PaddleOCR
+    except (RuntimeError, ValueError, OSError) as e:
+        # RapidOCR failed with expected error, try PaddleOCR fallback
         pass
     
     # Fall back to PaddleOCR
