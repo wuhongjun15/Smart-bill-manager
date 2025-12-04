@@ -60,8 +60,8 @@ var (
 	merchantFullNameRegex = regexp.MustCompile(`商户全称[：:]?[\s]*([^\n收单机构支付方式]+?)[\s]*(?:收单机构|支付方式|\n|$)`)
 	merchantGenericRegex  = regexp.MustCompile(`([^\n]+(?:店|行|公司|商户|超市|餐厅|饭店|有限公司))`)
 
-	// Chinese date to ISO conversion pattern - compiled once for performance
-	chineseDateTimeSpacePattern = regexp.MustCompile(`日(\d)`)
+	// Pattern to insert space between Chinese date and time when 日 is directly followed by digits
+	chineseDateTimePattern = regexp.MustCompile(`日(\d)`)
 )
 
 func NewOCRService() *OCRService {
@@ -590,7 +590,7 @@ func removeChineseSpaces(text string) string {
 func convertChineseDateToISO(dateStr string) string {
 	// If 日 is directly followed by a digit (time), insert a space
 	// This handles cases like "2025年10月23日14:59:46" -> "2025年10月23日 14:59:46"
-	dateStr = chineseDateTimeSpacePattern.ReplaceAllString(dateStr, "日 $1")
+	dateStr = chineseDateTimePattern.ReplaceAllString(dateStr, "日 $1")
 
 	// Replace Chinese date separators with dashes
 	dateStr = strings.ReplaceAll(dateStr, "年", "-")
@@ -718,10 +718,8 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		// Standard format: 2024-01-01 12:00:00
 		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
 		regexp.MustCompile(`转账时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
-		// Chinese format with space: 2025年10月23日 14:59:46
-		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s+[\d]{1,2}:[\d]{2}:[\d]{2})`),
-		// Chinese format without space (after preprocessing): 2025年10月23日14:59:46
-		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}年[\d]{1,2}月[\d]{1,2}日[\d]{1,2}:[\d]{2}:[\d]{2})`),
+		// Chinese format (handles both with and without space after 日): 2025年10月23日14:59:46 or 2025年10月23日 14:59:46
+		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Generic Chinese date-time format with space
 		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)\s+([\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Generic Chinese date-time format without space
