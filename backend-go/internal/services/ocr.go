@@ -599,6 +599,19 @@ func convertChineseDateToISO(dateStr string) string {
 	return strings.TrimSpace(dateStr)
 }
 
+// extractTimeFromMatch extracts time string from regex match groups
+// Handles both single capture group and separate date/time capture groups
+func extractTimeFromMatch(match []string) string {
+	var timeStr string
+	if len(match) > 2 && match[2] != "" {
+		// Date and time captured separately, join with space
+		timeStr = match[1] + " " + match[2]
+	} else {
+		timeStr = match[1]
+	}
+	return convertChineseDateToISO(timeStr)
+}
+
 // ParsePaymentScreenshot extracts payment information from OCR text
 func (s *OCRService) ParsePaymentScreenshot(text string) (*PaymentExtractedData, error) {
 	data := &PaymentExtractedData{
@@ -718,7 +731,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		// Standard format: 2024-01-01 12:00:00
 		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
 		regexp.MustCompile(`转账时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
-		// Chinese format (handles both with and without space after 日): 2025年10月23日14:59:46 or 2025年10月23日 14:59:46
+		// Chinese format with optional spaces after 日: matches "2025年10月23日14:59:46" and "2025年10月23日 14:59:46"
 		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Generic Chinese date-time format with space
 		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)\s+([\d]{1,2}:[\d]{2}:[\d]{2})`),
@@ -729,15 +742,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 	}
 	for _, re := range timeRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
-			var timeStr string
-			if len(match) > 2 && match[2] != "" {
-				// Date and time captured separately, join with space
-				timeStr = match[1] + " " + match[2]
-			} else {
-				timeStr = match[1]
-			}
-			// Convert Chinese date format to ISO format
-			timeStr = convertChineseDateToISO(timeStr)
+			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
 			break
 		}
@@ -829,15 +834,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 	}
 	for _, re := range timeRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
-			var timeStr string
-			if len(match) > 2 && match[2] != "" {
-				// Date and time captured separately, join with space
-				timeStr = match[1] + " " + match[2]
-			} else {
-				timeStr = match[1]
-			}
-			// Convert Chinese date format to ISO format
-			timeStr = convertChineseDateToISO(timeStr)
+			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
 			break
 		}
@@ -928,15 +925,7 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 	}
 	for _, re := range timeRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
-			var timeStr string
-			if len(match) > 2 && match[2] != "" {
-				// Date and time captured separately, join with space
-				timeStr = match[1] + " " + match[2]
-			} else {
-				timeStr = match[1]
-			}
-			// Convert Chinese date format to ISO format
-			timeStr = convertChineseDateToISO(timeStr)
+			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
 			break
 		}
