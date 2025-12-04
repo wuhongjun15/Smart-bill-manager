@@ -75,8 +75,8 @@ RUN apk add --no-cache tesseract-ocr-data-chi_sim tesseract-ocr-data-eng 2>/dev/
          https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata && \
      apk del wget)
 
-# Install optional libraries for RapidOCR (allow failures)
-# RapidOCR requires additional libraries, install them if available
+# Install optional libraries for RapidOCR (mesa-gl for OpenGL, glib for GLib, libstdc++ for C++ runtime)
+# Allows failures since RapidOCR is optional and will fall back to Tesseract
 RUN apk add --no-cache mesa-gl glib libstdc++ 2>/dev/null || true
 
 # Install Python OCR dependencies (optional, will fall back to Tesseract if fails)
