@@ -24,6 +24,8 @@ def main():
         from paddleocr import PaddleOCR
         
         # Initialize PaddleOCR (lazy loading, will cache after first run)
+        # Using 'ch' for Chinese (includes both Traditional and Simplified)
+        # For explicit Chinese Simplified only, use 'ch_sim'
         ocr = PaddleOCR(
             use_angle_cls=True,
             lang='ch',

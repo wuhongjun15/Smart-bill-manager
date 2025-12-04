@@ -2,7 +2,6 @@ package services
 
 import (
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -40,7 +39,7 @@ func TestRecognizeWithPaddleOCR(t *testing.T) {
 
 	t.Run("Returns error when script not found", func(t *testing.T) {
 		// Create a temporary directory without the script
-		tempDir, err := ioutil.TempDir("", "ocr-test-*")
+		tempDir, err := os.MkdirTemp("", "ocr-test-*")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -48,7 +47,7 @@ func TestRecognizeWithPaddleOCR(t *testing.T) {
 
 		// Create a dummy image file
 		imagePath := filepath.Join(tempDir, "test.png")
-		if err := ioutil.WriteFile(imagePath, []byte("dummy"), 0644); err != nil {
+		if err := os.WriteFile(imagePath, []byte("dummy"), 0644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -75,7 +74,7 @@ func TestRecognizeWithPaddleOCR(t *testing.T) {
 		}
 
 		// Create a temporary directory
-		tempDir, err := ioutil.TempDir("", "ocr-test-*")
+		tempDir, err := os.MkdirTemp("", "ocr-test-*")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,13 +98,13 @@ result = {
 print(json.dumps(result, ensure_ascii=False))
 `
 		scriptPath := filepath.Join(tempDir, "paddleocr_cli.py")
-		if err := ioutil.WriteFile(scriptPath, []byte(mockScript), 0755); err != nil {
+		if err := os.WriteFile(scriptPath, []byte(mockScript), 0755); err != nil {
 			t.Fatal(err)
 		}
 
 		// Create a dummy image file
 		imagePath := filepath.Join(tempDir, "test.png")
-		if err := ioutil.WriteFile(imagePath, []byte("dummy"), 0644); err != nil {
+		if err := os.WriteFile(imagePath, []byte("dummy"), 0644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -139,7 +138,7 @@ print(json.dumps(result, ensure_ascii=False))
 		}
 
 		// Create a temporary directory
-		tempDir, err := ioutil.TempDir("", "ocr-test-*")
+		tempDir, err := os.MkdirTemp("", "ocr-test-*")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -158,13 +157,13 @@ print(json.dumps(result))
 sys.exit(1)
 `
 		scriptPath := filepath.Join(tempDir, "paddleocr_cli.py")
-		if err := ioutil.WriteFile(scriptPath, []byte(mockScript), 0755); err != nil {
+		if err := os.WriteFile(scriptPath, []byte(mockScript), 0755); err != nil {
 			t.Fatal(err)
 		}
 
 		// Create a dummy image file
 		imagePath := filepath.Join(tempDir, "test.png")
-		if err := ioutil.WriteFile(imagePath, []byte("dummy"), 0644); err != nil {
+		if err := os.WriteFile(imagePath, []byte("dummy"), 0644); err != nil {
 			t.Fatal(err)
 		}
 
@@ -200,7 +199,7 @@ func TestRecognizePaymentScreenshotWithPaddleOCR(t *testing.T) {
 
 	t.Run("Falls back to Tesseract when PaddleOCR unavailable", func(t *testing.T) {
 		// Create a temporary directory without the script
-		tempDir, err := ioutil.TempDir("", "ocr-test-*")
+		tempDir, err := os.MkdirTemp("", "ocr-test-*")
 		if err != nil {
 			t.Fatal(err)
 		}
