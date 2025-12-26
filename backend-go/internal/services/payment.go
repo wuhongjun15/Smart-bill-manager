@@ -119,17 +119,25 @@ type CreateFromScreenshotInput struct {
 	ScreenshotPath string
 }
 
-func (s *PaymentService) CreateFromScreenshot(input CreateFromScreenshotInput) (*models.Payment, *PaymentExtractedData, error) {
+// CreateFromScreenshotBestEffort creates a payment from a screenshot and tries OCR,
+// but will still create the payment record even if OCR fails.
+func (s *PaymentService) CreateFromScreenshotBestEffort(input CreateFromScreenshotInput) (*models.Payment, *PaymentExtractedData, *string, error) {
+	var ocrError *string
+
 	// Perform OCR on the screenshot with specialized payment screenshot recognition
 	text, err := s.ocrService.RecognizePaymentScreenshot(input.ScreenshotPath)
 	if err != nil {
-		return nil, nil, err
+		msg := err.Error()
+		ocrError = &msg
+		text = ""
 	}
 
 	// Parse payment data from OCR text
-	extracted, err := s.ocrService.ParsePaymentScreenshot(text)
-	if err != nil {
-		return nil, nil, err
+	extracted, parseErr := s.ocrService.ParsePaymentScreenshot(text)
+	if parseErr != nil {
+		msg := parseErr.Error()
+		ocrError = &msg
+		extracted = &PaymentExtractedData{RawText: text}
 	}
 
 	// Store extracted data as JSON
@@ -166,10 +174,10 @@ func (s *PaymentService) CreateFromScreenshot(input CreateFromScreenshotInput) (
 	}
 
 	if err := s.repo.Create(payment); err != nil {
-		return nil, nil, err
+		return nil, nil, ocrError, err
 	}
 
-	return payment, extracted, nil
+	return payment, extracted, ocrError, nil
 }
 
 // GetLinkedInvoices returns all invoices linked to a payment

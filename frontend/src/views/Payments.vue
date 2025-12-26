@@ -684,7 +684,7 @@ const handleScreenshotUpload = async () => {
     const file = screenshotFileList.value[0].raw as File
     const res = await paymentApi.uploadScreenshot(file)
     if (res.data.success && res.data.data) {
-      const { payment, extracted } = res.data.data
+      const { payment, extracted, ocr_error } = res.data.data as any
       
       // Save payment ID for later update
       uploadedPaymentId.value = payment.id
@@ -702,11 +702,17 @@ const handleScreenshotUpload = async () => {
       ocrForm.category = ''
       ocrForm.description = ''
       
-      ElMessage.success('截图识别成功，请确认或修改识别结果')
+      if (ocr_error) {
+        ElMessage.warning(`截图上传成功，但 OCR 识别失败：${ocr_error}`)
+      } else {
+        ElMessage.success('截图识别成功，请确认或修改识别结果')
+      }
     }
   } catch (error: unknown) {
-    const err = error as { response?: { data?: { message?: string } } }
-    ElMessage.error(err.response?.data?.message || '截图识别失败')
+    const err = error as { response?: { data?: { message?: string; error?: string } } }
+    const message = err.response?.data?.message || '截图识别失败'
+    const detail = err.response?.data?.error
+    ElMessage.error(detail ? `${message}：${detail}` : message)
   } finally {
     uploadingScreenshot.value = false
   }
@@ -825,8 +831,10 @@ const handleReparseOcr = async (paymentId: string) => {
       loadPayments()
     }
   } catch (error: unknown) {
-    const err = error as { response?: { data?: { message?: string } } }
-    ElMessage.error(err.response?.data?.message || '重新解析失败')
+    const err = error as { response?: { data?: { message?: string; error?: string } } }
+    const message = err.response?.data?.message || '重新解析失败'
+    const detail = err.response?.data?.error
+    ElMessage.error(detail ? `${message}：${detail}` : message)
   } finally {
     reparsingOcr.value = false
   }

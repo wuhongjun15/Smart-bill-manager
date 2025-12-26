@@ -168,8 +168,8 @@ func (h *PaymentHandler) UploadScreenshot(c *gin.Context) {
 	// Always use forward slashes and "uploads/" prefix for consistency
 	relPath := "uploads/" + filename
 
-	// Process screenshot with OCR
-	payment, extracted, err := h.paymentService.CreateFromScreenshot(services.CreateFromScreenshotInput{
+	// Process screenshot with OCR (best-effort)
+	payment, extracted, ocrError, err := h.paymentService.CreateFromScreenshotBestEffort(services.CreateFromScreenshotInput{
 		ScreenshotPath: relPath,
 	})
 	if err != nil {
@@ -179,10 +179,17 @@ func (h *PaymentHandler) UploadScreenshot(c *gin.Context) {
 		return
 	}
 
-	utils.Success(c, 201, "支付截图上传成功", gin.H{
-		"payment":  payment,
+	message := "支付截图上传成功"
+	data := gin.H{
+		"payment":   payment,
 		"extracted": extracted,
-	})
+	}
+	if ocrError != nil && *ocrError != "" {
+		message = "支付截图上传成功，但 OCR 识别失败，请手动填写"
+		data["ocr_error"] = *ocrError
+	}
+
+	utils.Success(c, 201, message, data)
 }
 
 func (h *PaymentHandler) GetLinkedInvoices(c *gin.Context) {
