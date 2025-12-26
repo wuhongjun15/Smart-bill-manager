@@ -111,6 +111,23 @@ func (h *PaymentHandler) Update(c *gin.Context) {
 
 func (h *PaymentHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
+
+	payment, err := h.paymentService.GetByID(id)
+	if err != nil {
+		utils.Error(c, 404, "æ”¯ä»˜è®°å½•ä¸å­˜åœ?", nil)
+		return
+	}
+
+	// Remove the screenshot file if present (ignore missing file).
+	if payment.ScreenshotPath != nil && *payment.ScreenshotPath != "" {
+		if absPath, err := resolveUploadsFilePath(h.uploadsDir, *payment.ScreenshotPath); err == nil {
+			if rmErr := os.Remove(absPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				utils.Error(c, 500, "åˆ é™¤æ”¯ä»˜æˆªå›¾æ–‡ä»¶å¤±è´¥", rmErr)
+				return
+			}
+		}
+	}
+
 	if err := h.paymentService.Delete(id); err != nil {
 		utils.Error(c, 404, "支付记录不存在", nil)
 		return
