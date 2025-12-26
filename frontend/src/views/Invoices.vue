@@ -65,6 +65,11 @@
             {{ row.invoice_number || '-' }}
           </template>
         </el-table-column>
+        <el-table-column prop="invoice_date" label="&#24320;&#31080;&#26102;&#38388;" sortable>
+          <template #default="{ row }">
+            {{ formatDate(row.invoice_date) }}
+          </template>
+        </el-table-column>
         <el-table-column label="金额">
           <template #default="{ row }">
             <span v-if="row.amount" class="amount">¥{{ row.amount.toFixed(2) }}</span>
@@ -503,6 +508,11 @@ const getSourceType = (source?: string): 'primary' | 'success' | 'warning' | 'in
 const formatDateTime = (date?: string) => {
   if (!date) return '-'
   return dayjs(date).format('YYYY-MM-DD HH:mm')
+}
+
+const formatDate = (date?: string) => {
+  if (!date) return '-'
+  return dayjs(date).format('YYYY-MM-DD')
 }
 
 const getParseStatusLabel = (status?: string) => {
