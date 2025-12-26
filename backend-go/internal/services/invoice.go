@@ -11,6 +11,7 @@ import (
 	"smart-bill-manager/internal/models"
 	"smart-bill-manager/internal/repository"
 	"smart-bill-manager/internal/utils"
+	"smart-bill-manager/pkg/database"
 )
 
 type InvoiceService struct {
@@ -215,6 +216,37 @@ func (s *InvoiceService) SuggestPayments(invoiceID string, limit int, debug bool
 	candidates, err := s.repo.SuggestPayments(invoice, maxCandidates)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(candidates) == 0 {
+		// Safety net: if repository-side filters are too strict (or data is missing),
+		// fall back to the most recent payments so scoring still has something to rank.
+		var total int64
+		_ = database.GetDB().Model(&models.Payment{}).Count(&total).Error
+		if debug {
+			log.Printf("[MATCH] invoice=%s repo candidates=0, fallback to recent payments (total=%d)", invoiceID, total)
+		}
+		if total > 0 {
+			var recent []models.Payment
+			_ = database.GetDB().
+				Model(&models.Payment{}).
+				Order("transaction_time DESC").
+				Limit(maxCandidates).
+				Find(&recent).Error
+			candidates = recent
+
+			if debug {
+				sampleN := 5
+				if len(recent) < sampleN {
+					sampleN = len(recent)
+				}
+				for i := 0; i < sampleN; i++ {
+					p := recent[i]
+					log.Printf("[MATCH] invoice=%s recent payment sample=%d id=%s amount=%.2f merchant=%q time=%q",
+						invoiceID, i+1, p.ID, p.Amount, strPtrVal(p.Merchant), p.TransactionTime)
+				}
+			}
+		}
 	}
 
 	if debug {

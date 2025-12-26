@@ -8,6 +8,7 @@ import (
 	"smart-bill-manager/internal/models"
 	"smart-bill-manager/internal/repository"
 	"smart-bill-manager/internal/utils"
+	"smart-bill-manager/pkg/database"
 )
 
 type PaymentService struct {
@@ -229,6 +230,35 @@ func (s *PaymentService) SuggestInvoices(paymentID string, limit int, debug bool
 	candidates, err := s.invoiceRepo.SuggestInvoices(payment, maxCandidates)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(candidates) == 0 {
+		var total int64
+		_ = database.GetDB().Model(&models.Invoice{}).Count(&total).Error
+		if debug {
+			log.Printf("[MATCH] payment=%s repo candidates=0, fallback to recent invoices (total=%d)", paymentID, total)
+		}
+		if total > 0 {
+			var recent []models.Invoice
+			_ = database.GetDB().
+				Model(&models.Invoice{}).
+				Order("created_at DESC").
+				Limit(maxCandidates).
+				Find(&recent).Error
+			candidates = recent
+
+			if debug {
+				sampleN := 5
+				if len(recent) < sampleN {
+					sampleN = len(recent)
+				}
+				for i := 0; i < sampleN; i++ {
+					inv := recent[i]
+					log.Printf("[MATCH] payment=%s recent invoice sample=%d id=%s amount=%v seller=%v invoice_date=%v",
+						paymentID, i+1, inv.ID, valueOrNil(inv.Amount), strValueOrNil(inv.SellerName), strValueOrNil(inv.InvoiceDate))
+				}
+			}
+		}
 	}
 
 	if debug {
