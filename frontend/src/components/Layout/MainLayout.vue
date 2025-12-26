@@ -34,6 +34,10 @@
           <el-icon><ChatDotRound /></el-icon>
           <template #title>钉钉机器人</template>
         </el-menu-item>
+        <el-menu-item index="/logs">
+          <el-icon><Tickets /></el-icon>
+          <template #title>日志</template>
+        </el-menu-item>
       </el-menu>
       <div class="collapse-trigger" @click="isCollapsed = !isCollapsed">
         <el-icon v-if="isCollapsed"><Expand /></el-icon>
@@ -86,7 +90,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { 
   Odometer, Wallet, Document, Message, ChatDotRound,
-  User, Key, SwitchButton, Expand, Fold
+  Tickets, User, Key, SwitchButton, Expand, Fold
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import ChangePassword from '@/components/ChangePassword.vue'
@@ -107,6 +111,7 @@ const pageTitle = computed(() => {
     '/invoices': '发票管理',
     '/email': '邮箱监控',
     '/dingtalk': '钉钉机器人'
+    '/logs': '日志',
   }
   return titles[route.path] || '仪表盘'
 })

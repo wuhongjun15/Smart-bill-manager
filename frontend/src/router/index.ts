@@ -53,6 +53,12 @@ const routes: RouteRecordRaw[] = [
         name: 'DingTalk',
         component: () => import('@/views/DingTalk.vue'),
         meta: { title: '钉钉机器人' }
+      },
+      {
+        path: 'logs',
+        name: 'Logs',
+        component: () => import('@/views/Logs.vue'),
+        meta: { title: '日志' }
       }
     ]
   },

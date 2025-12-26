@@ -122,6 +122,10 @@ func main() {
 	dingtalkHandler := handlers.NewDingtalkHandler(dingtalkService, invoiceService, uploadsDir)
 	dingtalkHandler.RegisterRoutes(protectedGroup.Group("/dingtalk"))
 
+	// Logs routes
+	logsHandler := handlers.NewLogsHandler()
+	logsHandler.RegisterRoutes(protectedGroup.Group("/logs"))
+
 	// Dashboard endpoint
 	protectedGroup.GET("/dashboard", func(c *gin.Context) {
 		now := time.Now()
