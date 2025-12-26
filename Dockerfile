@@ -58,16 +58,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
     python3 \
     python3-pip \
+    python3-venv \
     libgomp1 \
     libstdc++6 \
     libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python OCR dependencies (RapidOCR v3)
-RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    python3 -m pip install --no-cache-dir "rapidocr==3.*" onnxruntime && \
-    python3 -c "import rapidocr, onnxruntime; print('RapidOCR v3 OK')"
+# Install Python OCR dependencies (RapidOCR v3) in a virtualenv to avoid Debian PEP 668 restrictions.
+RUN python3 -m venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+RUN ln -sf /opt/venv/bin/python /opt/venv/bin/python3
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    python -m pip install --no-cache-dir "rapidocr==3.*" onnxruntime && \
+    python -c "import rapidocr, onnxruntime; print('RapidOCR v3 OK')"
 
 WORKDIR /app
 
