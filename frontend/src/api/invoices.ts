@@ -43,8 +43,13 @@ export const invoiceApi = {
     api.get<ApiResponse<Payment[]>>(`/invoices/${invoiceId}/linked-payments`),
   
   // Get suggested payments for an invoice (smart matching)
-  getSuggestedPayments: (invoiceId: string) =>
-    api.get<ApiResponse<Payment[]>>(`/invoices/${invoiceId}/suggest-payments`),
+  getSuggestedPayments: (invoiceId: string, params?: { limit?: number; debug?: boolean }) =>
+    api.get<ApiResponse<Payment[]>>(`/invoices/${invoiceId}/suggest-payments`, {
+      params: {
+        ...(params || {}),
+        debug: params?.debug ? 1 : undefined,
+      },
+    }),
   
   // Link a payment to an invoice
   linkPayment: (invoiceId: string, paymentId: string) =>

@@ -38,6 +38,11 @@ export const paymentApi = {
     api.get<ApiResponse<Invoice[]>>(`/payments/${paymentId}/invoices`),
 
   // Get suggested invoices for a payment (smart matching)
-  getSuggestedInvoices: (paymentId: string) =>
-    api.get<ApiResponse<Invoice[]>>(`/payments/${paymentId}/suggest-invoices`),
+  getSuggestedInvoices: (paymentId: string, params?: { limit?: number; debug?: boolean }) =>
+    api.get<ApiResponse<Invoice[]>>(`/payments/${paymentId}/suggest-invoices`, {
+      params: {
+        ...(params || {}),
+        debug: params?.debug ? 1 : undefined,
+      },
+    }),
 }

@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -181,10 +182,20 @@ func (s *InvoiceService) GetLinkedPayments(invoiceID string) ([]models.Payment, 
 }
 
 // SuggestPayments suggests payments that might match this invoice based on amount and date
-func (s *InvoiceService) SuggestPayments(invoiceID string, limit int) ([]models.Payment, error) {
+func (s *InvoiceService) SuggestPayments(invoiceID string, limit int, debug bool) ([]models.Payment, error) {
 	invoice, err := s.repo.FindByID(invoiceID)
 	if err != nil {
 		return nil, err
+	}
+
+	if debug {
+		log.Printf(
+			"[MATCH] invoice=%s amount=%v invoice_date=%v seller=%v",
+			invoiceID,
+			valueOrNil(invoice.Amount),
+			strValueOrNil(invoice.InvoiceDate),
+			strValueOrNil(invoice.SellerName),
+		)
 	}
 
 	linked, _ := s.repo.GetLinkedPayments(invoiceID)
@@ -206,21 +217,28 @@ func (s *InvoiceService) SuggestPayments(invoiceID string, limit int) ([]models.
 		return nil, err
 	}
 
+	if debug {
+		log.Printf("[MATCH] invoice=%s linked=%d candidates=%d", invoiceID, len(linkedIDs), len(candidates))
+	}
+
 	type scored struct {
 		payment models.Payment
 		score   float64
+		aScore  float64
+		dScore  float64
+		mScore  float64
 	}
 	scoredList := make([]scored, 0, len(candidates))
 	for _, p := range candidates {
 		if _, ok := linkedIDs[p.ID]; ok {
 			continue
 		}
-		score := computeInvoicePaymentScore(invoice, &p)
+		score, aScore, dScore, mScore := computeInvoicePaymentScoreBreakdown(invoice, &p)
 		// Drop extremely low-score candidates to reduce noise.
 		if score < 0.15 {
 			continue
 		}
-		scoredList = append(scoredList, scored{payment: p, score: score})
+		scoredList = append(scoredList, scored{payment: p, score: score, aScore: aScore, dScore: dScore, mScore: mScore})
 	}
 
 	sort.Slice(scoredList, func(i, j int) bool {
@@ -237,7 +255,52 @@ func (s *InvoiceService) SuggestPayments(invoiceID string, limit int) ([]models.
 			break
 		}
 	}
+
+	if debug {
+		top := 10
+		if len(scoredList) < top {
+			top = len(scoredList)
+		}
+		for i := 0; i < top; i++ {
+			p := scoredList[i].payment
+			log.Printf(
+				"[MATCH] invoice=%s rank=%d payment=%s score=%.3f amount=%.2f merchant=%q time=%q parts(a=%.3f d=%.3f m=%.3f)",
+				invoiceID,
+				i+1,
+				p.ID,
+				scoredList[i].score,
+				p.Amount,
+				strPtrVal(p.Merchant),
+				p.TransactionTime,
+				scoredList[i].aScore,
+				scoredList[i].dScore,
+				scoredList[i].mScore,
+			)
+		}
+	}
+
 	return out, nil
+}
+
+func strPtrVal(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func valueOrNil(v *float64) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
+func strValueOrNil(v *string) interface{} {
+	if v == nil {
+		return nil
+	}
+	return *v
 }
 
 // parseInvoicePDF is a helper method that parses a PDF invoice and returns the extracted data

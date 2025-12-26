@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"smart-bill-manager/internal/models"
 	"smart-bill-manager/internal/repository"
@@ -189,10 +190,20 @@ func (s *PaymentService) GetLinkedInvoices(paymentID string) ([]models.Invoice, 
 }
 
 // SuggestInvoices suggests invoices that might match this payment using amount/seller/date signals.
-func (s *PaymentService) SuggestInvoices(paymentID string, limit int) ([]models.Invoice, error) {
+func (s *PaymentService) SuggestInvoices(paymentID string, limit int, debug bool) ([]models.Invoice, error) {
 	payment, err := s.repo.FindByID(paymentID)
 	if err != nil {
 		return nil, err
+	}
+
+	if debug {
+		log.Printf(
+			"[MATCH] payment=%s amount=%.2f merchant=%q time=%q",
+			paymentID,
+			payment.Amount,
+			strPtrVal(payment.Merchant),
+			payment.TransactionTime,
+		)
 	}
 
 	linked, _ := s.repo.GetLinkedInvoices(paymentID)
@@ -214,20 +225,27 @@ func (s *PaymentService) SuggestInvoices(paymentID string, limit int) ([]models.
 		return nil, err
 	}
 
+	if debug {
+		log.Printf("[MATCH] payment=%s linked=%d candidates=%d", paymentID, len(linkedIDs), len(candidates))
+	}
+
 	type scored struct {
 		invoice models.Invoice
 		score   float64
+		aScore  float64
+		dScore  float64
+		mScore  float64
 	}
 	scoredList := make([]scored, 0, len(candidates))
 	for _, inv := range candidates {
 		if _, ok := linkedIDs[inv.ID]; ok {
 			continue
 		}
-		score := computeInvoicePaymentScore(&inv, payment)
+		score, aScore, dScore, mScore := computeInvoicePaymentScoreBreakdown(&inv, payment)
 		if score < 0.15 {
 			continue
 		}
-		scoredList = append(scoredList, scored{invoice: inv, score: score})
+		scoredList = append(scoredList, scored{invoice: inv, score: score, aScore: aScore, dScore: dScore, mScore: mScore})
 	}
 
 	sort.Slice(scoredList, func(i, j int) bool {
@@ -244,6 +262,30 @@ func (s *PaymentService) SuggestInvoices(paymentID string, limit int) ([]models.
 			break
 		}
 	}
+
+	if debug {
+		top := 10
+		if len(scoredList) < top {
+			top = len(scoredList)
+		}
+		for i := 0; i < top; i++ {
+			inv := scoredList[i].invoice
+			log.Printf(
+				"[MATCH] payment=%s rank=%d invoice=%s score=%.3f amount=%v seller=%v invoice_date=%v parts(a=%.3f d=%.3f m=%.3f)",
+				paymentID,
+				i+1,
+				inv.ID,
+				scoredList[i].score,
+				valueOrNil(inv.Amount),
+				strValueOrNil(inv.SellerName),
+				strValueOrNil(inv.InvoiceDate),
+				scoredList[i].aScore,
+				scoredList[i].dScore,
+				scoredList[i].mScore,
+			)
+		}
+	}
+
 	return out, nil
 }
 

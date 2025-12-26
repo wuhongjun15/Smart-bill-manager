@@ -169,14 +169,18 @@ func merchantScore(invoiceSeller *string, paymentMerchant *string) float64 {
 }
 
 func computeInvoicePaymentScore(invoice *models.Invoice, payment *models.Payment) float64 {
-	if invoice == nil || payment == nil {
-		return 0
-	}
-	aScore := amountScore(invoice.Amount, payment.Amount)
-	dScore := dateScore(invoice.InvoiceDate, payment.TransactionTime)
-	mScore := merchantScore(invoice.SellerName, payment.Merchant)
-
-	// Weighted sum.
-	return 0.55*aScore + 0.25*dScore + 0.20*mScore
+	score, _, _, _ := computeInvoicePaymentScoreBreakdown(invoice, payment)
+	return score
 }
 
+func computeInvoicePaymentScoreBreakdown(invoice *models.Invoice, payment *models.Payment) (score, aScore, dScore, mScore float64) {
+	if invoice == nil || payment == nil {
+		return 0, 0, 0, 0
+	}
+	aScore = amountScore(invoice.Amount, payment.Amount)
+	dScore = dateScore(invoice.InvoiceDate, payment.TransactionTime)
+	mScore = merchantScore(invoice.SellerName, payment.Merchant)
+
+	// Weighted sum.
+	return 0.55*aScore + 0.25*dScore + 0.20*mScore, aScore, dScore, mScore
+}

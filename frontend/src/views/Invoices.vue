@@ -488,15 +488,17 @@ const loadLinkedPayments = async (invoiceId: string) => {
 const refreshSuggestedPayments = async (invoiceId: string) => {
   loadingSuggestedPayments.value = true
   try {
-    const suggestedRes = await invoiceApi.getSuggestedPayments(invoiceId)
-    if (suggestedRes.data.success && suggestedRes.data.data) {
-      suggestedPayments.value = suggestedRes.data.data
+    const suggestedRes = await invoiceApi.getSuggestedPayments(invoiceId, { debug: true })
+    suggestedPayments.value = suggestedRes.data.success && suggestedRes.data.data ? suggestedRes.data.data : []
+    if (suggestedPayments.value.length > 0) {
+      ElMessage.success(`推荐到 ${suggestedPayments.value.length} 条可关联的支付记录`)
     } else {
-      suggestedPayments.value = []
+      ElMessage.warning('没有找到可推荐的支付记录')
     }
   } catch (error) {
     console.error('Load suggested payments failed:', error)
     suggestedPayments.value = []
+    ElMessage.error('推荐匹配失败')
   } finally {
     loadingSuggestedPayments.value = false
   }
@@ -515,7 +517,8 @@ const handleLinkPayment = async (paymentId: string) => {
     await invoiceApi.linkPayment(previewInvoice.value.id, paymentId)
     ElMessage.success('关联成功')
     // Reload linked payments
-    loadLinkedPayments(previewInvoice.value.id)
+    await loadLinkedPayments(previewInvoice.value.id)
+    await refreshSuggestedPayments(previewInvoice.value.id)
   } catch (error: unknown) {
     const err = error as { response?: { data?: { message?: string } } }
     ElMessage.error(err.response?.data?.message || '关联失败')

@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"smart-bill-manager/internal/services"
@@ -313,14 +315,23 @@ func (h *InvoiceHandler) GetLinkedPayments(c *gin.Context) {
 
 func (h *InvoiceHandler) SuggestPayments(c *gin.Context) {
 	id := c.Param("id")
-	limit := 10 // Default limit
-	
-	payments, err := h.invoiceService.SuggestPayments(id, limit)
+	limit := 10
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	debug := c.Query("debug") == "1" || c.Query("debug") == "true"
+
+	log.Printf("[MATCH] suggest-payments invoice_id=%s limit=%d debug=%t", id, limit, debug)
+
+	payments, err := h.invoiceService.SuggestPayments(id, limit, debug)
 	if err != nil {
 		utils.Error(c, 500, "获取建议支付记录失败", err)
 		return
 	}
 
+	log.Printf("[MATCH] suggest-payments invoice_id=%s -> %d results", id, len(payments))
 	utils.SuccessData(c, payments)
 }
 

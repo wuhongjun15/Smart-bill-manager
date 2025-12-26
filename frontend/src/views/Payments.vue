@@ -867,14 +867,16 @@ const refreshSuggestedInvoices = async () => {
 
   loadingSuggestedInvoices.value = true
   try {
-    const res = await paymentApi.getSuggestedInvoices(currentPaymentForInvoices.value.id)
-    if (res.data.success && res.data.data) {
-      suggestedInvoices.value = res.data.data
+    const res = await paymentApi.getSuggestedInvoices(currentPaymentForInvoices.value.id, { debug: true })
+    suggestedInvoices.value = res.data.success && res.data.data ? res.data.data : []
+    if (suggestedInvoices.value.length > 0) {
+      ElMessage.success(`推荐到 ${suggestedInvoices.value.length} 张可关联的发票`)
     } else {
-      suggestedInvoices.value = []
+      ElMessage.warning('没有找到可推荐的发票')
     }
   } catch {
     suggestedInvoices.value = []
+    ElMessage.error('推荐匹配失败')
   } finally {
     loadingSuggestedInvoices.value = false
   }

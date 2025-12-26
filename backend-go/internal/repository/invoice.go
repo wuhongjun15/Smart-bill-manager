@@ -1,6 +1,9 @@
 package repository
 
 import (
+	"fmt"
+	"regexp"
+	"strconv"
 	"smart-bill-manager/internal/models"
 	"smart-bill-manager/pkg/database"
 
@@ -11,6 +14,28 @@ type InvoiceRepository struct{}
 
 func NewInvoiceRepository() *InvoiceRepository {
 	return &InvoiceRepository{}
+}
+
+var invoiceDatePrefixRegex = regexp.MustCompile(`(\d{4})\D+(\d{1,2})\D+(\d{1,2})`)
+
+func normalizeDatePrefix(s string) string {
+	if len(s) >= 10 && s[4] == '-' && s[7] == '-' {
+		// Likely YYYY-MM-DD...
+		return s[:10]
+	}
+	if len(s) >= 10 && s[4] == '/' && s[7] == '/' {
+		// Likely YYYY/MM/DD...
+		return s[:10]
+	}
+	if m := invoiceDatePrefixRegex.FindStringSubmatch(s); len(m) == 4 {
+		month, err1 := strconv.Atoi(m[2])
+		day, err2 := strconv.Atoi(m[3])
+		if err1 != nil || err2 != nil || month < 1 || month > 12 || day < 1 || day > 31 {
+			return ""
+		}
+		return fmt.Sprintf("%s-%02d-%02d", m[1], month, day)
+	}
+	return ""
 }
 
 func (r *InvoiceRepository) Create(invoice *models.Invoice) error {
@@ -143,10 +168,10 @@ func (r *InvoiceRepository) SuggestPayments(invoice *models.Invoice, limit int) 
 	}
 	
 	// If invoice has date, prioritize payments from similar timeframe
-	if invoice.InvoiceDate != nil && len(*invoice.InvoiceDate) >= 10 {
-		// Extract date part (first 10 characters: YYYY-MM-DD)
-		dateStr := (*invoice.InvoiceDate)[:10]
-		query = query.Where("transaction_time LIKE ?", dateStr+"%")
+	if invoice.InvoiceDate != nil && *invoice.InvoiceDate != "" {
+		if datePrefix := normalizeDatePrefix(*invoice.InvoiceDate); datePrefix != "" {
+			query = query.Where("transaction_time LIKE ?", datePrefix+"%")
+		}
 	}
 	
 	// Default: newest first (service will apply scoring on top)
