@@ -158,24 +158,24 @@ docker-compose down
 - `app-data`: 数据库文件
 - `app-uploads`: 上传的文件
 
-#### OpenVINO（Intel CPU/iGPU）OCR 加速（Docker）
+#### OCR（RapidOCR v3，CPU）
 
-本项目支持在 Docker 中使用 OpenVINO 做 OCR 推理（适合 Intel CPU / iGPU，例如 UHD Graphics 630）。
+默认使用 `RapidOCR v3 + onnxruntime` 在 CPU 上进行识别（最稳定、最少依赖）。
 
-推荐环境变量：
-- `SBM_OCR_ENGINE=openvino`
-- `SBM_OPENVINO_DEVICE=CPU|GPU|AUTO`（默认 `CPU`；如要用 iGPU 通常需要额外映射设备）
-- `OPENVINO_CACHE_DIR=/app/backend/data/openvino-cache`（把编译缓存放进 `app-data`，避免重启后重复编译）
-
-iGPU（GPU 插件）通常还需要：
-- 容器映射 `/dev/dri`（例如 `--device /dev/dri:/dev/dri` 或在 compose 里配置）
+可用环境变量：
+- `SBM_OCR_ENGINE=rapidocr`（默认）
+- `SBM_PDF_TEXT_EXTRACTOR=pymupdf|off`（默认 `pymupdf`：优先用 PyMuPDF 提取 PDF 内嵌文本；失败再走 OCR）
+- `SBM_PDF_OCR_DPI=220`（可选，范围建议 `120-450`；更高更清晰但更慢）
+- `SBM_RAPIDOCR_MULTIPASS=1`（可选；对 `profile=pdf` 默认启用，用多种增强版本选最优结果）
+- `SBM_RAPIDOCR_ROTATE180=true`（可选；对 `profile=pdf` 默认启用，兼容倒置扫描）
+- `SBM_OCR_DEBUG=true`（可选；返回更多 OCR 变体评分信息，便于排查）
 
 #### 发票购销方 ROI（可选）
 
 默认情况下，发票 PDF 解析会对 **整页图片** 做 OCR，并仅注入二维码可稳定提取的抬头字段（如发票代码/号码/日期/价税合计）。
 
 如果你希望额外启用“购买方/销售方”区域 ROI 识别（可能提升，也可能因为注入片段导致解析受干扰），可设置：
-- `SBM_INVOICE_PARTY_ROI=true`
+- `SBM_INVOICE_PARTY_ROI=auto|true|false`（默认 `auto`：仅在主 OCR 未能识别购销方时再尝试 ROI）
 
 ### 方式三：从源码构建
 

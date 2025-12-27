@@ -55,6 +55,15 @@ const (
 	pdfOCRDPI = 220
 )
 
+func getPDFOCRDPI() int {
+	if v := strings.TrimSpace(os.Getenv("SBM_PDF_OCR_DPI")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 120 && n <= 450 {
+			return n
+		}
+	}
+	return pdfOCRDPI
+}
+
 var (
 	// Compiled regex patterns for better performance
 	amountRegex = regexp.MustCompile(amountPattern)
@@ -95,21 +104,16 @@ func NewOCRService() *OCRService {
 
 func getOCREngine() string {
 	engine := strings.ToLower(strings.TrimSpace(os.Getenv("SBM_OCR_ENGINE")))
-	if engine == "" {
-		engine = "rapidocr"
+	// This project ships with RapidOCR v3 (onnxruntime CPU) as the default/recommended engine.
+	// Other engines are intentionally not supported in the default Docker image.
+	if engine != "rapidocr" {
+		return "rapidocr"
 	}
-	return engine
+	return "rapidocr"
 }
 
 func ocrEngineInstallHint(engine string) string {
-	switch engine {
-	case "openvino":
-		return "install openvino and rapidocr-openvino"
-	case "rapidocr":
-		fallthrough
-	default:
-		return "install rapidocr==3.* and onnxruntime"
-	}
+	return "install rapidocr==3.* and onnxruntime"
 }
 
 // PaymentExtractedData represents extracted payment information
@@ -135,19 +139,22 @@ type InvoiceExtractedData struct {
 
 // OCRCLIResponse represents the response from the Python OCR CLI script.
 type OCRCLIResponse struct {
-	Success   bool         `json:"success"`
-	Text      string       `json:"text"`
-	Lines     []OCRCLILine `json:"lines"`
-	LineCount int          `json:"line_count"`
-	Engine    string       `json:"engine,omitempty"`
-	Profile   string       `json:"profile,omitempty"`
-	// OpenVINO debug fields (only present when SBM_OCR_ENGINE=openvino).
-	DeviceRequested string   `json:"device_requested,omitempty"`
-	DeviceEffective string   `json:"device_effective,omitempty"`
-	AvailableDevices []string `json:"available_devices,omitempty"`
-	CacheDir         string   `json:"cache_dir,omitempty"`
-	OpenVINO         string   `json:"openvino,omitempty"`
-	Error     string       `json:"error,omitempty"`
+	Success   bool            `json:"success"`
+	Text      string          `json:"text"`
+	Lines     []OCRCLILine    `json:"lines"`
+	LineCount int             `json:"line_count"`
+	Engine    string          `json:"engine,omitempty"`
+	Profile   string          `json:"profile,omitempty"`
+	Variant   string          `json:"variant,omitempty"`
+	Variants  []OCRCLIVariant `json:"variants,omitempty"`
+	Error     string          `json:"error,omitempty"`
+}
+
+type OCRCLIVariant struct {
+	Variant string  `json:"variant"`
+	Score   float64 `json:"score"`
+	Lines   int     `json:"lines"`
+	Chars   int     `json:"chars"`
 }
 
 // OCRCLILine represents a single line of OCR result
@@ -231,11 +238,8 @@ func (s *OCRService) recognizeWithRapidOCRArgs(imagePath string, extraArgs []str
 	if profile == "" {
 		profile = "default"
 	}
-	if result.DeviceRequested != "" || result.DeviceEffective != "" {
-		fmt.Printf("[OCR] OCR extracted %d lines, %d characters (engine=%s profile=%s device=%s->%s openvino=%s devices=%v cache=%s)\n",
-			result.LineCount, len(result.Text), engine, profile,
-			result.DeviceRequested, result.DeviceEffective, result.OpenVINO, result.AvailableDevices, result.CacheDir,
-		)
+	if result.Variant != "" {
+		fmt.Printf("[OCR] OCR extracted %d lines, %d characters (engine=%s profile=%s variant=%s)\n", result.LineCount, len(result.Text), engine, profile, result.Variant)
 	} else {
 		fmt.Printf("[OCR] OCR extracted %d lines, %d characters (engine=%s profile=%s)\n", result.LineCount, len(result.Text), engine, profile)
 	}
@@ -291,6 +295,24 @@ func (s *OCRService) findPaddleOCRScript() string {
 	return ""
 }
 
+// findPDFTextScript locates the pdf_text_cli.py script (PyMuPDF PDF text extraction).
+func (s *OCRService) findPDFTextScript() string {
+	locations := []string{
+		"scripts/pdf_text_cli.py",
+		"../scripts/pdf_text_cli.py",
+		"/app/scripts/pdf_text_cli.py",
+		"./pdf_text_cli.py",
+	}
+
+	for _, loc := range locations {
+		if _, err := os.Stat(loc); err == nil {
+			return loc
+		}
+	}
+
+	return ""
+}
+
 // checkPythonModule checks if a Python module is available using both python3 and python
 func (s *OCRService) checkPythonModule(moduleName string) bool {
 	// Try with python3 first
@@ -329,26 +351,12 @@ func (s *OCRService) isRapidOCRAvailable() bool {
 		return false
 	}
 
-	engine := getOCREngine()
-
-	switch engine {
-	case "openvino":
-		// OpenVINO-based OCR (PP-OCR models).
-		if s.checkPythonModule("openvino") && s.checkPythonModule("rapidocr_openvino") {
-			return true
-		}
-		fmt.Printf("[OCR] OpenVINO OCR is not available\n")
-		return false
-	case "rapidocr":
-		fallthrough
-	default:
-		// RapidOCR v3 requires both rapidocr and onnxruntime
-		if s.checkPythonModule("rapidocr") && s.checkPythonModule("onnxruntime") {
-			return true
-		}
-		fmt.Printf("[OCR] RapidOCR v3 is not available\n")
-		return false
+	// RapidOCR v3 requires both rapidocr and onnxruntime.
+	if s.checkPythonModule("rapidocr") && s.checkPythonModule("onnxruntime") {
+		return true
 	}
+	fmt.Printf("[OCR] RapidOCR v3 is not available\n")
+	return false
 }
 
 // RecognizePaymentScreenshot performs OCR for payment screenshots (RapidOCR v3 only).
@@ -414,6 +422,93 @@ func (s *OCRService) isGarbledText(text string) bool {
 	return validRatio < 0.5
 }
 
+type PDFTextCLIResponse struct {
+	Success   bool   `json:"success"`
+	Text      string `json:"text"`
+	PageCount int    `json:"page_count,omitempty"`
+	Extractor string `json:"extractor,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+func (s *OCRService) extractTextWithPyMuPDF(pdfPath string) (string, error) {
+	fmt.Printf("[OCR] Attempting PDF text extraction with PyMuPDF: %s\n", pdfPath)
+
+	scriptPath := s.findPDFTextScript()
+	if scriptPath == "" {
+		return "", fmt.Errorf("pdf_text_cli.py script not found")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	run := func(python string) ([]byte, error) {
+		cmd := exec.CommandContext(ctx, python, scriptPath, pdfPath)
+		return cmd.CombinedOutput()
+	}
+
+	output, execErr := run("python3")
+	if execErr != nil {
+		if altOut, altErr := run("python"); altErr == nil || len(altOut) > 0 {
+			output = altOut
+			execErr = altErr
+		}
+	}
+
+	var result PDFTextCLIResponse
+	if err := unmarshalPossiblyNoisyJSON(output, &result); err != nil {
+		if execErr != nil {
+			return "", fmt.Errorf("failed to execute PyMuPDF CLI: %w (output: %s)", execErr, string(output))
+		}
+		return "", fmt.Errorf("failed to parse PyMuPDF CLI output: %w (output: %s)", err, string(output))
+	}
+
+	if !result.Success {
+		return "", fmt.Errorf("PyMuPDF error: %s", result.Error)
+	}
+
+	fmt.Printf("[OCR] PyMuPDF extracted %d characters from %d pages (%s)\n", len(result.Text), result.PageCount, result.Extractor)
+	return result.Text, nil
+}
+
+func (s *OCRService) isLikelyUsefulInvoicePDFText(text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false
+	}
+	if s.isGarbledText(text) {
+		return false
+	}
+
+	minChars := 160
+	if v := strings.TrimSpace(os.Getenv("SBM_PDF_TEXT_MIN_CHARS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			minChars = n
+		}
+	}
+
+	minHanRatio := 0.01
+	if v := strings.TrimSpace(os.Getenv("SBM_PDF_TEXT_MIN_HAN_RATIO")); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil && f >= 0 && f <= 1 {
+			minHanRatio = f
+		}
+	}
+
+	if len([]rune(text)) >= minChars && s.getChineseCharRatio(text) >= minHanRatio {
+		return true
+	}
+
+	keywords := []string{
+		"发票代码", "发票号码", "开票日期", "校验码", "价税合计", "合计金额", "购买方", "销售方",
+	}
+	for _, k := range keywords {
+		if strings.Contains(text, k) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // extractTextWithPdftotext uses poppler's pdftotext for better CID font support
 func (s *OCRService) extractTextWithPdftotext(pdfPath string) (string, error) {
 	fmt.Printf("[OCR] Attempting text extraction with pdftotext: %s\n", pdfPath)
@@ -454,9 +549,39 @@ func (s *OCRService) extractTextWithPdftotext(pdfPath string) (string, error) {
 	return text, nil
 }
 
-// RecognizePDF extracts text from PDF using RapidOCR v3 only (no PDF text extraction).
+// RecognizePDF extracts invoice text from PDF with PyMuPDF as a fast pre-step, falling back to RapidOCR.
 func (s *OCRService) RecognizePDF(pdfPath string) (string, error) {
 	fmt.Printf("[OCR] Starting PDF recognition for: %s\n", pdfPath)
+
+	if strings.TrimSpace(pdfPath) == "" {
+		return "", fmt.Errorf("empty PDF path")
+	}
+
+	// Validate PDF file exists and is a regular file
+	fileInfo, err := os.Stat(pdfPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to access PDF file: %w", err)
+	}
+	if !fileInfo.Mode().IsRegular() {
+		return "", fmt.Errorf("PDF path is not a regular file")
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("SBM_PDF_TEXT_EXTRACTOR")))
+	if mode == "" {
+		mode = "pymupdf"
+	}
+
+	if mode != "off" && mode != "false" && mode != "0" {
+		if text, err := s.extractTextWithPyMuPDF(pdfPath); err == nil {
+			if s.isLikelyUsefulInvoicePDFText(text) {
+				return text, nil
+			}
+			fmt.Printf("[OCR] PyMuPDF text looks incomplete; falling back to RapidOCR image OCR\n")
+		} else {
+			fmt.Printf("[OCR] PyMuPDF extraction failed; falling back to RapidOCR image OCR: %v\n", err)
+		}
+	}
+
 	fmt.Printf("[OCR] Using OCR CLI for PDF pages\n")
 	return s.pdfToImageOCR(pdfPath)
 }
@@ -572,7 +697,7 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 	// pdftoppm outputs files with pattern: outputPrefix-N.png where N is page number
 	outputPrefix := filepath.Join(tempDir, "page")
 	// Use grayscale output to improve OCR recall on colored text (common in invoices).
-	cmd := exec.Command("pdftoppm", "-png", "-gray", "-r", strconv.Itoa(pdfOCRDPI), pdfPath, outputPrefix)
+	cmd := exec.Command("pdftoppm", "-png", "-gray", "-r", strconv.Itoa(getPDFOCRDPI()), pdfPath, outputPrefix)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to convert PDF to images with pdftoppm: %w (output: %s)", err, string(output))
@@ -604,15 +729,6 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 		if qrInjected != "" {
 			parts = append(parts, qrInjected)
 		}
-		// Optional ROI injection (disabled by default): can be enabled to help buyer/seller,
-		// but may also inject partial names that interfere with parsing.
-		enablePartyROI := strings.ToLower(strings.TrimSpace(os.Getenv("SBM_INVOICE_PARTY_ROI")))
-		if enablePartyROI == "1" || enablePartyROI == "true" || enablePartyROI == "yes" {
-			partyInjected, _, _ := s.injectInvoicePartiesFromRegions(tempDir, imgPath)
-			if partyInjected != "" {
-				parts = append(parts, partyInjected)
-			}
-		}
 
 		text, err := s.RecognizeWithRapidOCRProfile(imgPath, "pdf")
 		if err != nil {
@@ -636,6 +752,27 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 				text = text + "\n" + extra
 			} else if extraErr != nil {
 				fmt.Printf("[OCR] Extra header OCR failed for page %d: %v\n", i+1, extraErr)
+			}
+		}
+
+		// Buyer/seller ROI fallback:
+		// - true/1/yes: always try ROI injection
+		// - auto (default): try ROI only when buyer/seller seems missing from main OCR text
+		roiMode := strings.ToLower(strings.TrimSpace(os.Getenv("SBM_INVOICE_PARTY_ROI")))
+		if roiMode == "" {
+			roiMode = "auto"
+		}
+		needROI := false
+		if roiMode == "1" || roiMode == "true" || roiMode == "yes" {
+			needROI = true
+		} else if roiMode == "auto" {
+			buyer, seller := s.extractBuyerAndSellerByPosition(text)
+			needROI = buyer == nil || seller == nil
+		}
+		if needROI {
+			partyInjected, _, _ := s.injectInvoicePartiesFromRegions(tempDir, imgPath)
+			if partyInjected != "" {
+				text = partyInjected + "\n" + text
 			}
 		}
 
@@ -2149,12 +2286,12 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	// Extract amount - support newline-separated formats like "（小写）\n¥\n3080.00"
 	amountRegexes := []*regexp.Regexp{
 		// Prefer tax-inclusive total (价税合计).
-		regexp.MustCompile(`价税合计[（(]小写[)）][：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
-		regexp.MustCompile(`总计[：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
+		regexp.MustCompile(`价税合计\s*[（(]?\s*小写\s*[)）]?\s*[：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
+		regexp.MustCompile(`总计\s*[：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
 		// "合计金额(小写)" is usually tax-exclusive; keep as fallback.
-		regexp.MustCompile(`合计金额[（(]小写[)）][：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
-		regexp.MustCompile(`[（(]小写[)）][：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
-		regexp.MustCompile(`金额[：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
+		regexp.MustCompile(`合计金额\s*[（(]?\s*小写\s*[)）]?\s*[：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
+		regexp.MustCompile(`[（(]?\s*小写\s*[)）]?\s*[：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
+		regexp.MustCompile(`金额\s*[：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
 	}
 	for _, re := range amountRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
