@@ -73,13 +73,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG ENABLE_INTEL_GPU_RUNTIME=false
 RUN if [ "$ENABLE_INTEL_GPU_RUNTIME" = "true" ]; then \
       set -eux; \
-      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i 's/^Components:.*$/Components: main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources; \
-      elif [ -f /etc/apt/sources.list ]; then \
-        sed -i 's/ main$/ main contrib non-free non-free-firmware/' /etc/apt/sources.list || true; \
+      try_install() { \
+        apt-get update -o Acquire::Retries=3 || return 1; \
+        # OpenCL ICD (required for many iGPU paths) + clinfo for easy diagnostics. \
+        apt-get install -y --no-install-recommends intel-opencl-icd clinfo || \
+          apt-get install -y --no-install-recommends intel-opencl-icd || return 1; \
+        # Level Zero runtime (optional, package names vary by distro). \
+        apt-get install -y --no-install-recommends level-zero libze1 || true; \
+        apt-get install -y --no-install-recommends intel-level-zero-gpu || true; \
+        return 0; \
+      }; \
+      if ! try_install; then \
+        echo "Intel GPU runtime install failed; enabling contrib/non-free and retrying..." >&2; \
+        if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+          sed -i -E 's/^(Components:).*/\\1 main contrib non-free non-free-firmware/' /etc/apt/sources.list.d/debian.sources || true; \
+        fi; \
+        if [ -f /etc/apt/sources.list ]; then \
+          sed -i -E 's/^(deb\\s+[^ ]+\\s+[^ ]+\\s+)main(\\s*)$/\\1main contrib non-free non-free-firmware\\2/' /etc/apt/sources.list || true; \
+        fi; \
+        rm -rf /var/lib/apt/lists/*; \
+        try_install; \
       fi; \
-      apt-get update; \
-      apt-get install -y --no-install-recommends intel-opencl-icd clinfo || apt-get install -y --no-install-recommends intel-opencl-icd; \
       rm -rf /var/lib/apt/lists/*; \
     fi
 
