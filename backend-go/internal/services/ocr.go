@@ -583,8 +583,9 @@ func (s *OCRService) injectInvoicePartiesFromRegions(tempDir, imgPath string) (i
 	// Heuristic crops (A4 invoice layouts):
 	// - Buyer: upper-left block under the QR code
 	// - Seller: bottom-left block
-	buyerText, err1 := s.ocrInvoiceRegion(tempDir, imgPath, "buyer", 0.03, 0.16, 0.62, 0.44)
-	sellerText, err2 := s.ocrInvoiceRegion(tempDir, imgPath, "seller", 0.03, 0.64, 0.72, 0.90)
+	// Widened slightly to better cover “名称/纳税人识别号/地址电话/开户行账号” lines.
+	buyerText, err1 := s.ocrInvoiceRegion(tempDir, imgPath, "buyer", 0.02, 0.12, 0.78, 0.50)
+	sellerText, err2 := s.ocrInvoiceRegion(tempDir, imgPath, "seller", 0.02, 0.56, 0.86, 0.92)
 
 	if err1 != nil {
 		fmt.Printf("[OCR] Buyer ROI OCR failed: %v\n", err1)
@@ -593,8 +594,8 @@ func (s *OCRService) injectInvoicePartiesFromRegions(tempDir, imgPath string) (i
 		fmt.Printf("[OCR] Seller ROI OCR failed: %v\n", err2)
 	}
 
-	buyerName, buyerTax := extractPartyFromROICandidate(buyerText)
-	sellerName, sellerTax := extractPartyFromROICandidate(sellerText)
+	buyerName, buyerTax := extractPartyFromROICandidate(buyerText, "buyer")
+	sellerName, sellerTax := extractPartyFromROICandidate(sellerText, "seller")
 
 	var parts []string
 	if buyerName != "" {
@@ -616,7 +617,7 @@ func (s *OCRService) injectInvoicePartiesFromRegions(tempDir, imgPath string) (i
 	return injected, buyerOK, sellerOK
 }
 
-func extractPartyFromROICandidate(text string) (name string, taxID string) {
+func extractPartyFromROICandidate(text string, role string) (name string, taxID string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return "", ""
@@ -642,7 +643,8 @@ func extractPartyFromROICandidate(text string) (name string, taxID string) {
 		lines := strings.Split(text, "\n")
 		for i := 0; i < len(lines); i++ {
 			l := strings.TrimSpace(lines[i])
-			if l == "名称" || strings.ReplaceAll(l, " ", "") == "名称" || strings.ReplaceAll(l, " ", "") == "名称:" || strings.ReplaceAll(l, " ", "") == "名称：" {
+			compact := strings.ReplaceAll(l, " ", "")
+			if compact == "名称" || compact == "名称:" || compact == "名称：" || compact == "名" || compact == "称" {
 				if i+1 < len(lines) {
 					candidate := strings.TrimSpace(lines[i+1])
 					if candidate != "" && !strings.Contains(candidate, "地址") && !strings.Contains(candidate, "电话") && len([]rune(candidate)) <= MaxMerchantNameLength {
@@ -654,7 +656,148 @@ func extractPartyFromROICandidate(text string) (name string, taxID string) {
 		}
 	}
 
+	// Heuristic fallback: pick the best Chinese-looking line(s) as name.
+	if name == "" {
+		name = pickBestPartyNameHeuristic(text, role)
+	}
+
 	return name, taxID
+}
+
+func pickBestPartyNameHeuristic(text string, role string) string {
+	lines := make([]string, 0, 32)
+	for _, l := range strings.Split(text, "\n") {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		lines = append(lines, l)
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+
+	badContains := []string{
+		"国家税务总局", "税务局", "密码区", "校验码", "发票代码", "发票号码", "开票日期",
+		"地址", "电话", "开户行", "账号", "纳税人识别号", "统一社会信用代码",
+	}
+
+	sellerBonus := []string{"公司", "有限", "集团", "商贸", "商业", "零售", "超市", "沃尔玛", "门店"}
+	buyerBonus := []string{"先生", "女士", "个人"}
+
+	containsAny := func(s string, arr []string) bool {
+		for _, k := range arr {
+			if strings.Contains(s, k) {
+				return true
+			}
+		}
+		return false
+	}
+
+	countHan := func(s string) int {
+		n := 0
+		for _, r := range s {
+			if unicode.Is(unicode.Han, r) {
+				n++
+			}
+		}
+		return n
+	}
+
+	cleanLine := func(s string) string {
+		s = strings.TrimSpace(s)
+		// Remove leading labels like “购买方/销售方”.
+		s = regexp.MustCompile(`^(购买方|销售方)\s*`).ReplaceAllString(s, "")
+		s = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(s, ":"), "："))
+		return strings.TrimSpace(s)
+	}
+
+	best := ""
+	bestScore := -1
+
+	scoreCandidate := func(s string) int {
+		s = cleanLine(s)
+		if s == "" {
+			return -1
+		}
+		if containsAny(s, badContains) {
+			return -1
+		}
+		han := countHan(s)
+		if han < 2 {
+			return -1
+		}
+		// Avoid “名称/纳税人识别号” itself.
+		if s == "名称" || s == "名" || s == "称" {
+			return -1
+		}
+		score := han * 10
+		// Penalize too many digits/symbols.
+		digits := 0
+		for _, r := range s {
+			if r >= '0' && r <= '9' {
+				digits++
+			}
+		}
+		score -= digits * 5
+		if len([]rune(s)) > MaxMerchantNameLength {
+			score -= 30
+		}
+		if role == "seller" && containsAny(s, sellerBonus) {
+			score += 40
+		}
+		if role == "buyer" && containsAny(s, buyerBonus) {
+			score += 30
+		}
+		// Buyer names are often short; seller names usually longer.
+		if role == "buyer" && han <= 6 {
+			score += 15
+		}
+		return score
+	}
+
+	// Evaluate single lines.
+	for _, l := range lines {
+		if sc := scoreCandidate(l); sc > bestScore {
+			bestScore = sc
+			best = cleanLine(l)
+		}
+	}
+
+	// Evaluate concatenation of up to 3 consecutive lines (handles broken long company names).
+	for i := 0; i < len(lines); i++ {
+		joined := ""
+		for j := i; j < len(lines) && j < i+3; j++ {
+			part := cleanLine(lines[j])
+			if part == "" || containsAny(part, badContains) {
+				break
+			}
+			// If the part is mostly non-Chinese and very short, stop concatenating.
+			if countHan(part) == 0 && len([]rune(part)) <= 2 {
+				break
+			}
+			if joined == "" {
+				joined = part
+			} else {
+				joined = joined + part
+			}
+			if sc := scoreCandidate(joined); sc > bestScore {
+				bestScore = sc
+				best = joined
+			}
+		}
+	}
+
+	// Extra buyer fallback: look for “X先生/女士”.
+	if role == "buyer" && best != "" && !containsAny(best, buyerBonus) {
+		re := regexp.MustCompile(`([\p{Han}]{1,4}(先生|女士))`)
+		if m := re.FindStringSubmatch(text); len(m) > 1 {
+			return m[1]
+		}
+	}
+
+	return best
 }
 
 func (s *OCRService) ocrInvoiceRegion(tempDir, imgPath, tag string, x0p, y0p, x1p, y1p float64) (string, error) {
@@ -702,6 +845,11 @@ func (s *OCRService) ocrInvoiceRegion(tempDir, imgPath, tag string, x0p, y0p, x1
 		return "", err
 	}
 
+	// Upscale ROI a bit for small fonts; cheap and improves recall.
+	if bin.Bounds().Dx() < 1300 && bin.Bounds().Dy() < 900 {
+		bin = scaleGrayNearest(bin, 2, 1800, 1200)
+	}
+
 	outPath := filepath.Join(tempDir, fmt.Sprintf("roi-%s-%s.png", tag, filepath.Base(imgPath)))
 	of, err := os.Create(outPath)
 	if err != nil {
@@ -715,6 +863,33 @@ func (s *OCRService) ocrInvoiceRegion(tempDir, imgPath, tag string, x0p, y0p, x1
 
 	// Lower thresholds for small text in ROI.
 	return s.recognizeWithRapidOCRArgs(outPath, []string{"--profile", "pdf", "--min-height", "5", "--text-score", "0.25"})
+}
+
+func scaleGrayNearest(src *image.Gray, scale int, maxW, maxH int) *image.Gray {
+	if scale <= 1 {
+		return src
+	}
+	w := src.Bounds().Dx() * scale
+	h := src.Bounds().Dy() * scale
+	if w > maxW || h > maxH {
+		// Compute a smaller scale that still upscales a bit.
+		scale = 2
+		w = src.Bounds().Dx() * scale
+		h = src.Bounds().Dy() * scale
+		if w > maxW || h > maxH {
+			return src
+		}
+	}
+
+	dst := image.NewGray(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		sy := y / scale
+		for x := 0; x < w; x++ {
+			sx := x / scale
+			dst.SetGray(x, y, src.GrayAt(sx, sy))
+		}
+	}
+	return dst
 }
 
 func binarizeRegion(src image.Image, rect image.Rectangle) (*image.Gray, error) {
