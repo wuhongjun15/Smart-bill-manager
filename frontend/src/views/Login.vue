@@ -82,8 +82,24 @@ const handleLogin = async () => {
   margin-bottom: 22px;
 }
 
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .field {
-  margin-bottom: 14px;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.field :deep(.p-input-icon-left) {
+  width: 100%;
+}
+
+.field :deep(.p-inputtext) {
+  width: 100%;
 }
 
 .submit-btn {
@@ -94,6 +110,10 @@ const handleLogin = async () => {
 }
 
 :deep(.p-password input) {
+  width: 100%;
+}
+
+:deep(.p-password) {
   width: 100%;
 }
 

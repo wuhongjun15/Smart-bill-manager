@@ -20,6 +20,10 @@
   
   /* Monospace Font */
   --font-mono: 'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+
+  /* Base sizing (closer to PrimeVue templates) */
+  font-size: 14px;
+  color-scheme: light;
   
   /* App tokens mapped to PrimeVue theme vars */
   --color-text-primary: var(--p-text-color);

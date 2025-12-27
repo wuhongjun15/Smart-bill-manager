@@ -1,6 +1,6 @@
 <template>
   <div class="layout">
-    <aside class="sidebar sbm-surface" :class="{ collapsed: isCollapsed }">
+    <aside class="sidebar" :class="{ collapsed: isCollapsed }">
       <div class="brand" @click="router.push('/dashboard')">
         <div class="brand-logo" aria-hidden="true">
           <i class="pi pi-box" />
@@ -75,7 +75,7 @@
       </div>
     </aside>
 
-    <div class="content sbm-surface">
+    <div class="content">
       <header class="topbar">
         <div class="topbar-left">
           <div class="page-kicker">Overview</div>
@@ -181,31 +181,54 @@ const toggleUserMenu = (event: MouseEvent) => {
 
 <style scoped>
 .layout {
-  min-height: 100vh;
+  min-height: calc(100vh - 40px);
+  height: calc(100vh - 40px);
+  max-height: 1040px;
   display: flex;
-  gap: 16px;
-  padding: 16px;
+  gap: 24px;
+  padding: 24px;
+  margin: 20px auto;
+  width: min(1440px, calc(100vw - 40px));
+  background: var(--p-surface-0);
+  border: 1px solid rgba(2, 6, 23, 0.08);
+  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 20%);
+  border-radius: 32px;
+  box-shadow: 0 25px 20px -5px rgba(0, 0, 0, 0.07), 0 10px 8px -6px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
 }
 
 .sidebar {
-  width: 96px;
+  width: 260px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   transition: width var(--transition-base);
   position: relative;
-  padding: 14px 10px;
+  padding: 20px 14px 14px;
+  border-radius: 24px;
+  background: var(--p-surface-50);
 }
 
 .sidebar.collapsed {
-  width: 96px;
+  width: 88px;
+}
+
+.sidebar.collapsed .brand {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar.collapsed .nav {
+  align-items: center;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .brand {
   height: 56px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   color: var(--p-text-color);
   font-size: 16px;
   font-weight: 800;
@@ -216,6 +239,7 @@ const toggleUserMenu = (event: MouseEvent) => {
   cursor: pointer;
   gap: 10px;
   user-select: none;
+  padding: 0 6px;
 }
 
 .brand-logo {
@@ -224,8 +248,9 @@ const toggleUserMenu = (event: MouseEvent) => {
   border-radius: 14px;
   display: grid;
   place-items: center;
-  background: rgba(2, 6, 23, 0.06);
-  color: rgba(2, 6, 23, 0.9);
+  background: var(--p-surface-0);
+  border: 1px solid var(--p-primary-color);
+  color: var(--p-primary-color);
 }
 
 .brand-text {
@@ -235,23 +260,22 @@ const toggleUserMenu = (event: MouseEvent) => {
 
 .nav {
   flex: 1;
-  padding: 10px 0;
+  padding: 18px 6px 10px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  align-items: center;
+  gap: 8px;
+  align-items: stretch;
 }
 
 .nav-item {
-  width: 44px;
   height: 44px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 0;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 14px;
+  border-radius: 12px;
   background: transparent;
   color: var(--p-text-muted-color);
   cursor: pointer;
@@ -261,8 +285,10 @@ const toggleUserMenu = (event: MouseEvent) => {
 }
 
 .sidebar.collapsed .nav-item {
+  width: 44px;
   justify-content: center;
   padding: 0;
+  margin: 0 auto;
 }
 
 .nav-item i {
@@ -274,8 +300,8 @@ const toggleUserMenu = (event: MouseEvent) => {
 }
 
 .nav-item.active {
-  background: rgba(2, 6, 23, 0.92);
-  color: white;
+  background: var(--p-primary-color);
+  color: var(--p-primary-contrast-color);
 }
 
 .nav-item.active::before {
@@ -305,14 +331,15 @@ const toggleUserMenu = (event: MouseEvent) => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border-radius: 22px;
+  height: 100%;
+  overflow: hidden;
 }
 
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 22px 8px;
+  padding: 10px 10px 0;
   position: relative;
   z-index: 20;
 }
@@ -333,9 +360,9 @@ const toggleUserMenu = (event: MouseEvent) => {
 .page-title {
   margin: 0;
   color: var(--p-text-color);
-  font-size: 30px;
-  font-weight: 900;
-  letter-spacing: -0.6px;
+  font-size: 32px;
+  font-weight: 650;
+  letter-spacing: -0.3px;
 }
 
 .topbar-center {
@@ -392,15 +419,20 @@ const toggleUserMenu = (event: MouseEvent) => {
 }
 
 .main {
-  padding: 14px 22px 22px;
+  padding: 18px 10px 10px;
   flex: 1;
   overflow: auto;
 }
 
 @media (max-width: 768px) {
   .layout {
-    padding: 10px;
-    gap: 10px;
+    height: 100vh;
+    min-height: 100vh;
+    margin: 0;
+    width: 100vw;
+    border-radius: 0;
+    padding: 12px;
+    gap: 12px;
   }
 
   .page-title {
