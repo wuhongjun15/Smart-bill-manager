@@ -586,24 +586,19 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 		fmt.Printf("[OCR] Processing page %d/%d\n", i+1, len(files))
 
 		qrInjected, qrHasHeader := s.injectInvoiceFieldsFromQRCode(imgPath)
-		partyInjected, buyerOK, sellerOK := s.injectInvoicePartiesFromRegions(tempDir, imgPath)
 
 		var parts []string
 		if qrInjected != "" {
 			parts = append(parts, qrInjected)
 		}
-		if partyInjected != "" {
-			parts = append(parts, partyInjected)
-		}
-
-		// If QR + ROI already provide core fields, skip expensive full-page OCR for speed.
-		if qrHasHeader && buyerOK && sellerOK {
-			text := strings.Join(parts, "\n")
-			fmt.Printf("[OCR] Skipping full-page OCR for page %d (QR+ROI core fields)\n", i+1)
-			fmt.Printf("[OCR] Extracted %d characters from page %d\n", len(text), i+1)
-			allText.WriteString(text)
-			allText.WriteString("\n")
-			continue
+		// Optional ROI injection (disabled by default): can be enabled to help buyer/seller,
+		// but may also inject partial names that interfere with parsing.
+		enablePartyROI := strings.ToLower(strings.TrimSpace(os.Getenv("SBM_INVOICE_PARTY_ROI")))
+		if enablePartyROI == "1" || enablePartyROI == "true" || enablePartyROI == "yes" {
+			partyInjected, _, _ := s.injectInvoicePartiesFromRegions(tempDir, imgPath)
+			if partyInjected != "" {
+				parts = append(parts, partyInjected)
+			}
 		}
 
 		text, err := s.RecognizeWithRapidOCRProfile(imgPath, "pdf")

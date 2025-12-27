@@ -85,29 +85,41 @@ def main():
 
                 device = args.device or os.getenv("SBM_OPENVINO_DEVICE") or "CPU"
                 device = str(device).strip().upper()
-                if device == "AUTO":
-                    device = "AUTO"
-                elif device not in ("CPU", "GPU"):
+                if device not in ("AUTO", "CPU", "GPU"):
                     device = "CPU"
 
                 cache_dir = os.getenv("OPENVINO_CACHE_DIR")
                 if cache_dir:
                     Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
+                ie = Core()
+                if cache_dir:
+                    ie.set_property({"CACHE_DIR": str(cache_dir)})
+
+                available_devices = []
+                try:
+                    available_devices = list(ie.available_devices)
+                except Exception:
+                    available_devices = []
+
+                requested_device = device
+                effective_device = device
+                if device == "GPU" and "GPU" not in available_devices:
+                    # Keep OCR working even if GPU plugin is not available in the container.
+                    effective_device = "CPU"
+                if device == "AUTO" and not available_devices:
+                    effective_device = "CPU"
+
                 # Patch OpenVINOInferSession to support device selection and caching.
                 class PatchedOpenVINOInferSession:
                     def __init__(self, config):
-                        ie = Core()
-                        if cache_dir:
-                            ie.set_property({"CACHE_DIR": str(cache_dir)})
-
                         model_path = Path(ov_utils.root_dir) / config["model_path"]
                         model_path = str(model_path)
                         if not Path(model_path).exists():
                             raise FileNotFoundError(f"{model_path} does not exists.")
 
                         model_onnx = ie.read_model(model_path)
-                        compile_model = ie.compile_model(model=model_onnx, device_name=device)
+                        compile_model = ie.compile_model(model=model_onnx, device_name=effective_device)
                         self.session = compile_model.create_infer_request()
 
                     def __call__(self, input_content):
@@ -115,6 +127,14 @@ def main():
                         return self.session.get_output_tensor().data
 
                 ov_utils.OpenVINOInferSession = PatchedOpenVINOInferSession
+                # IMPORTANT: submodules import OpenVINOInferSession into their own namespace,
+                # so we must patch them as well (otherwise it always uses CPU).
+                import rapidocr_openvino.ch_ppocr_v3_det.text_detect as det_mod
+                import rapidocr_openvino.ch_ppocr_v3_rec.text_recognize as rec_mod
+                import rapidocr_openvino.ch_ppocr_v2_cls.text_cls as cls_mod
+                det_mod.OpenVINOInferSession = PatchedOpenVINOInferSession
+                rec_mod.OpenVINOInferSession = PatchedOpenVINOInferSession
+                cls_mod.OpenVINOInferSession = PatchedOpenVINOInferSession
 
                 from rapidocr_openvino import RapidOCR as OV_RapidOCR
 
@@ -122,7 +142,8 @@ def main():
                 if args.profile == "pdf":
                     params.update(
                         {
-                            "det_limit_side_len": 2048,
+                            # Keep more pixels for small invoice fields.
+                            "det_limit_side_len": 4096,
                             "min_height": 10,
                             "text_score": 0.35,
                         }
@@ -149,7 +170,10 @@ def main():
                             "engine": f"rapidocr-openvino-{ro_version}",
                             "profile": args.profile,
                             "openvino": ov_version,
-                            "device": device,
+                            "device_requested": requested_device,
+                            "device_effective": effective_device,
+                            "available_devices": available_devices,
+                            "cache_dir": cache_dir or "",
                         },
                         ensure_ascii=False,
                     )
@@ -182,7 +206,10 @@ def main():
                         "engine": f"rapidocr-openvino-{ro_version}",
                         "profile": args.profile,
                         "openvino": ov_version,
-                        "device": device,
+                        "device_requested": requested_device,
+                        "device_effective": effective_device,
+                        "available_devices": available_devices,
+                        "cache_dir": cache_dir or "",
                     },
                     ensure_ascii=False,
                 )
