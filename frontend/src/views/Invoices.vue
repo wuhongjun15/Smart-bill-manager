@@ -111,18 +111,16 @@
           <i class="pi pi-cloud-upload" />
           <div class="sbm-dropzone-title">&#25299;&#25321; PDF/&#22270;&#29255; &#21040;&#27492;&#22788;&#65292;&#25110;&#28857;&#20987;&#36873;&#25321;</div>
           <div class="sbm-dropzone-sub">&#25903;&#25345; PDF&#12289;PNG&#12289;JPG&#65288;&#21487;&#25209;&#37327;&#65289;&#65292;&#21333;&#20010;&#25991;&#20214;&#26368;&#22823; 20MB</div>
-          <Button type="button" icon="pi pi-plus" :label="'\u9009\u62E9\u6587\u4EF6'" @click="invoiceUploader?.choose?.()" />
+          <Button type="button" icon="pi pi-plus" :label="'\u9009\u62E9\u6587\u4EF6'" @click.stop="chooseInvoiceFiles" />
         </div>
 
-        <FileUpload
-          ref="invoiceUploader"
-          class="sbm-fileupload-hidden"
-          name="files"
+        <input
+          ref="invoiceInput"
+          class="sbm-file-input-hidden"
+          type="file"
           accept="application/pdf,image/png,image/jpeg"
-          :multiple="true"
-          :maxFileSize="20_971_520"
-          :customUpload="true"
-          @select="onSelectFiles"
+          multiple
+          @change="onInvoiceInputChange"
         />
         <div v-if="selectedFiles.length > 0" class="file-list" @click.stop>
           <div v-for="(f, idx) in selectedFiles" :key="`${f.name}-${f.size}-${idx}`" class="file-row">
@@ -281,7 +279,6 @@ import Column from 'primevue/column'
 import DataTable from 'primevue/datatable'
 import Dialog from 'primevue/dialog'
 import Divider from 'primevue/divider'
-import FileUpload from 'primevue/fileupload'
 import Tab from 'primevue/tab'
 import TabList from 'primevue/tablist'
 import TabPanel from 'primevue/tabpanel'
@@ -307,19 +304,23 @@ const stats = ref<{ totalCount: number; totalAmount: number; bySource: Record<st
 const uploadModalVisible = ref(false)
 const uploading = ref(false)
 const selectedFiles = ref<File[]>([])
-const invoiceUploader = ref<any | null>(null)
+const invoiceInput = ref<HTMLInputElement | null>(null)
 
 const triggerInvoiceChoose = (event: MouseEvent) => {
   const target = event.target as HTMLElement | null
   if (!target) return
   if (target.closest('button') || target.closest('input') || target.closest('a')) return
-  invoiceUploader.value?.choose?.()
+  invoiceInput.value?.click()
+}
+
+const chooseInvoiceFiles = () => {
+  invoiceInput.value?.click()
 }
 
 const removeSelectedFile = (idx: number) => {
   selectedFiles.value = selectedFiles.value.filter((_, i) => i !== idx)
   if (selectedFiles.value.length === 0) {
-    invoiceUploader.value?.clear?.()
+    if (invoiceInput.value) invoiceInput.value.value = ''
   }
 }
 
@@ -358,13 +359,15 @@ const loadStats = async () => {
 
 const openUploadModal = () => {
   selectedFiles.value = []
-  invoiceUploader.value?.clear?.()
+  if (invoiceInput.value) invoiceInput.value.value = ''
   uploadModalVisible.value = true
 }
 
-const onSelectFiles = (event: any) => {
-  const files = Array.isArray(event?.files) ? (event.files as File[]) : []
+const onInvoiceInputChange = (event: Event) => {
+  const input = event.target as HTMLInputElement | null
+  const files = input?.files ? Array.from(input.files) : []
   addInvoiceFiles(files, { replace: true })
+  if (input) input.value = ''
 }
 
 const addInvoiceFiles = (files: File[], opts?: { replace?: boolean }) => {
@@ -742,64 +745,19 @@ onMounted(() => {
   position: relative;
 }
 
-.sbm-dropzone :deep(.p-fileupload) {
-  width: 100%;
-}
-
-.sbm-fileupload-hidden {
+.sbm-file-input-hidden {
   position: absolute;
   inset: 0;
   width: 1px;
   height: 1px;
   overflow: hidden;
   opacity: 0;
-}
-
-.sbm-fileupload-hidden :deep(.p-fileupload),
-.sbm-fileupload-hidden :deep(.p-fileupload-buttonbar),
-.sbm-fileupload-hidden :deep(.p-fileupload-content) {
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-}
-
-.sbm-dropzone :deep(.p-fileupload-buttonbar) {
-  background: transparent;
-  border: none;
-  padding: 0;
-  display: flex;
-  justify-content: center;
-}
-
-.sbm-dropzone :deep(.p-fileupload-content) {
-  background: transparent;
-  border: none;
-  padding: 0;
-  min-height: 160px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.sbm-dropzone :deep(.p-fileupload-file-list) {
-  display: none;
-}
-
-.sbm-dropzone :deep(.p-fileupload-files),
-.sbm-dropzone :deep(.p-fileupload-file),
-.sbm-dropzone :deep(.p-fileupload-file-name),
-.sbm-dropzone :deep(.p-fileupload-file-thumbnail),
-.sbm-dropzone :deep(.p-fileupload-file-details),
-.sbm-dropzone :deep(.p-fileupload-file-badge),
-.sbm-dropzone :deep(.p-fileupload-file-actions),
-.sbm-dropzone :deep(.p-fileupload-progressbar),
-.sbm-dropzone :deep(.p-progressbar) {
-  display: none !important;
+  pointer-events: none;
 }
 
 .sbm-dropzone-hero {
   width: 100%;
-  min-height: 140px;
+  min-height: clamp(104px, 16vh, 150px);
   display: flex;
   flex-direction: column;
   align-items: center;

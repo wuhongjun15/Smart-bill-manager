@@ -186,21 +186,15 @@
             <i class="pi pi-cloud-upload" />
             <div class="sbm-dropzone-title">&#25299;&#25321;&#22270;&#29255;&#21040;&#27492;&#22788;&#65292;&#25110;&#28857;&#20987;&#36873;&#25321;</div>
             <div class="sbm-dropzone-sub">&#25903;&#25345; PNG/JPG&#65292;&#26368;&#22823; 10MB</div>
-            <Button type="button" icon="pi pi-plus" :label="'\u9009\u62E9\u622A\u56FE'" @click="screenshotUploader?.choose?.()" />
+            <Button type="button" icon="pi pi-plus" :label="'\u9009\u62E9\u622A\u56FE'" @click.stop="chooseScreenshotFile" />
           </div>
 
-          <FileUpload
-            ref="screenshotUploader"
-            class="sbm-fileupload-hidden"
-            name="file"
+          <input
+            ref="screenshotInput"
+            class="sbm-file-input-hidden"
+            type="file"
             accept="image/png,image/jpeg"
-            :maxFileSize="10_485_760"
-            :customUpload="true"
-            :multiple="false"
-            :fileLimit="1"
-            :showUploadButton="false"
-            :showCancelButton="false"
-            @select="onScreenshotSelected"
+            @change="onScreenshotInputChange"
           />
 
           <div v-if="selectedScreenshotName" class="file-row" @click.stop>
@@ -450,7 +444,6 @@ import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
 import Divider from 'primevue/divider'
 import Dropdown from 'primevue/dropdown'
-import FileUpload from 'primevue/fileupload'
 import Image from 'primevue/image'
 import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
@@ -520,18 +513,22 @@ const selectedScreenshotName = ref('')
 const screenshotError = ref('')
 const ocrResult = ref<OcrExtractedData | null>(null)
 const uploadedPaymentId = ref<string | null>(null)
-const screenshotUploader = ref<any | null>(null)
+const screenshotInput = ref<HTMLInputElement | null>(null)
 
 const triggerScreenshotChoose = (event: MouseEvent) => {
   const target = event.target as HTMLElement | null
   if (!target) return
   if (target.closest('button') || target.closest('input') || target.closest('a')) return
-  screenshotUploader.value?.choose?.()
+  screenshotInput.value?.click()
+}
+
+const chooseScreenshotFile = () => {
+  screenshotInput.value?.click()
 }
 
 const setScreenshotFile = (file?: File) => {
   screenshotError.value = ''
-  screenshotUploader.value?.clear?.()
+  if (screenshotInput.value) screenshotInput.value.value = ''
 
   if (!file) {
     selectedScreenshotFile.value = null
@@ -566,13 +563,20 @@ const onScreenshotDrop = (event: DragEvent) => {
   setScreenshotFile(file)
 }
 
+const onScreenshotInputChange = (event: Event) => {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  setScreenshotFile(file)
+  if (input) input.value = ''
+}
+
 const clearSelectedScreenshot = () => {
   selectedScreenshotFile.value = null
   selectedScreenshotName.value = ''
   screenshotError.value = ''
   ocrResult.value = null
   uploadedPaymentId.value = null
-  screenshotUploader.value?.clear?.()
+  if (screenshotInput.value) screenshotInput.value.value = ''
 }
 
 const ocrForm = reactive({
@@ -769,11 +773,6 @@ const handleDelete = async (id: string) => {
 const openScreenshotModal = () => {
   resetScreenshotUploadState()
   uploadScreenshotModalVisible.value = true
-}
-
-const onScreenshotSelected = (event: any) => {
-  const file: File | undefined = event?.files?.[0]
-  setScreenshotFile(file)
 }
 
 const handleScreenshotUpload = async () => {
@@ -1134,64 +1133,19 @@ onMounted(() => {
   position: relative;
 }
 
-.sbm-dropzone :deep(.p-fileupload) {
-  width: 100%;
-}
-
-.sbm-fileupload-hidden {
+.sbm-file-input-hidden {
   position: absolute;
   inset: 0;
   width: 1px;
   height: 1px;
   overflow: hidden;
   opacity: 0;
-}
-
-.sbm-fileupload-hidden :deep(.p-fileupload),
-.sbm-fileupload-hidden :deep(.p-fileupload-buttonbar),
-.sbm-fileupload-hidden :deep(.p-fileupload-content) {
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-}
-
-.sbm-dropzone :deep(.p-fileupload-buttonbar) {
-  background: transparent;
-  border: none;
-  padding: 0;
-  display: flex;
-  justify-content: center;
-}
-
-.sbm-dropzone :deep(.p-fileupload-content) {
-  background: transparent;
-  border: none;
-  padding: 0;
-  min-height: 120px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.sbm-dropzone :deep(.p-fileupload-file-list) {
-  display: none;
-}
-
-.sbm-dropzone :deep(.p-fileupload-files),
-.sbm-dropzone :deep(.p-fileupload-file),
-.sbm-dropzone :deep(.p-fileupload-file-name),
-.sbm-dropzone :deep(.p-fileupload-file-thumbnail),
-.sbm-dropzone :deep(.p-fileupload-file-details),
-.sbm-dropzone :deep(.p-fileupload-file-badge),
-.sbm-dropzone :deep(.p-fileupload-file-actions),
-.sbm-dropzone :deep(.p-fileupload-progressbar),
-.sbm-dropzone :deep(.p-progressbar) {
-  display: none !important;
+  pointer-events: none;
 }
 
 .sbm-dropzone-hero {
   width: 100%;
-  min-height: 140px;
+  min-height: clamp(96px, 14vh, 132px);
   display: flex;
   flex-direction: column;
   align-items: center;
