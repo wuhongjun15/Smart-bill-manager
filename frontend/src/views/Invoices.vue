@@ -127,8 +127,12 @@
             </div>
           </template>
         </FileUpload>
-        <div v-if="selectedFiles.length > 0" class="file-hint">
-          &#24050;&#36873;&#25321; {{ selectedFiles.length }} &#20010;&#25991;&#20214;
+        <div v-if="selectedFiles.length > 0" class="file-list" @click.stop>
+          <div v-for="(f, idx) in selectedFiles" :key="`${f.name}-${f.size}-${idx}`" class="file-row">
+            <span class="file-row-name" :title="f.name">{{ f.name }}</span>
+            <Button class="file-row-remove p-button-text" severity="secondary" icon="pi pi-times" aria-label="Remove" @click="removeSelectedFile(idx)" />
+          </div>
+          <div class="file-hint">&#24050;&#36873;&#25321; {{ selectedFiles.length }} &#20010;&#25991;&#20214;</div>
         </div>
       </div>
       <template #footer>
@@ -313,6 +317,13 @@ const triggerInvoiceChoose = (event: MouseEvent) => {
   if (!target) return
   if (target.closest('button') || target.closest('input') || target.closest('a')) return
   invoiceUploader.value?.choose?.()
+}
+
+const removeSelectedFile = (idx: number) => {
+  selectedFiles.value = selectedFiles.value.filter((_, i) => i !== idx)
+  if (selectedFiles.value.length === 0) {
+    invoiceUploader.value?.clear?.()
+  }
 }
 
 const previewVisible = ref(false)
@@ -725,6 +736,18 @@ onMounted(() => {
   display: none;
 }
 
+.sbm-dropzone :deep(.p-fileupload-files),
+.sbm-dropzone :deep(.p-fileupload-file),
+.sbm-dropzone :deep(.p-fileupload-file-name),
+.sbm-dropzone :deep(.p-fileupload-file-thumbnail),
+.sbm-dropzone :deep(.p-fileupload-file-details),
+.sbm-dropzone :deep(.p-fileupload-file-badge),
+.sbm-dropzone :deep(.p-fileupload-file-actions),
+.sbm-dropzone :deep(.p-fileupload-progressbar),
+.sbm-dropzone :deep(.p-progressbar) {
+  display: none !important;
+}
+
 .sbm-dropzone-empty {
   width: 100%;
   min-height: 160px;
@@ -757,6 +780,37 @@ onMounted(() => {
   display: flex;
   justify-content: center;
   gap: 10px;
+}
+
+.file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.file-row-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-row-remove {
+  flex: 0 0 auto;
 }
 
 .file-hint {

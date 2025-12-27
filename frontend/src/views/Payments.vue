@@ -196,7 +196,16 @@
             </template>
           </FileUpload>
 
-          <div v-if="selectedScreenshotName" class="file-name">{{ selectedScreenshotName }}</div>
+          <div v-if="selectedScreenshotName" class="file-row" @click.stop>
+            <span class="file-row-name" :title="selectedScreenshotName">{{ selectedScreenshotName }}</span>
+            <Button
+              class="file-row-remove p-button-text"
+              severity="secondary"
+              icon="pi pi-times"
+              aria-label="Remove"
+              @click="clearSelectedScreenshot"
+            />
+          </div>
           <small v-if="screenshotError" class="p-error">{{ screenshotError }}</small>
         </div>
 
@@ -511,6 +520,15 @@ const triggerScreenshotChoose = (event: MouseEvent) => {
   if (!target) return
   if (target.closest('button') || target.closest('input') || target.closest('a')) return
   screenshotUploader.value?.choose?.()
+}
+
+const clearSelectedScreenshot = () => {
+  selectedScreenshotFile.value = null
+  selectedScreenshotName.value = ''
+  screenshotError.value = ''
+  ocrResult.value = null
+  uploadedPaymentId.value = null
+  screenshotUploader.value?.clear?.()
 }
 
 const ocrForm = reactive({
@@ -1121,6 +1139,18 @@ onMounted(() => {
   display: none;
 }
 
+.sbm-dropzone :deep(.p-fileupload-files),
+.sbm-dropzone :deep(.p-fileupload-file),
+.sbm-dropzone :deep(.p-fileupload-file-name),
+.sbm-dropzone :deep(.p-fileupload-file-thumbnail),
+.sbm-dropzone :deep(.p-fileupload-file-details),
+.sbm-dropzone :deep(.p-fileupload-file-badge),
+.sbm-dropzone :deep(.p-fileupload-file-actions),
+.sbm-dropzone :deep(.p-fileupload-progressbar),
+.sbm-dropzone :deep(.p-progressbar) {
+  display: none !important;
+}
+
 .sbm-dropzone-empty {
   width: 100%;
   min-height: 120px;
@@ -1155,11 +1185,29 @@ onMounted(() => {
   gap: 10px;
 }
 
-.file-name {
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.file-row-name {
+  flex: 1;
+  min-width: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--color-text-secondary);
-  word-break: break-all;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-row-remove {
+  flex: 0 0 auto;
 }
 
 .raw-title {
