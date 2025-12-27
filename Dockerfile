@@ -66,8 +66,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     libtbb12 \
     ocl-icd-libopencl1 \
-    intel-opencl-icd \
     && rm -rf /var/lib/apt/lists/*
+
+# Optional Intel OpenCL runtime (often required for OpenVINO iGPU acceleration).
+# Note: `intel-opencl-icd` may live in non-free repos on Debian and might be unavailable in some build environments.
+RUN apt-get update && \
+    (apt-get install -y --no-install-recommends intel-opencl-icd || true) && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install Python OCR dependencies (RapidOCR v3) in a virtualenv to avoid Debian PEP 668 restrictions.
 RUN python3 -m venv /opt/venv
