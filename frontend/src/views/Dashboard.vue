@@ -5,7 +5,7 @@
       <div class="loading-text">&#21152;&#36733;&#20013;...</div>
     </div>
 
-    <Card v-else-if="!data" class="empty-card">
+    <Card v-else-if="!data" class="empty-card sbm-surface">
       <template #content>
         <div class="empty">
           <i class="pi pi-inbox empty-icon" />
@@ -15,8 +15,52 @@
     </Card>
 
     <template v-else>
+      <div class="hero sbm-gradient-border sbm-surface">
+        <div class="hero-left">
+          <div class="hero-kicker">&#26234;&#33021;&#36134;&#21333;&#31649;&#29702;</div>
+          <div class="hero-title">Smart Bill Manager</div>
+          <div class="hero-subtitle">
+            &#21457;&#31080;&#19982;&#25903;&#20184;&#35760;&#24405;&#33258;&#21160;&#35782;&#21035;&#65292;&#26234;&#33021;&#25512;&#33616;&#20851;&#32852;&#65292;&#21482;&#20570;&#20320;&#30495;&#27491;&#38656;&#35201;&#30340;&#20107;&#12290;
+          </div>
+          <div class="hero-actions">
+            <Button
+              :label="'\u53BB\u4E0A\u4F20\u652F\u4ED8\u622A\u56FE'"
+              icon="pi pi-image"
+              @click="router.push('/payments')"
+            />
+            <Button
+              class="p-button-outlined"
+              severity="secondary"
+              :label="'\u53BB\u4E0A\u4F20\u53D1\u7968'"
+              icon="pi pi-upload"
+              @click="router.push('/invoices')"
+            />
+            <Button
+              class="p-button-text"
+              severity="secondary"
+              :label="'\u67E5\u770B\u65E5\u5FD7'"
+              icon="pi pi-book"
+              @click="router.push('/logs')"
+            />
+          </div>
+        </div>
+        <div class="hero-right">
+          <div class="hero-chip">
+            <div class="chip-label">&#26412;&#26376;&#25903;&#20986;</div>
+            <div class="chip-value">{{ formatMoney(data.payments.totalThisMonth) }}</div>
+          </div>
+          <div class="hero-chip">
+            <div class="chip-label">&#21457;&#31080;&#24635;&#25968;</div>
+            <div class="chip-value">{{ data.invoices.totalCount }}</div>
+          </div>
+        </div>
+      </div>
+
       <div class="stats-grid">
-        <Card class="stat-card gradient-purple">
+        <Card
+          class="stat-card sbm-surface"
+          :style="{ '--sbm-accent': 'var(--p-primary-500, #3b82f6)', '--sbm-accent-bg': 'rgba(59, 130, 246, 0.12)' }"
+        >
           <template #content>
             <div class="stat">
               <div class="stat-left">
@@ -30,7 +74,10 @@
           </template>
         </Card>
 
-        <Card class="stat-card gradient-pink">
+        <Card
+          class="stat-card sbm-surface"
+          :style="{ '--sbm-accent': 'var(--p-indigo-500, #6366f1)', '--sbm-accent-bg': 'rgba(99, 102, 241, 0.12)' }"
+        >
           <template #content>
             <div class="stat">
               <div class="stat-left">
@@ -44,7 +91,10 @@
           </template>
         </Card>
 
-        <Card class="stat-card gradient-blue">
+        <Card
+          class="stat-card sbm-surface"
+          :style="{ '--sbm-accent': 'var(--p-teal-500, #14b8a6)', '--sbm-accent-bg': 'rgba(20, 184, 166, 0.12)' }"
+        >
           <template #content>
             <div class="stat">
               <div class="stat-left">
@@ -58,7 +108,10 @@
           </template>
         </Card>
 
-        <Card class="stat-card gradient-green">
+        <Card
+          class="stat-card sbm-surface"
+          :style="{ '--sbm-accent': 'var(--p-orange-500, #f97316)', '--sbm-accent-bg': 'rgba(249, 115, 22, 0.12)' }"
+        >
           <template #content>
             <div class="stat">
               <div class="stat-left">
@@ -74,7 +127,7 @@
       </div>
 
       <div class="grid">
-        <Card class="panel col-span-2">
+        <Card class="panel col-span-2 sbm-surface">
           <template #title>
             <div class="panel-title">
               <span>&#27599;&#26085;&#25903;&#20986;&#36235;&#21183;</span>
@@ -94,7 +147,7 @@
           </template>
         </Card>
 
-        <Card class="panel">
+        <Card class="panel sbm-surface">
           <template #title>
             <span>&#25903;&#20986;&#20998;&#31867;</span>
           </template>
@@ -108,7 +161,7 @@
       </div>
 
       <div class="grid">
-        <Card class="panel">
+        <Card class="panel sbm-surface">
           <template #title>
             <span><i class="pi pi-envelope" /> &#37038;&#31665;&#30417;&#25511;&#29366;&#24577;</span>
           </template>
@@ -133,7 +186,7 @@
           </template>
         </Card>
 
-        <Card class="panel">
+        <Card class="panel sbm-surface">
           <template #title>
             <span>&#26368;&#36817;&#37038;&#20214;</span>
           </template>
@@ -161,7 +214,7 @@
         </Card>
       </div>
 
-      <Card class="panel">
+      <Card class="panel sbm-surface">
         <template #title>
           <span>&#21457;&#31080;&#26469;&#28304;&#20998;&#24067;</span>
         </template>
@@ -170,8 +223,8 @@
             <Card
               v-for="(count, source, index) in data.invoices.bySource"
               :key="source"
-              class="source-card"
-              :style="{ background: `${COLORS[index % COLORS.length]}12` }"
+              class="source-card sbm-surface"
+              :style="{ '--sbm-accent': COLORS[index % COLORS.length] }"
             >
               <template #content>
                 <div class="source-title">{{ getSourceLabel(source as string) }}</div>
@@ -188,6 +241,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart, PieChart } from 'echarts/charts'
@@ -206,6 +260,8 @@ import { CHART_COLORS } from '@/utils/constants'
 import type { DashboardData } from '@/types'
 
 use([CanvasRenderer, LineChart, PieChart, GridComponent, TooltipComponent, LegendComponent])
+
+const router = useRouter()
 
 const COLORS = CHART_COLORS
 
@@ -348,6 +404,75 @@ onMounted(() => {
   gap: 16px;
 }
 
+.hero {
+  display: grid;
+  grid-template-columns: 1.4fr 0.6fr;
+  gap: 18px;
+  padding: 22px 22px 20px;
+  border-radius: 18px;
+}
+
+.hero-left {
+  min-width: 0;
+}
+
+.hero-kicker {
+  font-weight: 900;
+  color: var(--p-text-muted-color);
+  letter-spacing: 0.2px;
+}
+
+.hero-title {
+  margin-top: 6px;
+  font-size: 30px;
+  font-weight: 950;
+  letter-spacing: -0.7px;
+  background: var(--sbm-hero-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-subtitle {
+  margin-top: 10px;
+  color: var(--p-text-muted-color);
+  font-weight: 600;
+  line-height: 1.7;
+}
+
+.hero-actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hero-right {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.hero-chip {
+  border-radius: 16px;
+  padding: 14px 14px;
+  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 20%);
+  background: color-mix(in srgb, var(--p-surface-0), transparent 10%);
+}
+
+.chip-label {
+  font-size: 12px;
+  font-weight: 900;
+  color: var(--p-text-muted-color);
+}
+
+.chip-value {
+  margin-top: 6px;
+  font-size: 18px;
+  font-weight: 950;
+  color: var(--p-text-color);
+}
+
 .loading {
   display: grid;
   place-items: center;
@@ -388,10 +513,9 @@ onMounted(() => {
 }
 
 .stat-card {
-  color: white;
-  border: none;
+  border-left: 4px solid var(--sbm-accent, var(--p-primary-500));
   overflow: hidden;
-  border-radius: var(--radius-lg);
+  border-radius: 16px;
 }
 
 .stat {
@@ -402,16 +526,17 @@ onMounted(() => {
 }
 
 .stat-title {
-  opacity: 0.92;
-  font-weight: 700;
+  font-weight: 800;
   font-size: 13px;
+  color: var(--p-text-muted-color);
 }
 
 .stat-value {
   margin-top: 6px;
-  font-size: 22px;
-  font-weight: 900;
+  font-size: 24px;
+  font-weight: 950;
   letter-spacing: -0.2px;
+  color: var(--p-text-color);
 }
 
 .stat-icon {
@@ -420,27 +545,12 @@ onMounted(() => {
   border-radius: 14px;
   display: grid;
   place-items: center;
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--sbm-accent-bg, rgba(59, 130, 246, 0.12));
+  color: var(--sbm-accent, var(--p-primary-500));
 }
 
 .stat-icon i {
   font-size: 20px;
-}
-
-.gradient-purple {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.gradient-pink {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-}
-
-.gradient-blue {
-  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-}
-
-.gradient-green {
-  background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
 }
 
 .grid {
@@ -454,7 +564,7 @@ onMounted(() => {
 }
 
 .panel {
-  border-radius: var(--radius-lg);
+  border-radius: 16px;
 }
 
 .panel-title {
@@ -486,7 +596,8 @@ onMounted(() => {
   gap: 10px;
   padding: 12px;
   border-radius: var(--radius-md);
-  background: rgba(0, 0, 0, 0.02);
+  background: rgba(2, 6, 23, 0.02);
+  border: 1px solid rgba(2, 6, 23, 0.06);
 }
 
 .monitor-left {
@@ -509,6 +620,7 @@ onMounted(() => {
 
 .source-card {
   border-radius: var(--radius-md);
+  border-top: 3px solid var(--sbm-accent, var(--p-primary-500));
 }
 
 .source-title {
@@ -524,6 +636,10 @@ onMounted(() => {
 }
 
 @media (max-width: 1100px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -538,4 +654,3 @@ onMounted(() => {
   }
 }
 </style>
-

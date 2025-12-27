@@ -2,7 +2,7 @@
   <div class="page">
     <div class="grid">
       <div class="col-12 md:col-4">
-        <Card>
+        <Card class="sbm-surface">
           <template #content>
             <div class="stat">
               <div>
@@ -15,7 +15,7 @@
         </Card>
       </div>
       <div class="col-12 md:col-4">
-        <Card>
+        <Card class="sbm-surface">
           <template #content>
             <div class="stat">
               <div>
@@ -28,7 +28,7 @@
         </Card>
       </div>
       <div class="col-12 md:col-4">
-        <Card>
+        <Card class="sbm-surface">
           <template #content>
             <div class="stat">
               <div>
@@ -42,12 +42,12 @@
       </div>
     </div>
 
-    <Card>
+    <Card class="sbm-surface">
       <template #title>
         <div class="header">
           <span>&#25903;&#20184;&#35760;&#24405;</span>
           <div class="toolbar">
-            <Calendar
+            <DatePicker
               v-model="dateRange"
               selectionMode="range"
               :manualInput="false"
@@ -146,7 +146,7 @@
           </div>
           <div class="col-12 field">
             <label for="time">&#20132;&#26131;&#26102;&#38388;</label>
-            <Calendar id="time" v-model="form.transaction_time" showTime :manualInput="false" />
+            <DatePicker id="time" v-model="form.transaction_time" showTime :manualInput="false" />
             <small v-if="errors.transaction_time" class="p-error">{{ errors.transaction_time }}</small>
           </div>
           <div class="col-12 field">
@@ -215,7 +215,7 @@
               </div>
               <div class="col-12 field">
                 <label for="ocr_time">&#20132;&#26131;&#26102;&#38388;</label>
-                <Calendar id="ocr_time" v-model="ocrForm.transaction_time" showTime :manualInput="false" />
+                <DatePicker id="ocr_time" v-model="ocrForm.transaction_time" showTime :manualInput="false" />
                 <small v-if="ocrErrors.transaction_time" class="p-error">{{ ocrErrors.transaction_time }}</small>
               </div>
               <div class="col-12 field">
@@ -259,7 +259,7 @@
       </div>
       <div class="grid">
         <div class="col-12 md:col-6">
-          <Card>
+          <Card class="sbm-surface">
             <template #title>&#24050;&#20851;&#32852;</template>
             <template #content>
               <DataTable :value="linkedInvoices" :loading="loadingLinkedInvoices" scrollHeight="360px" :scrollable="true" responsiveLayout="scroll">
@@ -275,7 +275,7 @@
           </Card>
         </div>
         <div class="col-12 md:col-6">
-          <Card>
+          <Card class="sbm-surface">
             <template #title>
               <div class="suggest-title">
                 <span>&#26234;&#33021;&#25512;&#33616;</span>
@@ -365,10 +365,10 @@ import dayjs from 'dayjs'
 import Accordion from 'primevue/accordion'
 import AccordionTab from 'primevue/accordiontab'
 import Button from 'primevue/button'
-import Calendar from 'primevue/calendar'
 import Card from 'primevue/card'
 import Column from 'primevue/column'
 import DataTable from 'primevue/datatable'
+import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
 import Divider from 'primevue/divider'
 import Dropdown from 'primevue/dropdown'
@@ -874,7 +874,7 @@ onMounted(() => {
 
 .amount {
   font-weight: 900;
-  color: #cf1322;
+  color: var(--p-red-600, #dc2626);
 }
 
 .stat {
@@ -903,18 +903,18 @@ onMounted(() => {
 }
 
 .stat-icon.danger {
-  background: rgba(245, 34, 45, 0.1);
-  color: #cf1322;
+  background: rgba(220, 38, 38, 0.12);
+  color: var(--p-red-600, #dc2626);
 }
 
 .stat-icon.success {
-  background: rgba(82, 196, 26, 0.12);
-  color: #389e0d;
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--p-green-600, #16a34a);
 }
 
 .stat-icon.info {
-  background: rgba(24, 144, 255, 0.12);
-  color: #096dd9;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--p-primary-600, #2563eb);
 }
 
 .footer {
@@ -930,8 +930,10 @@ onMounted(() => {
   gap: 8px;
   padding: 12px;
   border-radius: var(--radius-md);
-  border: 1px dashed rgba(102, 126, 234, 0.35);
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.03), rgba(118, 75, 162, 0.03));
+  border: 1px dashed rgba(59, 130, 246, 0.35);
+  border: 1px dashed color-mix(in srgb, var(--p-primary-400, #60a5fa), transparent 25%);
+  background: rgba(59, 130, 246, 0.03);
+  background: color-mix(in srgb, var(--p-primary-50, #eff6ff), transparent 55%);
 }
 
 .file-name {

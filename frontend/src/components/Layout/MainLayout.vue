@@ -1,6 +1,6 @@
 <template>
   <div class="layout">
-    <aside class="sidebar" :class="{ collapsed: isCollapsed }">
+    <aside class="sidebar sbm-gradient-border sbm-surface" :class="{ collapsed: isCollapsed }">
       <div class="brand" @click="router.push('/dashboard')">
         <span class="brand-icon">\uD83D\uDCB0</span>
         <span v-if="!isCollapsed" class="brand-text">&#26234;&#33021;&#36134;&#21333;&#31649;&#29702;</span>
@@ -44,7 +44,7 @@
     </aside>
 
     <div class="content">
-      <header class="topbar">
+      <header class="topbar sbm-surface">
         <div class="topbar-left">
           <h2 class="page-title">{{ pageTitle }}</h2>
         </div>
@@ -141,11 +141,12 @@ const toggleUserMenu = (event: MouseEvent) => {
 .layout {
   min-height: 100vh;
   display: flex;
+  gap: 16px;
+  padding: 16px;
 }
 
 .sidebar {
   width: 260px;
-  background: linear-gradient(180deg, #001529 0%, #003a70 100%);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -157,32 +158,20 @@ const toggleUserMenu = (event: MouseEvent) => {
   width: 76px;
 }
 
-/* Glassmorphism overlay for sidebar */
-.sidebar::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
-  pointer-events: none;
-}
-
 .brand {
   height: 64px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--p-text-color);
   font-size: 16px;
   font-weight: 700;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid rgba(2, 6, 23, 0.08);
+  border-bottom: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 20%);
   white-space: nowrap;
   overflow: hidden;
   transition: all var(--transition-base);
   position: relative;
-  z-index: 1;
   cursor: pointer;
   gap: 10px;
   user-select: none;
@@ -194,6 +183,11 @@ const toggleUserMenu = (event: MouseEvent) => {
 
 .brand-text {
   letter-spacing: 0.2px;
+  font-weight: 900;
+  background: var(--sbm-hero-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .nav {
@@ -202,8 +196,6 @@ const toggleUserMenu = (event: MouseEvent) => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  position: relative;
-  z-index: 1;
 }
 
 .nav-item {
@@ -216,10 +208,11 @@ const toggleUserMenu = (event: MouseEvent) => {
   border: 0;
   border-radius: var(--radius-md);
   background: transparent;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--p-text-muted-color);
   cursor: pointer;
   transition: all var(--transition-base);
   text-align: left;
+  position: relative;
 }
 
 .sidebar.collapsed .nav-item {
@@ -232,13 +225,14 @@ const toggleUserMenu = (event: MouseEvent) => {
 }
 
 .nav-item:hover {
-  background: rgba(255, 255, 255, 0.08);
-  transform: translateX(2px);
+  background: rgba(59, 130, 246, 0.06);
+  background: color-mix(in srgb, var(--p-primary-50), var(--p-surface-0) 85%);
 }
 
 .nav-item.active {
-  background: rgba(24, 144, 255, 0.15);
-  box-shadow: 0 2px 10px rgba(24, 144, 255, 0.25);
+  background: rgba(59, 130, 246, 0.10);
+  background: color-mix(in srgb, var(--p-primary-100), var(--p-surface-0) 85%);
+  color: var(--p-text-color);
 }
 
 .nav-item.active::before {
@@ -248,14 +242,13 @@ const toggleUserMenu = (event: MouseEvent) => {
   width: 3px;
   height: 28px;
   border-radius: 999px;
-  background: #1890ff;
+  background: var(--sbm-hero-gradient);
 }
 
 .sidebar-footer {
   padding: 12px 10px 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  position: relative;
-  z-index: 1;
+  border-top: 1px solid rgba(2, 6, 23, 0.08);
+  border-top: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 20%);
   display: flex;
   justify-content: center;
 }
@@ -264,12 +257,15 @@ const toggleUserMenu = (event: MouseEvent) => {
   width: 44px;
   height: 44px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08) !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  background: rgba(255, 255, 255, 0.86) !important;
+  border: 1px solid rgba(2, 6, 23, 0.10) !important;
+  background: color-mix(in srgb, var(--p-surface-0), transparent 10%) !important;
+  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 20%) !important;
 }
 
 .collapse-btn:hover {
-  background: rgba(255, 255, 255, 0.12) !important;
+  background: rgba(59, 130, 246, 0.06) !important;
+  background: color-mix(in srgb, var(--p-primary-50), var(--p-surface-0) 85%) !important;
 }
 
 .content {
@@ -280,26 +276,24 @@ const toggleUserMenu = (event: MouseEvent) => {
 }
 
 .topbar {
-  background: #fff;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
   height: 64px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
   position: relative;
   z-index: 20;
+  border-radius: 16px;
 }
 
 .page-title {
   margin: 0;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--sbm-hero-gradient);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
   font-size: 20px;
-  font-weight: 600;
-  animation: slideInLeft 0.3s ease;
+  font-weight: 900;
 }
 
 .topbar-right {
@@ -316,36 +310,43 @@ const toggleUserMenu = (event: MouseEvent) => {
   padding: 8px 10px;
   border-radius: 999px;
   transition: all var(--transition-base);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(2, 6, 23, 0.10);
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 20%);
+  background: color-mix(in srgb, var(--p-surface-0), transparent 10%);
 }
 
 .user-button:hover {
-  background: rgba(102, 126, 234, 0.06);
-  border-color: rgba(102, 126, 234, 0.25);
+  background: rgba(59, 130, 246, 0.06);
+  background: color-mix(in srgb, var(--p-primary-50), var(--p-surface-0) 85%);
+  border-color: color-mix(in srgb, var(--p-primary-200), transparent 30%);
 }
 
 .user-avatar {
-  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.25);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.12);
 }
 
 .username {
-  color: var(--color-text-primary);
-  font-weight: 600;
+  color: var(--p-text-color);
+  font-weight: 800;
 }
 
 .user-button i {
-  color: var(--color-text-tertiary);
+  color: var(--p-text-muted-color);
 }
 
 .main {
-  background: var(--color-bg-primary);
-  padding: 20px;
+  padding: 20px 4px 4px;
   flex: 1;
   overflow: auto;
 }
 
 @media (max-width: 768px) {
+  .layout {
+    padding: 10px;
+    gap: 10px;
+  }
+
   .page-title {
     font-size: 18px;
   }

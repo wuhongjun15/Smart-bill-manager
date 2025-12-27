@@ -10,7 +10,7 @@
       </div>
     </Message>
 
-    <Card class="panel">
+    <Card class="panel sbm-surface">
       <template #title>
         <div class="panel-title">
           <span>&#37038;&#31665;&#37197;&#32622;</span>
@@ -90,7 +90,7 @@
       </template>
     </Card>
 
-    <Card class="panel">
+    <Card class="panel sbm-surface">
       <template #title>
         <div class="panel-title">
           <span>&#37038;&#20214;&#22788;&#29702;&#26085;&#24535;</span>
@@ -563,4 +563,3 @@ onMounted(() => {
   }
 }
 </style>
-

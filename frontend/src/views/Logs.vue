@@ -1,6 +1,6 @@
 <template>
   <div class="logs-page">
-    <Card class="panel">
+    <Card class="panel sbm-surface">
       <template #title>
         <div class="header">
           <div class="title">
@@ -333,4 +333,3 @@ onBeforeUnmount(() => {
   flex: 1 1 auto;
 }
 </style>
-

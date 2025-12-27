@@ -2,7 +2,7 @@
   <div class="page">
     <div class="grid">
       <div class="col-12 md:col-4">
-        <Card>
+        <Card class="sbm-surface">
           <template #content>
             <div class="stat">
               <div>
@@ -15,7 +15,7 @@
         </Card>
       </div>
       <div class="col-12 md:col-4">
-        <Card>
+        <Card class="sbm-surface">
           <template #content>
             <div class="stat">
               <div>
@@ -28,7 +28,7 @@
         </Card>
       </div>
       <div class="col-12 md:col-4">
-        <Card>
+        <Card class="sbm-surface">
           <template #content>
             <div class="stat">
               <div>
@@ -46,7 +46,7 @@
       </div>
     </div>
 
-    <Card>
+    <Card class="sbm-surface">
       <template #title>
         <div class="header">
           <span>&#21457;&#31080;&#21015;&#34920;</span>
@@ -172,12 +172,12 @@
         </div>
 
         <div class="grid">
-          <div class="col-12 md:col-6">
-            <Card>
-              <template #title>&#24050;&#20851;&#32852;&#30340;&#25903;&#20184;</template>
-              <template #content>
-                <DataTable :value="linkedPayments" :loading="loadingLinkedPayments" scrollHeight="320px" :scrollable="true" responsiveLayout="scroll">
-                  <Column :header="'\u91D1\u989D'" :style="{ width: '110px' }">
+        <div class="col-12 md:col-6">
+          <Card class="sbm-surface">
+            <template #title>&#24050;&#20851;&#32852;&#30340;&#25903;&#20184;</template>
+            <template #content>
+              <DataTable :value="linkedPayments" :loading="loadingLinkedPayments" scrollHeight="320px" :scrollable="true" responsiveLayout="scroll">
+                <Column :header="'\u91D1\u989D'" :style="{ width: '110px' }">
                     <template #body="{ data: row }">{{ `\u00A5${row.amount.toFixed(2)}` }}</template>
                   </Column>
                   <Column field="merchant" :header="'\u5546\u5BB6'" />
@@ -193,13 +193,13 @@
               </template>
             </Card>
           </div>
-          <div class="col-12 md:col-6">
-            <Card>
-              <template #title>
-                <div class="suggest-title">
-                  <span>&#26234;&#33021;&#25512;&#33616;</span>
-                  <Tag severity="info" :value="`${suggestedPayments.length}\u6761`" />
-                </div>
+        <div class="col-12 md:col-6">
+          <Card class="sbm-surface">
+            <template #title>
+              <div class="suggest-title">
+                <span>&#26234;&#33021;&#25512;&#33616;</span>
+                <Tag severity="info" :value="`${suggestedPayments.length}\u6761`" />
+              </div>
               </template>
               <template #content>
                 <DataTable :value="suggestedPayments" :loading="loadingSuggestedPayments" scrollHeight="320px" :scrollable="true" responsiveLayout="scroll">
@@ -599,13 +599,13 @@ onMounted(() => {
 }
 
 .stat-icon.info {
-  background: rgba(24, 144, 255, 0.12);
-  color: #096dd9;
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--p-primary-600, #2563eb);
 }
 
 .stat-icon.success {
-  background: rgba(82, 196, 26, 0.12);
-  color: #389e0d;
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--p-green-600, #16a34a);
 }
 
 .stat-icon.secondary {
@@ -626,8 +626,10 @@ onMounted(() => {
   gap: 10px;
   padding: 12px;
   border-radius: var(--radius-md);
-  border: 1px dashed rgba(102, 126, 234, 0.35);
-  background: linear-gradient(135deg, rgba(102, 126, 234, 0.03), rgba(118, 75, 162, 0.03));
+  border: 1px dashed rgba(59, 130, 246, 0.35);
+  border: 1px dashed color-mix(in srgb, var(--p-primary-400, #60a5fa), transparent 25%);
+  background: rgba(59, 130, 246, 0.03);
+  background: color-mix(in srgb, var(--p-primary-50, #eff6ff), transparent 55%);
 }
 
 .file-hint {
@@ -684,7 +686,7 @@ onMounted(() => {
 }
 
 .money {
-  color: #cf1322;
+  color: var(--p-red-600, #dc2626);
   font-weight: 900;
 }
 

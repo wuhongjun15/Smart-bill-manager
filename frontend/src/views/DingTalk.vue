@@ -9,7 +9,7 @@
       </ul>
     </Message>
 
-    <Card class="panel">
+    <Card class="panel sbm-surface">
       <template #title>
         <div class="panel-title">
           <span>&#38025;&#38025;&#37197;&#32622;</span>
@@ -57,7 +57,7 @@
       </template>
     </Card>
 
-    <Card class="panel">
+    <Card class="panel sbm-surface">
       <template #title>
         <div class="panel-title">
           <span>&#26368;&#36817;&#22788;&#29702;&#26085;&#24535;</span>
@@ -362,4 +362,3 @@ onMounted(() => {
   margin-top: 16px;
 }
 </style>
-
