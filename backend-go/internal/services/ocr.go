@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,13 +107,13 @@ type InvoiceExtractedData struct {
 
 // OCRCLIResponse represents the response from the Python OCR CLI script.
 type OCRCLIResponse struct {
-	Success   bool            `json:"success"`
-	Text      string          `json:"text"`
-	Lines     []OCRCLILine    `json:"lines"`
-	LineCount int             `json:"line_count"`
-	Engine    string          `json:"engine,omitempty"`
-	Profile   string          `json:"profile,omitempty"`
-	Error     string          `json:"error,omitempty"`
+	Success   bool         `json:"success"`
+	Text      string       `json:"text"`
+	Lines     []OCRCLILine `json:"lines"`
+	LineCount int          `json:"line_count"`
+	Engine    string       `json:"engine,omitempty"`
+	Profile   string       `json:"profile,omitempty"`
+	Error     string       `json:"error,omitempty"`
 }
 
 // OCRCLILine represents a single line of OCR result
@@ -482,7 +485,8 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 	// Note: exec.Command properly escapes arguments, preventing shell injection
 	// pdftoppm outputs files with pattern: outputPrefix-N.png where N is page number
 	outputPrefix := filepath.Join(tempDir, "page")
-	cmd := exec.Command("pdftoppm", "-png", "-r", "300", pdfPath, outputPrefix)
+	// Use grayscale output to improve OCR recall on colored text (common in invoices).
+	cmd := exec.Command("pdftoppm", "-png", "-gray", "-r", "300", pdfPath, outputPrefix)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to convert PDF to images with pdftoppm: %w (output: %s)", err, string(output))
@@ -518,6 +522,17 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 			continue
 		}
 
+		// If key header fields are missing (invoice code/number/date), run a second pass on the
+		// top-right region with binarization. This improves recall for small, colored text.
+		if !strings.Contains(text, "发票代码") || !strings.Contains(text, "发票号码") || !strings.Contains(text, "开票日期") {
+			if extra, extraErr := s.ocrInvoiceTopRightRegion(tempDir, imgPath); extraErr == nil && strings.TrimSpace(extra) != "" {
+				fmt.Printf("[OCR] Extra header OCR extracted %d characters from page %d\n", len(extra), i+1)
+				text = text + "\n" + extra
+			} else if extraErr != nil {
+				fmt.Printf("[OCR] Extra header OCR failed for page %d: %v\n", i+1, extraErr)
+			}
+		}
+
 		fmt.Printf("[OCR] Extracted %d characters from page %d\n", len(text), i+1)
 		allText.WriteString(text)
 		allText.WriteString("\n")
@@ -531,6 +546,129 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 	}
 
 	return result, nil
+}
+
+func (s *OCRService) ocrInvoiceTopRightRegion(tempDir, imgPath string) (string, error) {
+	f, err := os.Open(imgPath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	src, _, err := image.Decode(f)
+	if err != nil {
+		return "", err
+	}
+
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w <= 0 || h <= 0 {
+		return "", fmt.Errorf("invalid image bounds")
+	}
+
+	// Heuristic crop: invoice header block is on the top-right of A4 invoices.
+	x0 := b.Min.X + int(float64(w)*0.55)
+	y0 := b.Min.Y + int(float64(h)*0.02)
+	x1 := b.Min.X + w
+	y1 := b.Min.Y + int(float64(h)*0.30)
+	if x0 < b.Min.X {
+		x0 = b.Min.X
+	}
+	if y0 < b.Min.Y {
+		y0 = b.Min.Y
+	}
+	if x1 > b.Max.X {
+		x1 = b.Max.X
+	}
+	if y1 > b.Max.Y {
+		y1 = b.Max.Y
+	}
+	if x1-x0 < 50 || y1-y0 < 50 {
+		return "", fmt.Errorf("crop region too small")
+	}
+
+	rect := image.Rect(x0, y0, x1, y1)
+
+	// Copy into a concrete image so SubImage implementations don't surprise us.
+	roi := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
+	for y := 0; y < rect.Dy(); y++ {
+		for x := 0; x < rect.Dx(); x++ {
+			roi.Set(x, y, src.At(rect.Min.X+x, rect.Min.Y+y))
+		}
+	}
+
+	// Convert to grayscale.
+	gray := image.NewGray(roi.Bounds())
+	hist := make([]int, 256)
+	for y := 0; y < gray.Bounds().Dy(); y++ {
+		for x := 0; x < gray.Bounds().Dx(); x++ {
+			r, g, b2, _ := roi.At(x, y).RGBA()
+			// Convert to 8-bit luma.
+			l := uint8((299*r + 587*g + 114*b2 + 500) / 1000 >> 8)
+			gray.SetGray(x, y, color.Gray{Y: l})
+			hist[int(l)]++
+		}
+	}
+
+	// Otsu binarization threshold.
+	total := gray.Bounds().Dx() * gray.Bounds().Dy()
+	if total <= 0 {
+		return "", fmt.Errorf("empty roi")
+	}
+	var sum int
+	for i := 0; i < 256; i++ {
+		sum += i * hist[i]
+	}
+	var (
+		sumB   int
+		wB     int
+		varMax float64
+		thr    int
+	)
+	for t := 0; t < 256; t++ {
+		wB += hist[t]
+		if wB == 0 {
+			continue
+		}
+		wF := total - wB
+		if wF == 0 {
+			break
+		}
+		sumB += t * hist[t]
+		mB := float64(sumB) / float64(wB)
+		mF := float64(sum-sumB) / float64(wF)
+		v := float64(wB) * float64(wF) * (mB - mF) * (mB - mF)
+		if v > varMax {
+			varMax = v
+			thr = t
+		}
+	}
+
+	// Produce binarized image (text -> black).
+	bin := image.NewGray(gray.Bounds())
+	for y := 0; y < bin.Bounds().Dy(); y++ {
+		for x := 0; x < bin.Bounds().Dx(); x++ {
+			if gray.GrayAt(x, y).Y > uint8(thr) {
+				bin.SetGray(x, y, color.Gray{Y: 255})
+			} else {
+				bin.SetGray(x, y, color.Gray{Y: 0})
+			}
+		}
+	}
+
+	outPath := filepath.Join(tempDir, fmt.Sprintf("roi-tr-%s.png", filepath.Base(imgPath)))
+	of, err := os.Create(outPath)
+	if err != nil {
+		return "", err
+	}
+	if err := png.Encode(of, bin); err != nil {
+		_ = of.Close()
+		return "", err
+	}
+	_ = of.Close()
+
+	// Lower thresholds a bit for this ROI.
+	return s.recognizeWithRapidOCRArgs(outPath, []string{"--profile", "pdf", "--min-height", "5", "--text-score", "0.25"})
 }
 
 // removeChineseSpaces removes spaces between Chinese characters in OCR text
