@@ -283,6 +283,51 @@ func TestParseInvoiceData_RealWorldFormat(t *testing.T) {
 	}
 }
 
+func TestParseInvoiceData_PreferTaxInclusiveAmount(t *testing.T) {
+	service := NewOCRService()
+
+	// Some invoices contain both:
+	// - 合计金额(小写): tax-exclusive subtotal
+	// - 价税合计(小写): tax-inclusive total (desired)
+	sampleText := `合计金额(小写)：100.00
+价税合计(小写)：107.79`
+
+	data, err := service.ParseInvoiceData(sampleText)
+	if err != nil {
+		t.Fatalf("ParseInvoiceData returned error: %v", err)
+	}
+
+	if data.Amount == nil {
+		t.Fatal("Amount is nil, expected 107.79")
+	}
+	if *data.Amount != 107.79 {
+		t.Fatalf("Expected Amount 107.79, got %.2f", *data.Amount)
+	}
+}
+
+func TestExtractPartyFromROICandidate_NameLabels(t *testing.T) {
+	buyerText := `购买方名称：张三
+购买方纳税人识别号：91310000132149237G
+地址电话：上海`
+	buyerName, buyerTax := extractPartyFromROICandidate(buyerText, "buyer")
+	if buyerName != "张三" {
+		t.Fatalf("Expected buyer name 张三, got %q", buyerName)
+	}
+	if buyerTax != "91310000132149237G" {
+		t.Fatalf("Expected buyer tax 91310000132149237G, got %q", buyerTax)
+	}
+
+	sellerText := `销售方名称：测试公司
+销售方纳税人识别号：91310000132149237G`
+	sellerName, sellerTax := extractPartyFromROICandidate(sellerText, "seller")
+	if sellerName != "测试公司" {
+		t.Fatalf("Expected seller name 测试公司, got %q", sellerName)
+	}
+	if sellerTax != "91310000132149237G" {
+		t.Fatalf("Expected seller tax 91310000132149237G, got %q", sellerTax)
+	}
+}
+
 func TestParseInvoiceData_DidiInvoice(t *testing.T) {
 	service := NewOCRService()
 

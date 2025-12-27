@@ -25,15 +25,18 @@ import (
 type OCRService struct{}
 
 const (
-	// taxIDPattern matches Chinese unified social credit codes (15-20 alphanumeric characters)
-	taxIDPattern = `[A-Z0-9]{15,20}`
+	// taxIDPattern matches common Chinese taxpayer identifiers:
+	// - 15-digit taxpayer ID (legacy)
+	// - 18-char unified social credit code
+	// Keeping this tight avoids misclassifying invoice/order/check codes (often 19-20 digits) as tax IDs.
+	taxIDPattern = `(?:[A-Z0-9]{15}|[A-Z0-9]{18})`
 
 	// amountPattern matches monetary amounts with ¥ or ￥ symbol
 	// Pattern explanation: (?:,\d{3})* allows comma-separated thousands, (?:\.\d{1,2})? makes decimals optional
 	amountPattern = `[¥￥]\s*\d+(?:,\d{3})*(?:\.\d{1,2})?`
 
 	// taxIDPatternWithBoundary for structured extraction (word boundaries for better matching)
-	taxIDPatternWithBoundary = `\b[A-Z0-9]{15,20}\b`
+	taxIDPatternWithBoundary = `\b(?:[A-Z0-9]{15}|[A-Z0-9]{18})\b`
 
 	// MinValidAmount is the minimum amount threshold for payment extraction
 	MinValidAmount = 1.0
@@ -584,8 +587,8 @@ func (s *OCRService) injectInvoicePartiesFromRegions(tempDir, imgPath string) (i
 	// - Buyer: upper-left block under the QR code
 	// - Seller: bottom-left block
 	// Widened slightly to better cover “名称/纳税人识别号/地址电话/开户行账号” lines.
-	buyerText, err1 := s.ocrInvoiceRegion(tempDir, imgPath, "buyer", 0.02, 0.12, 0.78, 0.50)
-	sellerText, err2 := s.ocrInvoiceRegion(tempDir, imgPath, "seller", 0.02, 0.56, 0.86, 0.92)
+	buyerText, err1 := s.ocrInvoiceRegion(tempDir, imgPath, "buyer", 0.02, 0.10, 0.86, 0.55)
+	sellerText, err2 := s.ocrInvoiceRegion(tempDir, imgPath, "seller", 0.02, 0.54, 0.90, 0.92)
 
 	if err1 != nil {
 		fmt.Printf("[OCR] Buyer ROI OCR failed: %v\n", err1)
@@ -628,8 +631,10 @@ func extractPartyFromROICandidate(text string, role string) (name string, taxID 
 		taxID = m
 	}
 
-	// Name: handle patterns like "名称: XXX" or "名 称 XXX".
-	nameRe := regexp.MustCompile(`(?m)^(?:名\s*称|名称)\s*[:：]?\s*([^\n\r]+)$`)
+	// Name: handle patterns like:
+	// - 名称: XXX / 名 称 XXX
+	// - 购买方名称: XXX / 销售方名称: XXX
+	nameRe := regexp.MustCompile(`(?m)^(?:(?:购买方|销售方)\s*)?(?:名\s*称|名称)\s*[:：]?\s*([^\n\r]+)$`)
 	if match := nameRe.FindStringSubmatch(text); len(match) > 1 {
 		candidate := strings.TrimSpace(match[1])
 		// Filter obvious non-names.
@@ -644,7 +649,10 @@ func extractPartyFromROICandidate(text string, role string) (name string, taxID 
 		for i := 0; i < len(lines); i++ {
 			l := strings.TrimSpace(lines[i])
 			compact := strings.ReplaceAll(l, " ", "")
-			if compact == "名称" || compact == "名称:" || compact == "名称：" || compact == "名" || compact == "称" {
+			if compact == "名称" || compact == "名称:" || compact == "名称：" ||
+				compact == "购买方名称" || compact == "购买方名称:" || compact == "购买方名称：" ||
+				compact == "销售方名称" || compact == "销售方名称:" || compact == "销售方名称：" ||
+				compact == "名" || compact == "称" {
 				if i+1 < len(lines) {
 					candidate := strings.TrimSpace(lines[i+1])
 					if candidate != "" && !strings.Contains(candidate, "地址") && !strings.Contains(candidate, "电话") && len([]rune(candidate)) <= MaxMerchantNameLength {
@@ -709,7 +717,9 @@ func pickBestPartyNameHeuristic(text string, role string) string {
 		s = strings.TrimSpace(s)
 		// Remove leading labels like “购买方/销售方”.
 		s = regexp.MustCompile(`^(购买方|销售方)\s*`).ReplaceAllString(s, "")
+		s = regexp.MustCompile(`^(名\s*称|名称)\s*`).ReplaceAllString(s, "")
 		s = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(s, ":"), "："))
+		s = strings.TrimSpace(strings.Trim(s, "（）()【】[]<>《》“”\"'"))
 		return strings.TrimSpace(s)
 	}
 
@@ -749,6 +759,10 @@ func pickBestPartyNameHeuristic(text string, role string) string {
 		}
 		if role == "buyer" && containsAny(s, buyerBonus) {
 			score += 30
+		}
+		// Penalize overly-short seller names without typical company/store keywords.
+		if role == "seller" && han < 4 && !containsAny(s, sellerBonus) {
+			score -= 20
 		}
 		// Buyer names are often short; seller names usually longer.
 		if role == "buyer" && han <= 6 {
@@ -2062,10 +2076,12 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 
 	// Extract amount - support newline-separated formats like "（小写）\n¥\n3080.00"
 	amountRegexes := []*regexp.Regexp{
-		regexp.MustCompile(`合计金额[（(]小写[)）][：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
+		// Prefer tax-inclusive total (价税合计).
 		regexp.MustCompile(`价税合计[（(]小写[)）][：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
-		regexp.MustCompile(`[（(]小写[)）][：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
 		regexp.MustCompile(`总计[：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
+		// "合计金额(小写)" is usually tax-exclusive; keep as fallback.
+		regexp.MustCompile(`合计金额[（(]小写[)）][：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
+		regexp.MustCompile(`[（(]小写[)）][：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
 		regexp.MustCompile(`金额[：:]?\s*[\n\r]?\s*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`),
 	}
 	for _, re := range amountRegexes {
