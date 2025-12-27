@@ -1,14 +1,20 @@
 <template>
   <div class="page">
-    <Message severity="info" :closable="false" class="info">
-      <div class="info-title">QQ &#37038;&#31665;&#37197;&#32622;&#35828;&#26126;</div>
-      <div class="info-body">
-        <p>1. &#30331;&#24405; QQ &#37038;&#31665;&#65292;&#36827;&#20837;&#8220;&#35774;&#32622;&#8221; &#8594; &#8220;&#36134;&#25143;&#8221;</p>
-        <p>2. &#25214;&#21040;&#8220;IMAP/SMTP &#26381;&#21153;&#8221;&#24182;&#24320;&#21551;</p>
-        <p>3. &#29983;&#25104;&#8220;&#25480;&#26435;&#30721;&#8221;&#65288;&#19981;&#26159; QQ &#23494;&#30721;&#65289;</p>
-        <p>4. &#22312;&#19979;&#26041;&#37197;&#32622;&#20013;&#20351;&#29992;&#37038;&#31665;&#22320;&#22336;&#21644;&#25480;&#26435;&#30721;</p>
-      </div>
-    </Message>
+    <Card class="panel sbm-surface">
+      <template #title>
+        <div class="panel-title">
+          <span>QQ 邮箱配置说明</span>
+        </div>
+      </template>
+      <template #content>
+        <ol class="guide-list">
+          <li>登录 QQ 邮箱，进入“设置” → “账户”</li>
+          <li>找到“IMAP/SMTP 服务”并开启</li>
+          <li>生成“授权码”（不是 QQ 密码）</li>
+          <li>在下方配置中使用邮箱地址和授权码</li>
+        </ol>
+      </template>
+    </Card>
 
     <Card class="panel sbm-surface">
       <template #title>
@@ -206,7 +212,6 @@ import Dropdown from 'primevue/dropdown'
 import InputNumber from 'primevue/inputnumber'
 import InputSwitch from 'primevue/inputswitch'
 import InputText from 'primevue/inputtext'
-import Message from 'primevue/message'
 import Password from 'primevue/password'
 import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
@@ -532,19 +537,15 @@ onMounted(() => {
   gap: 16px;
 }
 
-.info {
-  border-radius: var(--radius-lg);
+.guide-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--p-text-muted-color);
 }
 
-.info-title {
-  font-weight: 800;
-  margin-bottom: 6px;
-}
-
-.info-body p {
+.guide-list li {
   margin: 6px 0;
-  color: var(--color-text-secondary);
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
 .panel {

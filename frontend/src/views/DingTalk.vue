@@ -1,13 +1,19 @@
 <template>
   <div class="page">
-    <Message severity="info" :closable="false" class="info">
-      <div class="info-title">&#38025;&#38025;&#26426;&#22120;&#20154;&#37197;&#32622;&#35828;&#26126;</div>
-      <ul class="info-list">
-        <li>&#21019;&#24314;&#19968;&#20010;&#38025;&#38025;&#26426;&#22120;&#20154;&#65292;&#25214;&#21040;&#23427;&#30340; Webhook</li>
-        <li>&#22914;&#26524;&#24320;&#21551;&#20102;&#23433;&#20840;&#35774;&#32622;&#65288;&#22914;&#21152;&#31614;&#65289;&#65292;&#35831;&#22312;&#19979;&#26041;&#22635;&#20889;&#23545;&#24212;&#23383;&#27573;</li>
-        <li>&#20445;&#23384;&#21518;&#65292;&#28857;&#20987;&#8220;Copy Webhook URL&#8221; &#33719;&#21462;&#21518;&#21488;&#25509;&#25910;&#22320;&#22336;</li>
-      </ul>
-    </Message>
+    <Card class="panel sbm-surface">
+      <template #title>
+        <div class="panel-title">
+          <span>钉钉机器人配置说明</span>
+        </div>
+      </template>
+      <template #content>
+        <ul class="guide-list">
+          <li>创建一个钉钉机器人，找到它的 Webhook</li>
+          <li>如果开启了安全设置（如加签），请在下方填写对应字段</li>
+          <li>保存后，点击 “Copy Webhook URL” 获取后台接收地址</li>
+        </ul>
+      </template>
+    </Card>
 
     <Card class="panel sbm-surface">
       <template #title>
@@ -136,7 +142,6 @@ import DataTable from 'primevue/datatable'
 import Dialog from 'primevue/dialog'
 import InputText from 'primevue/inputtext'
 import InputSwitch from 'primevue/inputswitch'
-import Message from 'primevue/message'
 import Password from 'primevue/password'
 import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
@@ -354,19 +359,15 @@ onMounted(() => {
   gap: 16px;
 }
 
-.info {
-  border-radius: var(--radius-lg);
-}
-
-.info-title {
-  font-weight: 800;
-  margin-bottom: 6px;
-}
-
-.info-list {
+.guide-list {
   margin: 0;
   padding-left: 18px;
-  color: var(--color-text-secondary);
+  color: var(--p-text-muted-color);
+}
+
+.guide-list li {
+  margin: 6px 0;
+  line-height: 1.55;
 }
 
 .panel {

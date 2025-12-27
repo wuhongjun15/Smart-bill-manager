@@ -84,8 +84,9 @@
         <div class="topbar-right">
           <NotificationCenter />
           <button class="user-button" type="button" @click="toggleUserMenu">
-            <Avatar :label="userInitial" shape="circle" class="user-avatar" />
-            <span class="username">{{ authStore.user?.username || '\u7528\u6237' }}</span>
+            <Avatar v-if="userAvatarLabel" :label="userAvatarLabel" shape="circle" class="user-avatar" />
+            <Avatar v-else icon="pi pi-user" shape="circle" class="user-avatar" />
+            <span class="username">{{ userDisplayName }}</span>
             <i class="pi pi-angle-down" />
           </button>
           <Menu ref="userMenu" :model="userMenuItems" popup />
@@ -135,16 +136,19 @@ const pageTitle = computed(() => {
   return titles[route.path] || titles['/dashboard']
 })
 
-const userInitial = computed(() => {
-  const name = authStore.user?.username || ''
-  const trimmed = name.trim()
-  if (!trimmed) return '?'
-  return trimmed[0].toUpperCase()
+const userDisplayName = computed(() => authStore.user?.username?.trim() || '\u7528\u6237')
+
+const userAvatarLabel = computed(() => {
+  const trimmed = userDisplayName.value.trim()
+  if (!trimmed || trimmed === '\u7528\u6237') return ''
+  const first = trimmed[0]
+  if (/^\d$/.test(first)) return ''
+  return /[a-z]/i.test(first) ? first.toUpperCase() : first
 })
 
 const userMenuItems = computed(() => [
   {
-    label: authStore.user?.username || '\u7528\u6237',
+    label: userDisplayName.value,
     icon: 'pi pi-user',
     disabled: true,
   },
@@ -358,6 +362,7 @@ const toggleUserMenu = (event: MouseEvent) => {
 }
 
 .user-button {
+  height: 44px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -374,12 +379,20 @@ const toggleUserMenu = (event: MouseEvent) => {
 }
 
 .user-avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
   box-shadow: none;
 }
 
 .username {
   color: var(--p-text-color);
   font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .user-button i {
