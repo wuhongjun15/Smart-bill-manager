@@ -236,12 +236,38 @@
           </div>
           <div class="col-12 md:col-6 field">
             <label for="trip_start">开始时间</label>
-            <DatePicker id="trip_start" v-model="tripForm.start" showTime showSeconds :manualInput="false" />
+            <DatePicker
+              id="trip_start"
+              ref="tripStartPicker"
+              v-model="tripForm.start"
+              showTime
+              showSeconds
+              :manualInput="false"
+            >
+              <template #footer>
+                <div class="dp-footer">
+                  <Button type="button" size="small" label="确定" @click="closeDatePicker(tripStartPicker)" />
+                </div>
+              </template>
+            </DatePicker>
             <small v-if="tripErrors.start" class="p-error">{{ tripErrors.start }}</small>
           </div>
           <div class="col-12 md:col-6 field">
             <label for="trip_end">结束时间</label>
-            <DatePicker id="trip_end" v-model="tripForm.end" showTime showSeconds :manualInput="false" />
+            <DatePicker
+              id="trip_end"
+              ref="tripEndPicker"
+              v-model="tripForm.end"
+              showTime
+              showSeconds
+              :manualInput="false"
+            >
+              <template #footer>
+                <div class="dp-footer">
+                  <Button type="button" size="small" label="确定" @click="closeDatePicker(tripEndPicker)" />
+                </div>
+              </template>
+            </DatePicker>
             <small v-if="tripErrors.end" class="p-error">{{ tripErrors.end }}</small>
           </div>
           <div class="col-12 field">
@@ -307,6 +333,15 @@ const confirm = useConfirm()
 const notifications = useNotificationStore()
 
 const activeTab = ref<'trips' | 'calendar'>('trips')
+
+const tripStartPicker = ref<any>(null)
+const tripEndPicker = ref<any>(null)
+
+const closeDatePicker = (pickerRef: { value: any } | any) => {
+  const inst = pickerRef?.value ?? pickerRef
+  if (!inst) return
+  inst.overlayVisible = false
+}
 
 const trips = ref<Trip[]>([])
 const summaries = reactive<Record<string, TripSummary>>({})
@@ -885,6 +920,16 @@ onMounted(async () => {
   font-size: 10px;
   color: var(--p-text-muted-color);
   line-height: 1;
+}
+
+:global(.p-datepicker-day.p-datepicker-day-selected .date-cell .date-day) {
+  color: var(--p-surface-0, #ffffff) !important;
+}
+
+.dp-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 10px;
 }
 
 .field {
