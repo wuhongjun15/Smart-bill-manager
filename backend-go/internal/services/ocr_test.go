@@ -639,6 +639,82 @@ func TestParseInvoiceData_ItemsExtraction_ImageTextStopsOnInlineLabelsAndTotals(
 	}
 }
 
+func TestParseInvoiceData_ItemsExtraction_ImageText_SplitHejiAndSellerLines(t *testing.T) {
+	service := NewOCRService()
+
+	// A real-world image OCR case where:
+	// - "合计" is split across lines ("合" then "计")
+	// - seller fields are split ("名" then "称：xxx")
+	// Ensure we still extract both items and stop before seller/footer blocks.
+	sampleText := `发票代码：035021700111
+厦门增值税电子普通发票
+发票号码：31126517
+开票日期：2025年11月16日
+校验码：59872359464135616868
+购
+名
+称：邬先生
+货物或应税劳务、服务名称
+规格型号
+单位
+数量
+单价
+金额
+税率
+税额
+*乳制品*Member'sMark希腊式酸奶1.23kg（410g*3)
+3X410g
+组
+2
+53.01
+106.02
+13%
+13.78
+*日用杂品*包装费配送费
+1.77
+1.77
+13%
+0.23
+合
+计
+￥107.79
+￥14.01
+价税合计(大写)
+壹佰贰拾壹圆捌角
+（小写）￥121.80
+名
+称：沃尔玛（厦门）商业零售有限公司
+订单号[3087538259083065845]
+销售方
+纳税人识别号：913502005750394918
+发票专用章`
+
+	data, err := service.ParseInvoiceData(sampleText)
+	if err != nil {
+		t.Fatalf("ParseInvoiceData returned error: %v", err)
+	}
+	if len(data.Items) != 2 {
+		t.Fatalf("Expected 2 items, got %d: %+v", len(data.Items), data.Items)
+	}
+	if data.Items[0].Quantity == nil || *data.Items[0].Quantity != 2 {
+		t.Fatalf("Expected first item quantity 2, got %+v", data.Items[0].Quantity)
+	}
+	if data.Items[1].Quantity == nil || *data.Items[1].Quantity != 1 {
+		t.Fatalf("Expected second item quantity 1, got %+v", data.Items[1].Quantity)
+	}
+	if !strings.Contains(data.Items[0].Name, "乳制品") {
+		t.Fatalf("Expected first item to contain 乳制品, got %q", data.Items[0].Name)
+	}
+	if !strings.Contains(data.Items[1].Name, "包装费配送费") {
+		t.Fatalf("Expected second item to contain 包装费配送费, got %q", data.Items[1].Name)
+	}
+	for _, it := range data.Items {
+		if strings.Contains(it.Name, "价税合计") || strings.Contains(it.Name, "沃尔玛（厦门）商业零售有限公司") {
+			t.Fatalf("Unexpected non-item captured as item: %+v", data.Items)
+		}
+	}
+}
+
 func TestExtractPartyFromROICandidate_NameLabels(t *testing.T) {
 	buyerText := `购买方名称：张三
 购买方纳税人识别号：91310000132149237G

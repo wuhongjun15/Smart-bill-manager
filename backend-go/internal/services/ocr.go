@@ -2379,6 +2379,7 @@ func normalizeInvoiceTextForParsing(text string) string {
 		{regexp.MustCompile(`校\s*验\s*码`), "校验码"},
 		{regexp.MustCompile(`纳\s*税\s*人\s*识\s*别\s*号`), "纳税人识别号"},
 		{regexp.MustCompile(`名\s*称`), "名称"},
+		{regexp.MustCompile(`合\s*计`), "合计"},
 	}
 	for _, r := range replacements {
 		text = r.re.ReplaceAllString(text, r.repl)
@@ -2802,8 +2803,12 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 				break
 			}
 		}
-		if start > startIdx {
-			startIdx = start
+		// Override window-based start when we managed to anchor to a likely name line.
+		if start >= 0 && start < len(block) {
+			cand := strings.TrimSpace(block[start])
+			if strings.HasPrefix(cand, "*") || isLikelyItemNameLine(cand) {
+				startIdx = start
+			}
 		}
 	}
 	if startIdx > 0 && startIdx < len(block) {
