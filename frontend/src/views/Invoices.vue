@@ -180,20 +180,20 @@
         <div v-if="getInvoiceItems(previewInvoice).length" class="items-section">
           <div class="items-title">&#21830;&#21697;&#26126;&#32454;</div>
           <DataTable class="items-table" :value="getInvoiceItems(previewInvoice)" scrollHeight="220px" :scrollable="true" responsiveLayout="scroll">
-            <Column field="name" :header="'\u5546\u54C1\u540D\u79F0'">
+            <Column field="name" :header="'\u5546\u54C1\u540D\u79F0'" :style="{ width: '360px' }">
               <template #body="{ data: row }">
                 <span class="sbm-ellipsis" :title="row.name">{{ row.name }}</span>
               </template>
             </Column>
-            <Column field="spec" :header="'\u89C4\u683C\u578B\u53F7'" :style="{ width: '200px' }">
+            <Column field="spec" :header="'\u89C4\u683C\u578B\u53F7'" :style="{ width: '240px' }">
               <template #body="{ data: row }">
                 <span class="sbm-ellipsis" :title="row.spec || '-'">{{ row.spec || '-' }}</span>
               </template>
             </Column>
-            <Column field="unit" :header="'\u5355\u4F4D'" :style="{ width: '120px' }">
+            <Column field="unit" :header="'\u5355\u4F4D'" :style="{ width: '100px' }">
               <template #body="{ data: row }">{{ row.unit || '-' }}</template>
             </Column>
-            <Column field="quantity" :header="'\u6570\u91CF'" :style="{ width: '120px' }">
+            <Column field="quantity" :header="'\u6570\u91CF'" :style="{ width: '100px' }">
               <template #body="{ data: row }">{{ formatItemQuantity(row.quantity) }}</template>
             </Column>
           </DataTable>
@@ -991,6 +991,15 @@ onMounted(() => {
 .items-table :deep(.p-datatable-thead > tr > th),
 .items-table :deep(.p-datatable-tbody > tr > td) {
   white-space: nowrap;
+}
+
+.items-table :deep(.p-datatable-table-container) {
+  overflow-x: auto;
+}
+
+.items-table :deep(.p-datatable-table) {
+  width: auto !important;
+  table-layout: fixed;
 }
 
 .no-data {
