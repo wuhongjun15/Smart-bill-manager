@@ -126,7 +126,7 @@
         </Card>
       </div>
 
-      <div class="grid">
+      <div class="grid grid-equal">
         <Card class="panel sbm-surface">
           <template #title>
             <div class="panel-title">
@@ -146,9 +146,7 @@
             <div v-else class="empty-mini">&#26242;&#26080;&#25968;&#25454;</div>
           </template>
         </Card>
-      </div>
 
-      <div class="grid">
         <Card class="panel sbm-surface">
           <template #title>
             <div class="panel-title">
@@ -276,30 +274,32 @@
         </Card>
       </div>
 
-      <Card class="panel col-span-2 sbm-surface">
-        <template #title>
-          <span><i class="pi pi-envelope" /> &#37038;&#31665;&#30417;&#25511;&#29366;&#24577;</span>
-        </template>
-        <template #content>
-          <div v-if="data.email.monitoringStatus.length > 0" class="monitor-list">
-            <div v-for="(item, index) in data.email.monitoringStatus" :key="item.configId || index" class="monitor-item">
-              <div class="monitor-left">
-                <div class="monitor-label">&#37038;&#31665; {{ index + 1 }}</div>
-                <Tag
-                  :severity="item.status === 'running' ? 'success' : 'info'"
-                  :value="item.status === 'running' ? '\u8FD0\u884C\u4E2D' : '\u5DF2\u505C\u6B62'"
+      <div class="grid">
+        <Card class="panel col-span-2 sbm-surface">
+          <template #title>
+            <span><i class="pi pi-envelope" /> &#37038;&#31665;&#30417;&#25511;&#29366;&#24577;</span>
+          </template>
+          <template #content>
+            <div v-if="data.email.monitoringStatus.length > 0" class="monitor-list">
+              <div v-for="(item, index) in data.email.monitoringStatus" :key="item.configId || index" class="monitor-item">
+                <div class="monitor-left">
+                  <div class="monitor-label">&#37038;&#31665; {{ index + 1 }}</div>
+                  <Tag
+                    :severity="item.status === 'running' ? 'success' : 'info'"
+                    :value="item.status === 'running' ? '\u8FD0\u884C\u4E2D' : '\u5DF2\u505C\u6B62'"
+                  />
+                </div>
+                <ProgressBar
+                  :value="item.status === 'running' ? 100 : 0"
+                  :showValue="false"
+                  style="height: 10px"
                 />
               </div>
-              <ProgressBar
-                :value="item.status === 'running' ? 100 : 0"
-                :showValue="false"
-                style="height: 10px"
-              />
             </div>
-          </div>
-          <div v-else class="empty-mini">&#26242;&#26080;&#37197;&#32622;&#37038;&#31665;</div>
-        </template>
-      </Card>
+            <div v-else class="empty-mini">&#26242;&#26080;&#37197;&#32622;&#37038;&#31665;</div>
+          </template>
+        </Card>
+      </div>
     </template>
   </div>
 </template>
@@ -636,12 +636,22 @@ onMounted(() => {
   gap: 16px;
 }
 
+.grid > * {
+  min-width: 0;
+}
+
+.grid-equal {
+  grid-template-columns: 1fr 1fr;
+}
+
 .col-span-2 {
   grid-column: span 2 / span 2;
 }
 
 .panel {
   border-radius: 16px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .panel-title {
