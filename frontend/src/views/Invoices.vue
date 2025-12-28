@@ -265,10 +265,13 @@
 
         <Divider />
 
-        <div v-if="getInvoiceRawText(previewInvoice)" class="raw-section">
-          <div class="raw-title">OCR &#21407;&#22987;&#25991;&#26412;</div>
+        <div v-if="getInvoiceRawText(previewInvoice) || getInvoicePrettyText(previewInvoice)" class="raw-section">
+          <div class="raw-title">OCR &#25991;&#26412;</div>
           <Accordion>
-            <AccordionTab :header="'\u70B9\u51FB\u67E5\u770B OCR \u539F\u59CB\u6587\u672C'">
+            <AccordionTab v-if="getInvoicePrettyText(previewInvoice)" :header="'\u70B9\u51FB\u67E5\u770B OCR \u6574\u7406\u7248\u6587\u672C'">
+              <pre class="raw-text">{{ getInvoicePrettyText(previewInvoice) }}</pre>
+            </AccordionTab>
+            <AccordionTab v-if="getInvoiceRawText(previewInvoice)" :header="'\u70B9\u51FB\u67E5\u770B OCR \u539F\u59CB\u6587\u672C'">
               <pre class="raw-text">{{ getInvoiceRawText(previewInvoice) }}</pre>
             </AccordionTab>
           </Accordion>
@@ -656,6 +659,17 @@ const getInvoiceRawText = (invoice: Invoice | null) => {
     return data.raw_text || ''
   } catch {
     return invoice.extracted_data || ''
+  }
+}
+
+const getInvoicePrettyText = (invoice: Invoice | null) => {
+  if (!invoice) return ''
+  if (!invoice.extracted_data) return ''
+  try {
+    const data = JSON.parse(invoice.extracted_data)
+    return data.pretty_text || ''
+  } catch {
+    return ''
   }
 }
 

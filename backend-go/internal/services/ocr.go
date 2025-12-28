@@ -152,6 +152,7 @@ type InvoiceExtractedData struct {
 	BuyerName     *string           `json:"buyer_name"`
 	Items         []InvoiceLineItem `json:"items,omitempty"`
 	RawText       string            `json:"raw_text"`
+	PrettyText    string            `json:"pretty_text,omitempty"`
 }
 
 // OCRCLIResponse represents the response from the Python OCR CLI script.
@@ -2396,6 +2397,96 @@ func normalizeInvoiceTextForParsing(text string) string {
 	return text
 }
 
+func normalizeInvoiceTextForPretty(text string) string {
+	text = normalizeInvoiceTextForParsing(text)
+	text = paymentInvisibleSpaceReplacer.Replace(text)
+
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		s := strings.TrimSpace(line)
+		if s == "" {
+			continue
+		}
+		out = append(out, s)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+func formatFloat2(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.2f", *v)
+}
+
+func formatInvoicePrettyText(raw string, data *InvoiceExtractedData) string {
+	clean := normalizeInvoiceTextForPretty(raw)
+
+	var b strings.Builder
+	b.WriteString("【整理摘要】\n")
+	if data.InvoiceNumber != nil && strings.TrimSpace(*data.InvoiceNumber) != "" {
+		b.WriteString("发票号码：")
+		b.WriteString(strings.TrimSpace(*data.InvoiceNumber))
+		b.WriteString("\n")
+	}
+	if data.InvoiceDate != nil && strings.TrimSpace(*data.InvoiceDate) != "" {
+		b.WriteString("开票日期：")
+		b.WriteString(strings.TrimSpace(*data.InvoiceDate))
+		b.WriteString("\n")
+	}
+	if amt := formatFloat2(data.Amount); amt != "" {
+		b.WriteString("价税合计(小写)：￥")
+		b.WriteString(amt)
+		b.WriteString("\n")
+	}
+	if tax := formatFloat2(data.TaxAmount); tax != "" {
+		b.WriteString("税额：￥")
+		b.WriteString(tax)
+		b.WriteString("\n")
+	}
+	if data.BuyerName != nil && strings.TrimSpace(*data.BuyerName) != "" {
+		b.WriteString("购买方：")
+		b.WriteString(strings.TrimSpace(*data.BuyerName))
+		b.WriteString("\n")
+	}
+	if data.SellerName != nil && strings.TrimSpace(*data.SellerName) != "" {
+		b.WriteString("销售方：")
+		b.WriteString(strings.TrimSpace(*data.SellerName))
+		b.WriteString("\n")
+	}
+
+	if len(data.Items) > 0 {
+		b.WriteString("\n【商品明细(解析)】\n")
+		b.WriteString("商品名称\t数量\n")
+		for _, it := range data.Items {
+			name := strings.TrimSpace(it.Name)
+			if name == "" {
+				continue
+			}
+			qty := "-"
+			if it.Quantity != nil {
+				if *it.Quantity == float64(int64(*it.Quantity)) {
+					qty = fmt.Sprintf("%d", int64(*it.Quantity))
+				} else {
+					qty = fmt.Sprintf("%g", *it.Quantity)
+				}
+			}
+			b.WriteString(name)
+			b.WriteString("\t")
+			b.WriteString(qty)
+			b.WriteString("\n")
+		}
+	}
+
+	if clean != "" {
+		b.WriteString("\n【整理后的OCR文本】\n")
+		b.WriteString(clean)
+	}
+
+	return strings.TrimSpace(b.String())
+}
+
 func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	text = normalizeInvoiceTextForParsing(text)
 	lines := strings.Split(text, "\n")
@@ -3466,6 +3557,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	}
 
 	data.Items = extractInvoiceLineItems(parsedText)
+	data.PrettyText = formatInvoicePrettyText(text, data)
 	return data, nil
 }
 

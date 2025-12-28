@@ -343,6 +343,9 @@ func TestParseInvoiceData_ItemsExtraction(t *testing.T) {
 	if data.Items[0].Name == "" || data.Items[1].Name == "" {
 		t.Fatalf("Expected item names to be non-empty, got %+v", data.Items)
 	}
+	if data.PrettyText == "" || !strings.Contains(data.PrettyText, "【商品明细(解析)】") {
+		t.Fatalf("Expected PrettyText to include items section, got: %q", data.PrettyText)
+	}
 }
 
 func TestParseInvoiceData_ItemsExtraction_PDFTextNoisy(t *testing.T) {
