@@ -50,7 +50,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import OverlayPanel from 'primevue/overlaypanel'
 import Tag from 'primevue/tag'
@@ -64,6 +64,11 @@ const lastTarget = ref<HTMLElement | null>(null)
 
 const items = computed(() => store.items)
 const unreadCount = computed(() => store.unreadCount)
+
+const isOpen = () => {
+  const p = panel.value as any
+  return !!p?.visible
+}
 
 const getOverlayEl = (): HTMLElement | null => {
   const p = panel.value as any
@@ -123,6 +128,7 @@ const realign = async () => {
   await nextTick()
   const p = panel.value
   if (!p) return
+  if (!isOpen()) return
   if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
     window.requestAnimationFrame(() => {
       p.alignOverlay()
@@ -133,6 +139,23 @@ const realign = async () => {
   p.alignOverlay()
   forceLeftAligned()
 }
+
+const handleViewportChange = () => {
+  if (!isOpen()) return
+  void realign()
+}
+
+onMounted(() => {
+  if (typeof window === 'undefined') return
+  window.addEventListener('resize', handleViewportChange, { passive: true })
+  window.addEventListener('orientationchange', handleViewportChange, { passive: true } as any)
+})
+
+onBeforeUnmount(() => {
+  if (typeof window === 'undefined') return
+  window.removeEventListener('resize', handleViewportChange as any)
+  window.removeEventListener('orientationchange', handleViewportChange as any)
+})
 
 const handleItemClick = async (id: string) => {
   store.markRead(id)
@@ -198,14 +221,14 @@ const severityToTag = (s: NotificationSeverity): 'success' | 'info' | 'warn' | '
 
 /* OverlayPanel/Popover is teleported to <body>, so styles must be global. */
 :global(.p-popover.nc-panel) {
-  width: clamp(360px, 44vw, 480px);
+  width: clamp(340px, 34vw, 420px);
   border-radius: 20px;
   box-shadow: var(--shadow-xl);
   overflow: hidden;
 }
 
 :global(.p-overlaypanel.nc-panel) {
-  width: clamp(360px, 44vw, 480px);
+  width: clamp(340px, 34vw, 420px);
   border-radius: 20px;
   box-shadow: var(--shadow-xl);
   overflow: hidden;
@@ -298,20 +321,22 @@ const severityToTag = (s: NotificationSeverity): 'success' | 'info' | 'warn' | '
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1;
 }
 
 .nc-text {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 800;
   color: var(--p-text-color);
-  max-width: min(320px, 50vw);
 }
 
 .nc-tag {
   flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .nc-detail {
