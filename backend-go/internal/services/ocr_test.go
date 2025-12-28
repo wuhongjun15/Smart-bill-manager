@@ -404,6 +404,64 @@ func TestParseInvoiceData_ItemsExtraction_PDFTextNoisy(t *testing.T) {
 	}
 }
 
+func TestParseInvoiceData_ItemsExtraction_PDFTextStopsBeforePartyInfo(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `货物或应税劳务、服务名称
+规格型号   单位
+数 量
+单 价
+金 额
+税率
+税额
+*乳制品*Member's Mark 希腊式酸奶 1.23kg(410g*3)
+3X410g
+组
+2
+53.01
+106.02
+13%
+13.78
+*日用杂品*包装费配送费
+1
+1.77
+1.77
+13%
+0.23
+名称:
+纳税人识别号:
+地址、电话:
+开户行及账号:
+沃尔玛（厦门）商业零售有限公司
+收款人：沃尔玛
+复核：黄寿全
+开票人：林燕红
+订单号[3087538259083065845]
+发票专用章`
+
+	data, err := service.ParseInvoiceData(sampleText)
+	if err != nil {
+		t.Fatalf("ParseInvoiceData returned error: %v", err)
+	}
+	if len(data.Items) != 2 {
+		t.Fatalf("Expected 2 items, got %d: %+v", len(data.Items), data.Items)
+	}
+	if data.Items[0].Quantity == nil || *data.Items[0].Quantity != 2 {
+		t.Fatalf("Expected first item quantity 2, got %+v", data.Items[0].Quantity)
+	}
+	if data.Items[1].Quantity == nil || *data.Items[1].Quantity != 1 {
+		t.Fatalf("Expected second item quantity 1, got %+v", data.Items[1].Quantity)
+	}
+	for _, it := range data.Items {
+		if it.Name == "" {
+			t.Fatalf("Expected non-empty item name: %+v", data.Items)
+		}
+		if it.Name == "名称" || it.Name == "纳税人识别号" {
+			t.Fatalf("Unexpected label captured as item: %+v", data.Items)
+		}
+	}
+}
+
 func TestExtractPartyFromROICandidate_NameLabels(t *testing.T) {
 	buyerText := `购买方名称：张三
 购买方纳税人识别号：91310000132149237G

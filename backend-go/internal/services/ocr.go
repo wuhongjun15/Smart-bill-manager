@@ -2444,7 +2444,7 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	isBlockEndLine := func(s string) bool {
 		// For PDF text extraction, invoice meta (code/date/check) can appear between the header and
 		// actual rows. Only stop when we reach totals/summary, otherwise we might cut off items.
-		if strings.Contains(s, "价税合计") {
+		if strings.Contains(s, "价税合计") && (strings.ContainsAny(s, "¥￥") || strings.Contains(s, "\uffe5") || regexp.MustCompile(`\d+\.\d{2}`).MatchString(s)) {
 			return true
 		}
 		// Sometimes totals are broken into multiple lines; treat a "合计" line that also has currency as end.
@@ -2498,6 +2498,7 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	// - 410g×3
 	// - 750ml×6
 	specTokenRe := regexp.MustCompile(`(?i)^(?:\d+\s*[x×]\s*\d+(?:\.\d+)?\s*(?:g|kg|ml|l)?|\d+(?:\.\d+)?\s*(?:g|kg|ml|l)?\s*[x×]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?[a-z]{1,4}\s*[x×]\s*\d+(?:\.\d+)?)$`)
+	labelLineRe := regexp.MustCompile(`^(?:名称|名\s*称|纳税人识别号|地址|地址、电话|地址,电话|电话|开户行|开户行及账号|账号)[:：]?$`)
 
 	categoryPrefixRe := regexp.MustCompile(`^\*([^*]+)\*`)
 	normalizeName := func(s string) string {
@@ -2512,6 +2513,16 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 
 	isLikelyItemNameLine := func(s string) bool {
 		if s == "" || isHeaderLine(s) || isStopLine(s) {
+			return false
+		}
+		if labelLineRe.MatchString(s) {
+			return false
+		}
+		if strings.Contains(s, "订单号") || strings.Contains(s, "发票专用章") {
+			return false
+		}
+		// Label-like rows (often from PDF extraction) shouldn't be treated as item names.
+		if strings.HasSuffix(s, ":") || strings.HasSuffix(s, "：") {
 			return false
 		}
 		if taxRateRe.MatchString(s) || numOnlyRe.MatchString(s) {
@@ -2664,10 +2675,41 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		currentQty = nil
 	}
 
+	isTableExitLine := func(s string) bool {
+		// After items, PDF text often continues with buyer/seller blocks and footer.
+		if labelLineRe.MatchString(s) {
+			return true
+		}
+		exitMarkers := []string{
+			"销售方", "购买方",
+			"收款人", "复核", "开票人",
+			"发票专用章",
+			"订单号",
+		}
+		for _, m := range exitMarkers {
+			if strings.Contains(s, m) {
+				return true
+			}
+		}
+		// Chinese uppercase total line often appears after items.
+		if strings.ContainsAny(s, "圆元角分") && regexp.MustCompile(`[零壹贰叁肆伍陆柒捌玖拾佰仟万萬亿]+`).MatchString(s) {
+			return true
+		}
+		return false
+	}
+
 	for idx := 0; idx < len(block); idx++ {
 		s := strings.TrimSpace(block[idx])
 		if s == "" || isHeaderLine(s) {
 			continue
+		}
+
+		// If we already started collecting items, stop once we hit non-table sections.
+		if len(items) > 0 && isTableExitLine(s) {
+			if currentName != "" {
+				flush()
+			}
+			break
 		}
 
 		// Specs/models often appear on their own line (e.g. "3X410g"); don't create a new item.
