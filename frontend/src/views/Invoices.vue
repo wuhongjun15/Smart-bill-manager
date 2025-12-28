@@ -177,6 +177,20 @@
           </div>
         </div>
 
+        <div v-if="getInvoiceItems(previewInvoice).length" class="items-section">
+          <div class="items-title">&#21830;&#21697;&#26126;&#32454;</div>
+          <DataTable class="items-table" :value="getInvoiceItems(previewInvoice)" scrollHeight="220px" :scrollable="true" responsiveLayout="scroll">
+            <Column field="name" :header="'\u5546\u54C1\u540D\u79F0'">
+              <template #body="{ data: row }">
+                <span class="sbm-ellipsis" :title="row.name">{{ row.name }}</span>
+              </template>
+            </Column>
+            <Column field="quantity" :header="'\u6570\u91CF'" :style="{ width: '120px' }">
+              <template #body="{ data: row }">{{ formatItemQuantity(row.quantity) }}</template>
+            </Column>
+          </DataTable>
+        </div>
+
         <Divider />
 
         <div class="match-header">
@@ -572,6 +586,33 @@ const formatDateTime = (date?: string) => {
   return dayjs(date).format('YYYY-MM-DD HH:mm')
 }
 
+type InvoiceLineItem = { name: string; quantity?: number }
+
+const getInvoiceItems = (invoice: Invoice | null): InvoiceLineItem[] => {
+  if (!invoice?.extracted_data) return []
+  try {
+    const data = JSON.parse(invoice.extracted_data) as { items?: unknown }
+    if (!Array.isArray(data.items)) return []
+    return data.items
+      .map((it: unknown) => {
+        const obj = (it ?? {}) as Record<string, unknown>
+        return {
+          name: typeof obj.name === 'string' ? obj.name : '',
+          quantity: typeof obj.quantity === 'number' ? obj.quantity : undefined,
+        }
+      })
+      .filter((it: InvoiceLineItem) => it.name.trim().length > 0)
+  } catch {
+    return []
+  }
+}
+
+const formatItemQuantity = (qty?: number) => {
+  if (qty == null) return '-'
+  if (Number.isFinite(qty) && Number.isInteger(qty)) return String(qty)
+  return String(qty)
+}
+
 const formatInvoiceDate = (date?: string) => {
   if (!date) return '-'
   const parsed = dayjs(date)
@@ -911,6 +952,21 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: bottom;
+}
+
+.items-section {
+  margin-top: 10px;
+}
+
+.items-title {
+  font-weight: 900;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
+}
+
+.items-table :deep(.p-datatable-thead > tr > th),
+.items-table :deep(.p-datatable-tbody > tr > td) {
+  white-space: nowrap;
 }
 
 .no-data {

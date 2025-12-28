@@ -137,15 +137,21 @@ type PaymentExtractedData struct {
 	RawText         string   `json:"raw_text"`
 }
 
+type InvoiceLineItem struct {
+	Name     string   `json:"name"`
+	Quantity *float64 `json:"quantity,omitempty"`
+}
+
 // InvoiceExtractedData represents extracted invoice information
 type InvoiceExtractedData struct {
-	InvoiceNumber *string  `json:"invoice_number"`
-	InvoiceDate   *string  `json:"invoice_date"`
-	Amount        *float64 `json:"amount"`
-	TaxAmount     *float64 `json:"tax_amount"`
-	SellerName    *string  `json:"seller_name"`
-	BuyerName     *string  `json:"buyer_name"`
-	RawText       string   `json:"raw_text"`
+	InvoiceNumber *string           `json:"invoice_number"`
+	InvoiceDate   *string           `json:"invoice_date"`
+	Amount        *float64          `json:"amount"`
+	TaxAmount     *float64          `json:"tax_amount"`
+	SellerName    *string           `json:"seller_name"`
+	BuyerName     *string           `json:"buyer_name"`
+	Items         []InvoiceLineItem `json:"items,omitempty"`
+	RawText       string            `json:"raw_text"`
 }
 
 // OCRCLIResponse represents the response from the Python OCR CLI script.
@@ -2389,6 +2395,244 @@ func normalizeInvoiceTextForParsing(text string) string {
 	return text
 }
 
+func extractInvoiceLineItems(text string) []InvoiceLineItem {
+	text = normalizeInvoiceTextForParsing(text)
+	lines := strings.Split(text, "\n")
+
+	headerIdx := -1
+	for i, raw := range lines {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			continue
+		}
+		if strings.Contains(s, "货物或应税劳务") || strings.Contains(s, "服务名称") || strings.Contains(s, "项目名称") {
+			headerIdx = i
+			break
+		}
+	}
+	if headerIdx < 0 {
+		return nil
+	}
+
+	isStopLine := func(s string) bool {
+		stopMarkers := []string{
+			"价税合计",
+			"合计",
+			"校验码",
+			"收款人",
+			"复核",
+			"开票人",
+			"发票代码",
+			"发票号码",
+			"开票日期",
+			"备注",
+			"销售方",
+			"购买方",
+		}
+		for _, m := range stopMarkers {
+			if strings.Contains(s, m) {
+				return true
+			}
+		}
+		return false
+	}
+
+	isHeaderLine := func(s string) bool {
+		headerMarkers := []string{
+			"货物或应税劳务",
+			"服务名称",
+			"项目名称",
+			"规格型号",
+			"单位",
+			"数量",
+			"单价",
+			"金额",
+			"税率",
+			"税额",
+		}
+		for _, m := range headerMarkers {
+			if strings.Contains(s, m) {
+				return true
+			}
+		}
+		return false
+	}
+
+	unitTokenRe := regexp.MustCompile(`^[\p{Han}]{1,2}$`)
+	isUnitToken := func(s string) bool {
+		if !unitTokenRe.MatchString(s) {
+			return false
+		}
+		// Avoid treating common unit-like tokens as item names/continuations.
+		switch s {
+		case "件", "个", "箱", "袋", "包", "瓶", "罐", "盒", "组", "台", "次", "张", "套", "份", "支", "双", "只", "米", "公斤", "千克", "克":
+			return true
+		default:
+			return false
+		}
+	}
+
+	numOnlyRe := regexp.MustCompile(`^\d+(?:\.\d+)?$`)
+	taxRateRe := regexp.MustCompile(`^\d{1,2}%$`)
+	quantityLabelRe := regexp.MustCompile(`数量\s*[:：]?\s*(\d+(?:\.\d+)?)`)
+
+	categoryPrefixRe := regexp.MustCompile(`^\*([^*]+)\*`)
+	normalizeName := func(s string) string {
+		s = strings.TrimSpace(s)
+		// Convert "*分类*" prefix to "分类 ".
+		s = categoryPrefixRe.ReplaceAllString(s, "$1 ")
+		// Remaining '*' are usually multipliers like "410g*3".
+		s = strings.ReplaceAll(s, "*", "×")
+		s = strings.Join(strings.Fields(s), " ")
+		return strings.TrimSpace(s)
+	}
+
+	isLikelyItemNameLine := func(s string) bool {
+		if s == "" || isHeaderLine(s) || isStopLine(s) {
+			return false
+		}
+		if taxRateRe.MatchString(s) || numOnlyRe.MatchString(s) {
+			return false
+		}
+		if isUnitToken(s) {
+			return false
+		}
+		// Require at least one letter or Han character.
+		hasText := false
+		for _, r := range s {
+			if unicode.Is(unicode.Han, r) || (unicode.IsLetter(r) && r < 128) {
+				hasText = true
+				break
+			}
+		}
+		if !hasText {
+			return false
+		}
+		n := len([]rune(s))
+		return n >= 2 && n <= 120
+	}
+
+	parseQuantity := func(s string) *float64 {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil
+		}
+		if m := quantityLabelRe.FindStringSubmatch(s); len(m) > 1 {
+			return parseAmount(m[1])
+		}
+		if !numOnlyRe.MatchString(s) {
+			return nil
+		}
+		q := parseAmount(s)
+		if q == nil {
+			return nil
+		}
+		if *q <= 0 || *q > 9999 {
+			return nil
+		}
+		// Prefer "smallish" integers (most invoice quantities are <= 999).
+		if strings.Contains(s, ".") && *q > 999 {
+			return nil
+		}
+		return q
+	}
+
+	block := make([]string, 0, 64)
+	for i := headerIdx + 1; i < len(lines); i++ {
+		s := strings.TrimSpace(lines[i])
+		if s == "" {
+			continue
+		}
+		if isStopLine(s) {
+			break
+		}
+		block = append(block, strings.Join(strings.Fields(s), " "))
+	}
+	if len(block) == 0 {
+		return nil
+	}
+
+	var (
+		items       []InvoiceLineItem
+		currentName string
+		currentQty  *float64
+	)
+	flush := func() {
+		name := normalizeName(currentName)
+		if name == "" {
+			currentName = ""
+			currentQty = nil
+			return
+		}
+		items = append(items, InvoiceLineItem{Name: name, Quantity: currentQty})
+		currentName = ""
+		currentQty = nil
+	}
+
+	for idx := 0; idx < len(block); idx++ {
+		s := strings.TrimSpace(block[idx])
+		if s == "" || isHeaderLine(s) {
+			continue
+		}
+
+		if isLikelyItemNameLine(s) {
+			if currentName != "" {
+				flush()
+			}
+			currentName = s
+			currentQty = nil
+
+			// Look ahead for a quantity token near the name line.
+			for j := idx + 1; j < len(block) && j <= idx+12; j++ {
+				t := strings.TrimSpace(block[j])
+				if t == "" || isHeaderLine(t) {
+					continue
+				}
+				if isLikelyItemNameLine(t) {
+					break
+				}
+				if isUnitToken(t) || taxRateRe.MatchString(t) {
+					continue
+				}
+				if q := parseQuantity(t); q != nil {
+					currentQty = q
+					break
+				}
+			}
+			continue
+		}
+
+		// Merge continuation lines for long item names (before quantity is found).
+		if currentName != "" && currentQty == nil {
+			if isUnitToken(s) || taxRateRe.MatchString(s) || numOnlyRe.MatchString(s) {
+				continue
+			}
+			if len([]rune(s)) >= 2 && len([]rune(s)) <= 80 {
+				currentName = strings.TrimSpace(currentName + " " + s)
+			}
+		}
+	}
+
+	if currentName != "" {
+		flush()
+	}
+
+	// De-duplicate by name (keep the first occurrence).
+	seen := make(map[string]struct{}, len(items))
+	out := make([]InvoiceLineItem, 0, len(items))
+	for _, it := range items {
+		if it.Name == "" {
+			continue
+		}
+		if _, ok := seen[it.Name]; ok {
+			continue
+		}
+		seen[it.Name] = struct{}{}
+		out = append(out, it)
+	}
+	return out
+}
+
 // extractBuyerAndSellerByPosition extracts buyer and seller names based on text position
 func (s *OCRService) extractBuyerAndSellerByPosition(text string) (buyer, seller *string) {
 	text = normalizeInvoiceTextForParsing(text)
@@ -2895,6 +3139,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		}
 	}
 
+	data.Items = extractInvoiceLineItems(parsedText)
 	return data, nil
 }
 
