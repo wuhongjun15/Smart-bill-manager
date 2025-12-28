@@ -138,7 +138,14 @@
       </template>
     </Dialog>
 
-    <Dialog v-model:visible="previewVisible" modal :header="'\u53D1\u7968\u8BE6\u60C5'" :style="{ width: '980px', maxWidth: '96vw' }">
+    <Dialog
+      v-model:visible="previewVisible"
+      modal
+      :header="'\u53D1\u7968\u8BE6\u60C5'"
+      :style="{ width: '860px', maxWidth: '94vw' }"
+      :breakpoints="{ '960px': '94vw', '640px': '96vw' }"
+      :contentStyle="{ padding: '14px 16px' }"
+    >
       <div v-if="previewInvoice" class="preview">
         <div class="header-row">
           <div class="title">
@@ -151,7 +158,7 @@
           </div>
         </div>
 
-        <div class="grid">
+        <div class="grid sbm-grid-tight">
           <div class="col-12 md:col-6">
             <div class="kv"><div class="k">&#21457;&#31080;&#21495;</div><div class="v">{{ previewInvoice.invoice_number || '-' }}</div></div>
           </div>
@@ -179,21 +186,21 @@
 
         <div v-if="getInvoiceItems(previewInvoice).length" class="items-section">
           <div class="items-title">&#21830;&#21697;&#26126;&#32454;</div>
-          <DataTable class="items-table" :value="getInvoiceItems(previewInvoice)" scrollHeight="220px" :scrollable="true" responsiveLayout="scroll">
-            <Column field="name" :header="'\u5546\u54C1\u540D\u79F0'" :style="{ width: '360px' }">
+          <DataTable class="items-table" :value="getInvoiceItems(previewInvoice)" responsiveLayout="scroll">
+            <Column field="name" :header="'\u5546\u54C1\u540D\u79F0'" :style="{ width: '48%' }">
               <template #body="{ data: row }">
                 <span class="sbm-ellipsis" :title="row.name">{{ row.name }}</span>
               </template>
             </Column>
-            <Column field="spec" :header="'\u89C4\u683C\u578B\u53F7'" :style="{ width: '240px' }">
+            <Column field="spec" :header="'\u89C4\u683C\u578B\u53F7'" :style="{ width: '32%' }">
               <template #body="{ data: row }">
                 <span class="sbm-ellipsis" :title="row.spec || '-'">{{ row.spec || '-' }}</span>
               </template>
             </Column>
-            <Column field="unit" :header="'\u5355\u4F4D'" :style="{ width: '100px' }">
+            <Column field="unit" :header="'\u5355\u4F4D'" :style="{ width: '10%' }">
               <template #body="{ data: row }">{{ row.unit || '-' }}</template>
             </Column>
-            <Column field="quantity" :header="'\u6570\u91CF'" :style="{ width: '100px' }">
+            <Column field="quantity" :header="'\u6570\u91CF'" :style="{ width: '10%' }">
               <template #body="{ data: row }">{{ formatItemQuantity(row.quantity) }}</template>
             </Column>
           </DataTable>
@@ -998,8 +1005,20 @@ onMounted(() => {
 }
 
 .items-table :deep(.p-datatable-table) {
-  width: auto !important;
-  table-layout: fixed;
+  width: 100% !important;
+  table-layout: auto;
+}
+
+.preview .sbm-grid-tight {
+  margin: 0;
+}
+
+.preview .sbm-grid-tight > [class*='col-'] {
+  padding: 0.35rem;
+}
+
+.preview :deep(.p-divider.p-divider-horizontal) {
+  margin: 10px 0;
 }
 
 .no-data {

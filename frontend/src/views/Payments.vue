@@ -353,8 +353,15 @@
       </template>
     </Dialog>
 
-    <Dialog v-model:visible="paymentDetailVisible" modal :header="'\u652F\u4ED8\u8BB0\u5F55\u8BE6\u60C5'" :style="{ width: '820px', maxWidth: '96vw' }">
-      <div v-if="detailPayment">
+    <Dialog
+      v-model:visible="paymentDetailVisible"
+      modal
+      :header="'\u652F\u4ED8\u8BB0\u5F55\u8BE6\u60C5'"
+      :style="{ width: '740px', maxWidth: '94vw' }"
+      :breakpoints="{ '960px': '94vw', '640px': '96vw' }"
+      :contentStyle="{ padding: '14px 16px' }"
+    >
+      <div v-if="detailPayment" class="detail">
         <div class="header-row">
           <div class="title">
             <i class="pi pi-image" />
@@ -373,7 +380,7 @@
           </div>
         </div>
 
-        <div class="grid">
+        <div class="grid sbm-grid-tight">
           <div class="col-12 md:col-6">
             <div class="kv"><div class="k">&#37329;&#39069;</div><div class="v amount">{{ formatMoney(detailPayment.amount || 0) }}</div></div>
           </div>
@@ -415,7 +422,7 @@
               class="screenshot"
               :src="`${FILE_BASE_URL}/${detailPayment.screenshot_path}`"
               preview
-              :imageStyle="{ maxWidth: '100%', height: 'auto' }"
+              :imageStyle="{ width: '100%', maxWidth: '100%', height: 'auto' }"
             />
           </div>
         </div>
@@ -1304,7 +1311,7 @@ onMounted(() => {
   border: 1px solid rgba(0, 0, 0, 0.06);
   background: rgba(0, 0, 0, 0.02);
   border-radius: var(--radius-md);
-  padding: 10px 12px;
+  padding: 8px 10px;
 }
 
 .header-row {
@@ -1313,7 +1320,19 @@ onMounted(() => {
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
+}
+
+.detail .sbm-grid-tight {
+  margin: 0;
+}
+
+.detail .sbm-grid-tight > [class*='col-'] {
+  padding: 0.35rem;
+}
+
+.detail :deep(.p-divider.p-divider-horizontal) {
+  margin: 10px 0;
 }
 
 .title {
@@ -1352,13 +1371,13 @@ onMounted(() => {
 }
 
 .section {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .section-title {
   font-weight: 900;
   color: var(--color-text-primary);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .section-title-row {
@@ -1378,8 +1397,9 @@ onMounted(() => {
 .screenshot :deep(img) {
   display: block;
   max-width: 100%;
+  width: 100%;
   height: auto;
-  max-height: 420px;
+  max-height: 320px;
   object-fit: contain;
   border-radius: var(--radius-md);
 }
