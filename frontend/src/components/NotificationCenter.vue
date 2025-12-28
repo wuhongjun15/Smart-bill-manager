@@ -34,11 +34,13 @@
             <span class="nc-dot" aria-hidden="true" />
             <div class="nc-main">
               <div class="nc-top">
-                <span class="nc-text" :title="n.title">{{ n.title }}</span>
-                <Tag :severity="severityToTag(n.severity)" class="nc-tag" :value="severityLabel(n.severity)" />
+                <div class="nc-titleRow">
+                  <span class="nc-text" :title="n.title">{{ n.title }}</span>
+                  <Tag :severity="severityToTag(n.severity)" class="nc-tag" :value="severityLabel(n.severity)" />
+                </div>
+                <div class="nc-timeInline">{{ formatTime(n.createdAt) }}</div>
               </div>
               <div v-if="n.detail" class="nc-detail" :title="n.detail">{{ n.detail }}</div>
-              <div class="nc-time">{{ formatTime(n.createdAt) }}</div>
             </div>
           </div>
         </button>
@@ -287,17 +289,25 @@ const severityToTag = (s: NotificationSeverity): 'success' | 'info' | 'warn' | '
 .nc-top {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nc-titleRow {
+  display: flex;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .nc-text {
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 800;
   color: var(--p-text-color);
+  max-width: min(320px, 50vw);
 }
 
 .nc-tag {
@@ -313,9 +323,10 @@ const severityToTag = (s: NotificationSeverity): 'success' | 'info' | 'warn' | '
   white-space: nowrap;
 }
 
-.nc-time {
-  margin-top: 6px;
+.nc-timeInline {
+  flex: 0 0 auto;
   font-size: 12px;
   color: var(--p-text-muted-color);
+  white-space: nowrap;
 }
 </style>
