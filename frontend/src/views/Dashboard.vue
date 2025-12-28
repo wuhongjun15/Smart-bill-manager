@@ -127,7 +127,7 @@
       </div>
 
       <div class="grid">
-        <Card class="panel col-span-2 sbm-surface">
+        <Card class="panel sbm-surface">
           <template #title>
             <div class="panel-title">
               <span>&#27599;&#26085;&#25903;&#20986;&#36235;&#21183;</span>
@@ -149,7 +149,7 @@
       </div>
 
       <div class="grid">
-        <Card class="panel col-span-2 sbm-surface">
+        <Card class="panel sbm-surface">
           <template #title>
             <div class="panel-title">
               <div class="match-title">
@@ -228,31 +228,6 @@
       <div class="grid">
         <Card class="panel sbm-surface">
           <template #title>
-            <span><i class="pi pi-envelope" /> &#37038;&#31665;&#30417;&#25511;&#29366;&#24577;</span>
-          </template>
-          <template #content>
-            <div v-if="data.email.monitoringStatus.length > 0" class="monitor-list">
-              <div v-for="(item, index) in data.email.monitoringStatus" :key="item.configId || index" class="monitor-item">
-                <div class="monitor-left">
-                  <div class="monitor-label">&#37038;&#31665; {{ index + 1 }}</div>
-                  <Tag
-                    :severity="item.status === 'running' ? 'success' : 'info'"
-                    :value="item.status === 'running' ? '\u8FD0\u884C\u4E2D' : '\u5DF2\u505C\u6B62'"
-                  />
-                </div>
-                <ProgressBar
-                  :value="item.status === 'running' ? 100 : 0"
-                  :showValue="false"
-                  style="height: 10px"
-                />
-              </div>
-            </div>
-            <div v-else class="empty-mini">&#26242;&#26080;&#37197;&#32622;&#37038;&#31665;</div>
-          </template>
-        </Card>
-
-        <Card class="panel sbm-surface">
-          <template #title>
             <span>&#26368;&#36817;&#37038;&#20214;</span>
           </template>
           <template #content>
@@ -277,27 +252,52 @@
             </DataTable>
           </template>
         </Card>
+
+        <Card class="panel sbm-surface source-panel">
+          <template #title>
+            <span>&#21457;&#31080;&#26469;&#28304;&#20998;&#24067;</span>
+          </template>
+          <template #content>
+            <div v-if="Object.keys(data.invoices.bySource || {}).length > 0" class="source-grid">
+              <Card
+                v-for="(count, source, index) in data.invoices.bySource"
+                :key="source"
+                class="source-card sbm-surface"
+                :style="{ '--sbm-accent': COLORS[index % COLORS.length] }"
+              >
+                <template #content>
+                  <div class="source-title">{{ getSourceLabel(source as string) }}</div>
+                  <div class="source-value">{{ count }}</div>
+                </template>
+              </Card>
+            </div>
+            <div v-else class="empty-mini">&#26242;&#26080;&#21457;&#31080;</div>
+          </template>
+        </Card>
       </div>
 
-      <Card class="panel sbm-surface">
+      <Card class="panel col-span-2 sbm-surface">
         <template #title>
-          <span>&#21457;&#31080;&#26469;&#28304;&#20998;&#24067;</span>
+          <span><i class="pi pi-envelope" /> &#37038;&#31665;&#30417;&#25511;&#29366;&#24577;</span>
         </template>
         <template #content>
-          <div v-if="Object.keys(data.invoices.bySource || {}).length > 0" class="source-grid">
-            <Card
-              v-for="(count, source, index) in data.invoices.bySource"
-              :key="source"
-              class="source-card sbm-surface"
-              :style="{ '--sbm-accent': COLORS[index % COLORS.length] }"
-            >
-              <template #content>
-                <div class="source-title">{{ getSourceLabel(source as string) }}</div>
-                <div class="source-value">{{ count }}</div>
-              </template>
-            </Card>
+          <div v-if="data.email.monitoringStatus.length > 0" class="monitor-list">
+            <div v-for="(item, index) in data.email.monitoringStatus" :key="item.configId || index" class="monitor-item">
+              <div class="monitor-left">
+                <div class="monitor-label">&#37038;&#31665; {{ index + 1 }}</div>
+                <Tag
+                  :severity="item.status === 'running' ? 'success' : 'info'"
+                  :value="item.status === 'running' ? '\u8FD0\u884C\u4E2D' : '\u5DF2\u505C\u6B62'"
+                />
+              </div>
+              <ProgressBar
+                :value="item.status === 'running' ? 100 : 0"
+                :showValue="false"
+                style="height: 10px"
+              />
+            </div>
           </div>
-          <div v-else class="empty-mini">&#26242;&#26080;&#21457;&#31080;</div>
+          <div v-else class="empty-mini">&#26242;&#26080;&#37197;&#32622;&#37038;&#31665;</div>
         </template>
       </Card>
     </template>
@@ -733,6 +733,10 @@ onMounted(() => {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.source-panel .source-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .source-card {
