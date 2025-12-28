@@ -196,14 +196,14 @@ const severityToTag = (s: NotificationSeverity): 'success' | 'info' | 'warn' | '
 
 /* OverlayPanel/Popover is teleported to <body>, so styles must be global. */
 :global(.p-popover.nc-panel) {
-  width: min(560px, 94vw);
+  width: clamp(360px, 44vw, 480px);
   border-radius: 20px;
   box-shadow: var(--shadow-xl);
   overflow: hidden;
 }
 
 :global(.p-overlaypanel.nc-panel) {
-  width: min(560px, 94vw);
+  width: clamp(360px, 44vw, 480px);
   border-radius: 20px;
   box-shadow: var(--shadow-xl);
   overflow: hidden;
