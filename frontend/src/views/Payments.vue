@@ -1038,18 +1038,24 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  vertical-align: bottom;
+  vertical-align: middle;
+  line-height: 1.5;
 }
 
 .sbm-tag-ellipsis {
+  display: inline-flex;
+  flex: 0 1 auto;
+  width: fit-content;
   max-width: 100%;
+  min-width: 0;
 }
 
 .sbm-tag-ellipsis :deep(.p-tag-label) {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 180px;
+  max-width: 100%;
 }
 
 .amount {
@@ -1252,14 +1258,19 @@ onMounted(() => {
   font-size: 12px;
   font-weight: 800;
   color: var(--color-text-tertiary);
-  line-height: 1.35;
-  padding-top: 1px;
+  display: flex;
+  align-items: center;
+  min-height: 18px;
+  line-height: 1.6;
+  padding-top: 0;
+  padding-bottom: 1px;
 }
 
 .v {
   margin-top: 6px;
   font-weight: 700;
   color: var(--color-text-primary);
+  line-height: 1.6;
 }
 
 .section {

@@ -89,6 +89,9 @@ var (
 	// Pattern to insert space between Chinese date and time when 日 is directly followed by digits
 	chineseDateTimePattern = regexp.MustCompile(`日(\d)`)
 
+	// Alipay bill detail often contains an order id like "Alipay251116...".
+	alipayOrderNumberRegex = regexp.MustCompile(`(?i)alipay\d{6,}`)
+
 	// Amount detection patterns for merging OCR results
 	// Note: First pattern uses \d{3,} to prioritize large amounts (e.g., 1700.00)
 	// which are more likely to be the main transaction amount in payment screenshots
@@ -96,6 +99,14 @@ var (
 		regexp.MustCompile(`-?\d{3,}\.?\d{0,2}`), // Large amounts like 1700.00 or -1700.00
 		regexp.MustCompile(`[¥￥]-?\d+\.?\d*`),    // Currency symbol with amount (any size)
 	}
+)
+
+var paymentInvisibleSpaceReplacer = strings.NewReplacer(
+	"\u00a0", " ", // nbsp
+	"\u200b", " ", // zwsp
+	"\u200c", " ", // zwnj
+	"\u200d", " ", // zwj
+	"\ufeff", " ", // bom
 )
 
 func NewOCRService() *OCRService {
@@ -1527,6 +1538,12 @@ func (s *OCRService) ocrInvoiceTopRightRegion(tempDir, imgPath string) (string, 
 // This helps normalize text like "支 付 时 间" to "支付时间"
 // Also handles spaces between numbers and Chinese date units like "2025 年 10 月 23 日"
 func removeChineseSpaces(text string) string {
+	// Only treat "inline" spaces as removable. OCR output often uses newlines for structure,
+	// and removing them breaks downstream parsing (e.g. payment bill-detail blocks).
+	isInlineSpace := func(r rune) bool {
+		return r == ' ' || r == '\u3000' || r == '\u00a0'
+	}
+
 	var result strings.Builder
 	runes := []rune(text)
 
@@ -1535,7 +1552,7 @@ func removeChineseSpaces(text string) string {
 		r := runes[i]
 
 		// If not a space, directly add
-		if !unicode.IsSpace(r) {
+		if !isInlineSpace(r) {
 			result.WriteRune(r)
 			i++
 			continue
@@ -1544,13 +1561,13 @@ func removeChineseSpaces(text string) string {
 		// Is a space, check previous and next characters
 		// Find previous non-space character
 		prevIdx := i - 1
-		for prevIdx >= 0 && unicode.IsSpace(runes[prevIdx]) {
+		for prevIdx >= 0 && isInlineSpace(runes[prevIdx]) {
 			prevIdx--
 		}
 
 		// Find next non-space character
 		nextIdx := i + 1
-		for nextIdx < len(runes) && unicode.IsSpace(runes[nextIdx]) {
+		for nextIdx < len(runes) && isInlineSpace(runes[nextIdx]) {
 			nextIdx++
 		}
 
@@ -1689,6 +1706,16 @@ func (s *OCRService) isWeChatPay(text string) bool {
 
 // isAlipay checks if text is from Alipay
 func (s *OCRService) isAlipay(text string) bool {
+	// Most reliable: Alipay order id in the screenshot.
+	if alipayOrderNumberRegex.MatchString(text) {
+		return true
+	}
+	// Alipay bill-detail UI labels (some screenshots may not include "支付宝" explicitly).
+	if strings.Contains(text, "账单详情") &&
+		(strings.Contains(text, "付款方式") || strings.Contains(text, "收单机构") || strings.Contains(text, "商品说明")) {
+		return true
+	}
+
 	keywords := []string{"支付宝", "Alipay", "付款成功"}
 	for _, keyword := range keywords {
 		if strings.Contains(text, keyword) {
@@ -2067,6 +2094,7 @@ func sanitizePaymentMethod(s string) string {
 }
 
 func sanitizePaymentField(s string) string {
+	s = paymentInvisibleSpaceReplacer.Replace(s)
 	s = strings.TrimSpace(s)
 	// Normalize whitespace
 	s = strings.Join(strings.Fields(s), " ")
@@ -2099,6 +2127,7 @@ func extractAlipayMerchantFromBillDetail(text string) string {
 
 	timeOnlyRe := regexp.MustCompile(`^\d{1,2}:\d{2}$`)
 	datePrefixRe := regexp.MustCompile(`^\d{4}[-/年]\d{1,2}[-/月]\d{1,2}`)
+	amountOnlyRe := regexp.MustCompile(`^[-−]?\s*[¥￥]?\s*\d+(?:,\d{3})*(?:\.\d{1,2})?$`)
 
 	for i, line := range lines {
 		if !strings.Contains(line, "账单详情") {
@@ -2113,6 +2142,9 @@ func extractAlipayMerchantFromBillDetail(text string) string {
 				continue
 			}
 			s = sanitizePaymentField(s)
+			if amountOnlyRe.MatchString(s) {
+				continue
+			}
 			if s == "" || s == "说明" || s == "详情" {
 				continue
 			}
