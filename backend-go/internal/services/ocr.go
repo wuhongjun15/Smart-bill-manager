@@ -2087,6 +2087,8 @@ func inferPaymentMethodFromText(text string) *string {
 
 func sanitizePaymentMethod(s string) string {
 	s = sanitizePaymentField(s)
+	// Normalize fullwidth parentheses commonly seen in Chinese UIs.
+	s = strings.NewReplacer("（", "(", "）", ")").Replace(s)
 	// Alipay/WeChat UI arrows often appear as trailing ">" or similar.
 	s = strings.TrimRight(s, ">›»〉》→")
 	s = strings.TrimSpace(s)

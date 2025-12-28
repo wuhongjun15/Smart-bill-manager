@@ -86,8 +86,8 @@
                 v-if="row.payment_method"
                 class="sbm-tag-ellipsis"
                 severity="success"
-                :value="normalizeInlineText(row.payment_method)"
-                :title="normalizeInlineText(row.payment_method)"
+                :value="normalizePaymentMethodText(row.payment_method)"
+                :title="normalizePaymentMethodText(row.payment_method)"
               />
               <span v-else>-</span>
             </template>
@@ -366,8 +366,8 @@
                   v-if="detailPayment.payment_method"
                   class="sbm-tag-ellipsis"
                   severity="success"
-                  :value="normalizeInlineText(detailPayment.payment_method)"
-                  :title="normalizeInlineText(detailPayment.payment_method)"
+                  :value="normalizePaymentMethodText(detailPayment.payment_method)"
+                  :title="normalizePaymentMethodText(detailPayment.payment_method)"
                 />
                 <span v-else>-</span>
               </div>
@@ -634,6 +634,11 @@ const normalizeInlineText = (value?: string | null) => {
   return s.replace(/[>›»〉》→]+$/g, '').trim()
 }
 
+const normalizePaymentMethodText = (value?: string | null) => {
+  const s = normalizeInlineText(value)
+  return s.replace(/[（）]/g, (m) => (m === '（' ? '(' : ')')).trim()
+}
+
 const loadLinkedInvoicesCount = async () => {
   try {
     const counts: Record<string, number> = {}
@@ -668,7 +673,7 @@ const openModal = (payment?: Payment) => {
     editingPayment.value = payment
     form.amount = payment.amount
     form.merchant = payment.merchant || ''
-    form.payment_method = payment.payment_method || ''
+    form.payment_method = normalizePaymentMethodText(payment.payment_method || '')
     form.description = payment.description || ''
     form.transaction_time = new Date(payment.transaction_time)
   } else {
@@ -762,7 +767,7 @@ const handleScreenshotUpload = async () => {
 
       ocrForm.amount = extracted.amount || 0
       ocrForm.merchant = extracted.merchant || ''
-      ocrForm.payment_method = extracted.payment_method || ''
+      ocrForm.payment_method = normalizePaymentMethodText(extracted.payment_method || '')
       ocrForm.order_number = extracted.order_number || ''
       ocrForm.transaction_time = extracted.transaction_time ? new Date(extracted.transaction_time) : new Date()
       ocrForm.description = ''
@@ -808,7 +813,7 @@ const handleSaveOcrResult = async () => {
     const payload = {
       amount: Number(ocrForm.amount),
       merchant: ocrForm.merchant,
-      payment_method: ocrForm.payment_method,
+      payment_method: normalizePaymentMethodText(ocrForm.payment_method),
       description: ocrForm.description,
       transaction_time: dayjs(ocrForm.transaction_time).toISOString(),
     }
@@ -1013,6 +1018,9 @@ onMounted(() => {
   display: block;
   font-weight: 700;
   color: var(--color-text-secondary);
+  line-height: 1.6;
+  padding-left: 4px;
+  overflow: visible;
 }
 
 .field :deep(.p-inputtext),
