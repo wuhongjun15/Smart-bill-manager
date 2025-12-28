@@ -130,7 +130,7 @@
             <small v-if="errors.amount" class="p-error">{{ errors.amount }}</small>
           </div>
           <div class="col-12 md:col-6 field">
-            <label for="merchant">&#5546;&#23478;</label>
+            <label for="merchant">&#21830;&#23478;</label>
             <InputText id="merchant" v-model.trim="form.merchant" />
           </div>
           <div class="col-12 md:col-6 field">
@@ -209,7 +209,7 @@
               <small v-if="ocrErrors.amount" class="p-error">{{ ocrErrors.amount }}</small>
             </div>
             <div class="col-12 md:col-6 field">
-              <label for="ocr_merchant">&#5546;&#23478;</label>
+              <label for="ocr_merchant">&#21830;&#23478;</label>
               <InputText id="ocr_merchant" v-model.trim="ocrForm.merchant" />
             </div>
             <div class="col-12 md:col-6 field">
@@ -354,7 +354,7 @@
           </div>
           <div class="col-12 md:col-6">
             <div class="kv">
-              <div class="k">&#5546;&#23478;</div>
+              <div class="k">&#21830;&#23478;</div>
               <div class="v" :title="normalizeInlineText(detailPayment.merchant)">{{ normalizeInlineText(detailPayment.merchant) || '-' }}</div>
             </div>
           </div>
