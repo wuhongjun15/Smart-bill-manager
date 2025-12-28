@@ -2473,8 +2473,14 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	}
 
 	numOnlyRe := regexp.MustCompile(`^\d+(?:\.\d+)?$`)
+	moneyLikeRe := regexp.MustCompile(`^\d+\.\d{2}$`)
 	taxRateRe := regexp.MustCompile(`^\d{1,2}%$`)
 	quantityLabelRe := regexp.MustCompile(`数量\s*[:：]?\s*(\d+(?:\.\d+)?)`)
+	// Common "spec/model" tokens that are not item names, such as:
+	// - 3X410g / 3×410g
+	// - 410g×3
+	// - 750ml×6
+	specTokenRe := regexp.MustCompile(`(?i)^(?:\d+\s*[x×]\s*\d+(?:\.\d+)?\s*(?:g|kg|ml|l)?|\d+(?:\.\d+)?\s*(?:g|kg|ml|l)?\s*[x×]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?[a-z]{1,4}\s*[x×]\s*\d+(?:\.\d+)?)$`)
 
 	categoryPrefixRe := regexp.MustCompile(`^\*([^*]+)\*`)
 	normalizeName := func(s string) string {
@@ -2497,16 +2503,33 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		if isUnitToken(s) {
 			return false
 		}
+		if specTokenRe.MatchString(s) {
+			return false
+		}
 		// Require at least one letter or Han character.
 		hasText := false
+		hasHan := false
+		asciiLetters := 0
 		for _, r := range s {
-			if unicode.Is(unicode.Han, r) || (unicode.IsLetter(r) && r < 128) {
+			if unicode.Is(unicode.Han, r) {
 				hasText = true
+				hasHan = true
 				break
+			}
+			if unicode.IsLetter(r) && r < 128 {
+				hasText = true
+				asciiLetters++
 			}
 		}
 		if !hasText {
 			return false
+		}
+		// Purely ASCII "spec-like" tokens are common in invoices; avoid treating them as item names.
+		if !hasHan && asciiLetters > 0 {
+			// Heuristic: require at least 3 ASCII letters for English-only names.
+			if asciiLetters < 3 {
+				return false
+			}
 		}
 		n := len([]rune(s))
 		return n >= 2 && n <= 120
@@ -2519,6 +2542,21 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		}
 		if m := quantityLabelRe.FindStringSubmatch(s); len(m) > 1 {
 			return parseAmount(m[1])
+		}
+		// If token looks like money (2 decimal places), do not treat it as quantity.
+		if moneyLikeRe.MatchString(s) {
+			return nil
+		}
+		// Prefer integers for quantity.
+		if regexp.MustCompile(`^\d+$`).MatchString(s) {
+			q := parseAmount(s)
+			if q == nil {
+				return nil
+			}
+			if *q <= 0 || *q > 9999 {
+				return nil
+			}
+			return q
 		}
 		if !numOnlyRe.MatchString(s) {
 			return nil
@@ -2575,6 +2613,11 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 			continue
 		}
 
+		// Specs/models often appear on their own line (e.g. "3X410g"); don't create a new item.
+		if currentName != "" && currentQty == nil && specTokenRe.MatchString(s) {
+			continue
+		}
+
 		if isLikelyItemNameLine(s) {
 			if currentName != "" {
 				flush()
@@ -2583,6 +2626,7 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 			currentQty = nil
 
 			// Look ahead for a quantity token near the name line.
+			hasMoney := false
 			for j := idx + 1; j < len(block) && j <= idx+12; j++ {
 				t := strings.TrimSpace(block[j])
 				if t == "" || isHeaderLine(t) {
@@ -2591,7 +2635,14 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 				if isLikelyItemNameLine(t) {
 					break
 				}
+				if specTokenRe.MatchString(t) {
+					continue
+				}
 				if isUnitToken(t) || taxRateRe.MatchString(t) {
+					continue
+				}
+				if moneyLikeRe.MatchString(t) {
+					hasMoney = true
 					continue
 				}
 				if q := parseQuantity(t); q != nil {
@@ -2599,12 +2650,17 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 					break
 				}
 			}
+			// Many invoices omit the "数量" column for single-quantity lines; default to 1 when we saw money values.
+			if currentQty == nil && hasMoney {
+				one := 1.0
+				currentQty = &one
+			}
 			continue
 		}
 
 		// Merge continuation lines for long item names (before quantity is found).
 		if currentName != "" && currentQty == nil {
-			if isUnitToken(s) || taxRateRe.MatchString(s) || numOnlyRe.MatchString(s) {
+			if isUnitToken(s) || taxRateRe.MatchString(s) || numOnlyRe.MatchString(s) || moneyLikeRe.MatchString(s) || specTokenRe.MatchString(s) {
 				continue
 			}
 			if len([]rune(s)) >= 2 && len([]rune(s)) <= 80 {

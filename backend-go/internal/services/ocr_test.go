@@ -311,6 +311,7 @@ func TestParseInvoiceData_ItemsExtraction(t *testing.T) {
 	sampleText := `货物或应税劳务、服务名称
 规格型号 单位 数量 单价 金额 税率 税额
 *乳制品*希腊式酸奶 1.23kg(410g*3)
+3X410g
 组
 2
 53.01
@@ -318,8 +319,6 @@ func TestParseInvoiceData_ItemsExtraction(t *testing.T) {
 13%
 13.78
 *日用杂品*包装费配送费
-件
-1
 1.77
 1.77
 13%
