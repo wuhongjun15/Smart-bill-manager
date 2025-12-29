@@ -11,6 +11,7 @@ export default defineConfig({
     }
   },
   build: {
+    chunkSizeWarningLimit: 1200,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -18,6 +19,8 @@ export default defineConfig({
             if (id.includes('echarts') || id.includes('vue-echarts')) return 'echarts'
             if (id.includes('@js-temporal/polyfill')) return 'temporal'
             if (id.includes('dayjs')) return 'dayjs'
+            if (id.includes('primevue')) return 'primevue'
+            if (id.includes('primeicons')) return 'primeicons'
           }
         },
       },

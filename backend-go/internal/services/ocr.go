@@ -131,15 +131,19 @@ func ocrEngineInstallHint(engine string) string {
 type PaymentExtractedData struct {
 	Amount                *float64 `json:"amount"`
 	AmountSource          string   `json:"amount_source,omitempty"`
+	AmountConfidence      float64  `json:"amount_confidence,omitempty"`
 	Merchant              *string  `json:"merchant"`
 	MerchantSource        string   `json:"merchant_source,omitempty"`
 	MerchantConfidence    float64  `json:"merchant_confidence,omitempty"`
 	TransactionTime       *string  `json:"transaction_time"`
 	TransactionTimeSource string   `json:"transaction_time_source,omitempty"`
+	TransactionTimeConfidence float64 `json:"transaction_time_confidence,omitempty"`
 	PaymentMethod         *string  `json:"payment_method"`
 	PaymentMethodSource   string   `json:"payment_method_source,omitempty"`
+	PaymentMethodConfidence float64 `json:"payment_method_confidence,omitempty"`
 	OrderNumber           *string  `json:"order_number"`
 	OrderNumberSource     string   `json:"order_number_source,omitempty"`
+	OrderNumberConfidence float64  `json:"order_number_confidence,omitempty"`
 	RawText               string   `json:"raw_text"`
 	PrettyText            string   `json:"pretty_text,omitempty"`
 }
@@ -1780,6 +1784,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 			if amount := parseAmount(match[1]); amount != nil && *amount >= MinValidAmount {
 				data.Amount = amount
 				data.AmountSource = "wechat_amount_label"
+				data.AmountConfidence = 0.9
 				break
 			}
 		}
@@ -1856,6 +1861,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
 			data.TransactionTimeSource = "wechat_time_label"
+			data.TransactionTimeConfidence = 0.9
 			break
 		}
 	}
@@ -1874,6 +1880,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 			orderNum := strings.ReplaceAll(match[1], " ", "")
 			data.OrderNumber = &orderNum
 			data.OrderNumberSource = "wechat_order"
+			data.OrderNumberConfidence = 0.9
 			break
 		}
 	}
@@ -1888,6 +1895,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 			if method != "" {
 				data.PaymentMethod = &method
 				data.PaymentMethodSource = "wechat_method_label"
+				data.PaymentMethodConfidence = 0.8
 				break
 			}
 		}
@@ -1897,7 +1905,25 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		data.PaymentMethod = inferPaymentMethodFromText(text)
 		if data.PaymentMethod != nil && data.PaymentMethodSource == "" {
 			data.PaymentMethodSource = "wechat_infer"
+			data.PaymentMethodConfidence = 0.5
 		}
+	}
+
+	// Default confidences if not set but values present
+	if data.Merchant != nil && data.MerchantConfidence == 0 {
+		data.MerchantConfidence = 0.6
+	}
+	if data.Amount != nil && data.AmountConfidence == 0 {
+		data.AmountConfidence = 0.6
+	}
+	if data.TransactionTime != nil && data.TransactionTimeConfidence == 0 {
+		data.TransactionTimeConfidence = 0.7
+	}
+	if data.OrderNumber != nil && data.OrderNumberConfidence == 0 {
+		data.OrderNumberConfidence = 0.7
+	}
+	if data.PaymentMethod != nil && data.PaymentMethodConfidence == 0 {
+		data.PaymentMethodConfidence = 0.6
 	}
 }
 
@@ -1918,6 +1944,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 			if amount := parseAmount(match[1]); amount != nil && *amount >= MinValidAmount {
 				data.Amount = amount
 				data.AmountSource = "alipay_amount_label"
+				data.AmountConfidence = 0.9
 				break
 			}
 		}
@@ -1927,6 +1954,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 	if m := extractAlipayMerchantFromBillDetail(text); m != "" {
 		data.Merchant = &m
 		data.MerchantSource = "alipay_bill_detail"
+		data.MerchantConfidence = 0.9
 	}
 	merchantRegexes := []*regexp.Regexp{
 		// NOTE: Require delimiter to avoid matching "商品说明" -> "说明".
@@ -1948,6 +1976,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 			}
 			data.Merchant = &merchant
 			data.MerchantSource = "alipay_label"
+			data.MerchantConfidence = 0.8
 			break
 		}
 	}
@@ -1973,6 +2002,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
 			data.TransactionTimeSource = "alipay_time_label"
+			data.TransactionTimeConfidence = 0.85
 			break
 		}
 	}
@@ -1990,6 +2020,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 			orderNum := strings.ReplaceAll(match[1], " ", "")
 			data.OrderNumber = &orderNum
 			data.OrderNumberSource = "alipay_order"
+			data.OrderNumberConfidence = 0.9
 			break
 		}
 	}
@@ -2006,6 +2037,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 				if method != "" {
 					data.PaymentMethod = &method
 					data.PaymentMethodSource = "alipay_method_label"
+					data.PaymentMethodConfidence = 0.8
 				}
 				break
 			}
@@ -2016,7 +2048,25 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 		data.PaymentMethod = inferPaymentMethodFromText(text)
 		if data.PaymentMethod != nil && data.PaymentMethodSource == "" {
 			data.PaymentMethodSource = "alipay_infer"
+			data.PaymentMethodConfidence = 0.5
 		}
+	}
+
+	// Default confidences if missing
+	if data.Merchant != nil && data.MerchantConfidence == 0 {
+		data.MerchantConfidence = 0.6
+	}
+	if data.Amount != nil && data.AmountConfidence == 0 {
+		data.AmountConfidence = 0.6
+	}
+	if data.TransactionTime != nil && data.TransactionTimeConfidence == 0 {
+		data.TransactionTimeConfidence = 0.7
+	}
+	if data.OrderNumber != nil && data.OrderNumberConfidence == 0 {
+		data.OrderNumberConfidence = 0.7
+	}
+	if data.PaymentMethod != nil && data.PaymentMethodConfidence == 0 {
+		data.PaymentMethodConfidence = 0.6
 	}
 }
 
@@ -2036,6 +2086,7 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 			if amount := parseAmount(match[1]); amount != nil && *amount >= MinValidAmount {
 				data.Amount = amount
 				data.AmountSource = "bank_amount_label"
+				data.AmountConfidence = 0.85
 				break
 			}
 		}
@@ -2077,6 +2128,7 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
 			data.TransactionTimeSource = "bank_time_label"
+			data.TransactionTimeConfidence = 0.85
 			break
 		}
 	}
@@ -2093,6 +2145,7 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 				if method != "" {
 					data.PaymentMethod = &method
 					data.PaymentMethodSource = "bank_method_label"
+					data.PaymentMethodConfidence = 0.7
 				}
 				break
 			}
@@ -2103,7 +2156,25 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 		data.PaymentMethod = inferPaymentMethodFromText(text)
 		if data.PaymentMethod != nil && data.PaymentMethodSource == "" {
 			data.PaymentMethodSource = "bank_infer"
+			data.PaymentMethodConfidence = 0.5
 		}
+	}
+
+	// Default confidences if missing
+	if data.Merchant != nil && data.MerchantConfidence == 0 {
+		data.MerchantConfidence = 0.6
+	}
+	if data.Amount != nil && data.AmountConfidence == 0 {
+		data.AmountConfidence = 0.6
+	}
+	if data.TransactionTime != nil && data.TransactionTimeConfidence == 0 {
+		data.TransactionTimeConfidence = 0.7
+	}
+	if data.OrderNumber != nil && data.OrderNumberConfidence == 0 {
+		data.OrderNumberConfidence = 0.7
+	}
+	if data.PaymentMethod != nil && data.PaymentMethodConfidence == 0 {
+		data.PaymentMethodConfidence = 0.6
 	}
 }
 
@@ -2262,6 +2333,9 @@ func (s *OCRService) extractAmount(text string, data *PaymentExtractedData) {
 				data.Amount = amount
 				if data.AmountSource == "" {
 					data.AmountSource = "generic_amount"
+				}
+				if data.AmountConfidence == 0 {
+					data.AmountConfidence = 0.4
 				}
 				return
 			}

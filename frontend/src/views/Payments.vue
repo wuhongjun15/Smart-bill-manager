@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="page">
     <div class="grid">
       <div class="col-12 md:col-4">
@@ -209,53 +209,82 @@
           &#35831;&#36873;&#25321;&#25130;&#22270;&#65292;&#28857;&#20987;&#8220;&#35782;&#21035;&#8221;&#29983;&#25104;&#24405;&#20837;&#24314;&#35758;&#12290;
         </Message>
 
-        <form v-else class="p-fluid" @submit.prevent="handleSaveOcrResult">
+                <form v-else class="p-fluid" @submit.prevent="handleSaveOcrResult">
           <div class="grid">
-          <div class="col-12 md:col-6 field">
-            <label for="ocr_amount">&#37329;&#39069;</label>
-            <InputNumber
-              id="ocr_amount"
-              v-model="ocrForm.amount"
-              :minFractionDigits="2"
-              :maxFractionDigits="2"
-              :min="0"
-              :useGrouping="false"
-            />
-            <small v-if="ocrResult?.amount_source" class="sbm-ocr-hint">
-              &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.amount_source) }}
-            </small>
-            <small v-if="ocrErrors.amount" class="p-error">{{ ocrErrors.amount }}</small>
-          </div>
-          <div class="col-12 md:col-6 field">
-            <label for="ocr_merchant">&#21830;&#23478;</label>
-            <InputText id="ocr_merchant" v-model.trim="ocrForm.merchant" />
-            <small v-if="ocrResult?.merchant_source" class="sbm-ocr-hint">
-              &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.merchant_source) }}
-              <span v-if="ocrResult?.merchant_confidence"> &#65288;&#20449;&#24230; {{ (ocrResult?.merchant_confidence * 100).toFixed(0) }}%&#65289;</span>
-            </small>
-          </div>
-          <div class="col-12 md:col-6 field">
-            <label for="ocr_method">&#25903;&#20184;&#26041;&#24335;</label>
-            <InputText id="ocr_method" v-model.trim="ocrForm.payment_method" />
-            <small v-if="ocrResult?.payment_method_source" class="sbm-ocr-hint">
-              &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.payment_method_source) }}
-            </small>
-          </div>
-          <div class="col-12 field">
-            <label for="ocr_time">&#20132;&#26131;&#26102;&#38388;</label>
-            <DatePicker id="ocr_time" v-model="ocrForm.transaction_time" showTime :manualInput="false" />
-            <small v-if="ocrErrors.transaction_time" class="p-error">{{ ocrErrors.transaction_time }}</small>
-            <small v-if="ocrResult?.transaction_time_source" class="sbm-ocr-hint">
-              &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.transaction_time_source) }}
-            </small>
-          </div>
-          <div class="col-12 field">
-            <label for="ocr_order">&#20132;&#26131;&#21333;&#21495; (&#21487;&#36873;)</label>
-            <InputText id="ocr_order" v-model.trim="ocrForm.order_number" />
-            <small v-if="ocrResult?.order_number_source" class="sbm-ocr-hint">
-              &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.order_number_source) }}
-            </small>
-          </div>
+            <div class="col-12 md:col-6 field">
+              <label for="ocr_amount">&#37329;&#39069;</label>
+              <InputNumber
+                id="ocr_amount"
+                v-model="ocrForm.amount"
+                :minFractionDigits="2"
+                :maxFractionDigits="2"
+                :min="0"
+                :useGrouping="false"
+              />
+              <small
+                v-if="ocrResult?.amount_source || ocrResult?.amount_confidence"
+                class="sbm-ocr-hint"
+                :class="confidenceClass(ocrResult?.amount_confidence)"
+              >
+                &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.amount_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="ocrResult?.amount_confidence">&#xff08;&#20449;&#24230;&#65306;{{ confidenceLabel(ocrResult?.amount_confidence) }}&#xff09;</span>
+              </small>
+              <small v-if="ocrErrors.amount" class="p-error">{{ ocrErrors.amount }}</small>
+            </div>
+
+            <div class="col-12 md:col-6 field">
+              <label for="ocr_merchant">&#21830;&#23478;</label>
+              <InputText id="ocr_merchant" v-model.trim="ocrForm.merchant" />
+              <small
+                v-if="ocrResult?.merchant_source || ocrResult?.merchant_confidence"
+                class="sbm-ocr-hint"
+                :class="confidenceClass(ocrResult?.merchant_confidence)"
+              >
+                &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.merchant_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="ocrResult?.merchant_confidence">&#xff08;&#20449;&#24230;&#65306;{{ confidenceLabel(ocrResult?.merchant_confidence) }}&#xff09;</span>
+              </small>
+            </div>
+
+            <div class="col-12 md:col-6 field">
+              <label for="ocr_method">&#25903;&#20184;&#26041;&#24335;</label>
+              <InputText id="ocr_method" v-model.trim="ocrForm.payment_method" />
+              <small
+                v-if="ocrResult?.payment_method_source || ocrResult?.payment_method_confidence"
+                class="sbm-ocr-hint"
+                :class="confidenceClass(ocrResult?.payment_method_confidence)"
+              >
+                &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.payment_method_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="ocrResult?.payment_method_confidence">&#xff08;&#20449;&#24230;&#65306;{{ confidenceLabel(ocrResult?.payment_method_confidence) }}&#xff09;</span>
+              </small>
+            </div>
+
+            <div class="col-12 field">
+              <label for="ocr_time">&#20132;&#26131;&#26102;&#38388;</label>
+              <DatePicker id="ocr_time" v-model="ocrForm.transaction_time" showTime :manualInput="false" />
+              <small v-if="ocrErrors.transaction_time" class="p-error">{{ ocrErrors.transaction_time }}</small>
+              <small
+                v-if="ocrResult?.transaction_time_source || ocrResult?.transaction_time_confidence"
+                class="sbm-ocr-hint"
+                :class="confidenceClass(ocrResult?.transaction_time_confidence)"
+              >
+                &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.transaction_time_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="ocrResult?.transaction_time_confidence">&#xff08;&#20449;&#24230;&#65306;{{ confidenceLabel(ocrResult?.transaction_time_confidence) }}&#xff09;</span>
+              </small>
+            </div>
+
+            <div class="col-12 field">
+              <label for="ocr_order">&#20132;&#26131;&#21333;&#21495; (&#21487;&#36873;)</label>
+              <InputText id="ocr_order" v-model.trim="ocrForm.order_number" />
+              <small
+                v-if="ocrResult?.order_number_source || ocrResult?.order_number_confidence"
+                class="sbm-ocr-hint"
+                :class="confidenceClass(ocrResult?.order_number_confidence)"
+              >
+                &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.order_number_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="ocrResult?.order_number_confidence">&#xff08;&#20449;&#24230;&#65306;{{ confidenceLabel(ocrResult?.order_number_confidence) }}&#xff09;</span>
+              </small>
+            </div>
+
             <div class="col-12 field">
               <label for="ocr_desc">&#22791;&#27880;</label>
               <Textarea id="ocr_desc" v-model="ocrForm.description" autoResize rows="3" />
@@ -514,11 +543,15 @@ interface OcrExtractedData {
   payment_method?: string
   order_number?: string
   amount_source?: string
+  amount_confidence?: number
   merchant_source?: string
   merchant_confidence?: number
   transaction_time_source?: string
+  transaction_time_confidence?: number
   payment_method_source?: string
+  payment_method_confidence?: number
   order_number_source?: string
+  order_number_confidence?: number
   raw_text?: string
   pretty_text?: string
 }
@@ -706,7 +739,7 @@ const formatDateTime = (date: string) => dayjs(date).format('YYYY-MM-DD HH:mm')
 const formatMoney = (value: number) => `\u00A5${(value || 0).toFixed(2)}`
 const normalizeInlineText = (value?: string | null) => {
   const s = (value || '').replace(/\s+/g, ' ').trim()
-  return s.replace(/[>›»〉》→]+$/g, '').trim()
+  return s.replace(/[>鈥郝汇€夈€嬧啋]+$/g, '').trim()
 }
 
 const normalizePaymentMethodText = (value?: string | null) => {
@@ -963,6 +996,20 @@ const formatSourceLabel = (src?: string) => {
   return map[src] || src
 }
 
+const confidenceLabel = (c?: number) => {
+  if (c === undefined || c === null) return ''
+  if (c >= 0.8) return '\u9ad8' // 高
+  if (c >= 0.6) return '\u4e2d' // 中
+  return '\u4f4e' // 低
+}
+
+const confidenceClass = (c?: number) => {
+  const label = confidenceLabel(c)
+  if (label === '\u4f4e') return 'sbm-ocr-hint-low'
+  if (label === '\u4e2d') return 'sbm-ocr-hint-mid'
+  return ''
+}
+
 const viewLinkedInvoices = async (payment: Payment) => {
   currentPaymentForInvoices.value = payment
   linkedInvoicesModalVisible.value = true
@@ -1075,17 +1122,17 @@ const handleReparseOcr = async (paymentId: string) => {
   try {
     const res = await paymentApi.reparseScreenshot(paymentId)
     if (res.data.success) {
-      toast.add({ severity: 'success', summary: '\u91CD\u65B0\u89E3\u6790\u6210\u529F', life: 2000 })
+      toast.add({ severity: 'success', summary: '重新解析成功', life: 2000 })
       notifications.add({ severity: 'success', title: '支付截图已重新解析', detail: paymentId })
       const detailRes = await paymentApi.getById(paymentId)
-      if (detailRes.data.success && detailRes.data.data) detailPayment.value = detailRes.data.data
+      if (detailRes.data.success && res.data.data) detailPayment.value = res.data.data
       await loadPayments()
     }
   } catch (error: unknown) {
     const err = error as { response?: { data?: { message?: string; error?: string } } }
-    const message = err.response?.data?.message || '\u91CD\u65B0\u89E3\u6790\u5931\u8D25'
+    const message = err.response?.data?.message || '重新解析失败'
     const detail = err.response?.data?.error
-    toast.add({ severity: 'error', summary: detail ? `${message}\uFF1A${detail}` : message, life: 5000 })
+    toast.add({ severity: 'error', summary: detail ? `${message}：${detail}` : message, life: 5000 })
     notifications.add({ severity: 'error', title: '支付截图重新解析失败', detail: detail || message })
   } finally {
     reparsingOcr.value = false
@@ -1501,4 +1548,17 @@ watch(
   color: var(--text-color-secondary);
   margin-top: 2px;
 }
+
+.sbm-ocr-hint-low {
+  color: #d97706;
+  font-weight: 800;
+}
+
+.sbm-ocr-hint-mid {
+  color: var(--color-text-secondary);
+}
 </style>
+
+
+
+
