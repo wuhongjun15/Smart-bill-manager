@@ -1,6 +1,13 @@
 import api from './auth'
 import type { Payment, Invoice, ApiResponse } from '@/types'
 
+type UploadScreenshotResult = {
+  payment: Payment | null
+  extracted: any
+  screenshot_path: string
+  ocr_error?: string
+}
+
 export const paymentApi = {
   getAll: (params?: { limit?: number; offset?: number; startDate?: string; endDate?: string; category?: string }) =>
     api.get<ApiResponse<Payment[]>>('/payments', { params }),
@@ -24,10 +31,13 @@ export const paymentApi = {
   uploadScreenshot: (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
-    return api.post<ApiResponse<{ payment: Payment; extracted: any }>>('/payments/upload-screenshot', formData, {
+    return api.post<ApiResponse<UploadScreenshotResult>>('/payments/upload-screenshot', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+
+  cancelUploadScreenshot: (screenshot_path: string) =>
+    api.post<ApiResponse<void>>('/payments/upload-screenshot/cancel', { screenshot_path }),
   
   // Reparse screenshot with OCR
   reparseScreenshot: (id: string) => 

@@ -1801,8 +1801,8 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 	// Extract transaction time with support for various formats
 	timeRegexes := []*regexp.Regexp{
 		// Standard format: 2024-01-01 12:00:00
-		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
-		regexp.MustCompile(`转账时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}-[\d]{1,2}-[\d]{1,2}\s[\d]{1,2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`转账时间[：:]?[\s]*([\d]{4}-[\d]{1,2}-[\d]{1,2}\s[\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Chinese format with optional spaces after 日: matches "2025年10月23日14:59:46" and "2025年10月23日 14:59:46"
 		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}年[\d]{1,2}月[\d]{1,2}日\s*[\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Generic Chinese date-time format with space
@@ -1905,13 +1905,13 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 	// Extract transaction time
 	timeRegexes := []*regexp.Regexp{
 		// Alipay often prints "支付时间" and sometimes omits the space between date and time.
-		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2})[\s]*([\d]{2}:[\d]{2}:[\d]{2})`),
-		regexp.MustCompile(`付款时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2})[\s]*([\d]{2}:[\d]{2}:[\d]{2})`),
-		regexp.MustCompile(`创建时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2})[\s]*([\d]{2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}-[\d]{1,2}-[\d]{1,2})[\s]*([\d]{1,2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`付款时间[：:]?[\s]*([\d]{4}-[\d]{1,2}-[\d]{1,2})[\s]*([\d]{1,2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`创建时间[：:]?[\s]*([\d]{4}-[\d]{1,2}-[\d]{1,2})[\s]*([\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Standard format: 2024-01-01 12:00:00
-		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
-		regexp.MustCompile(`付款时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
-		regexp.MustCompile(`创建时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`支付时间[：:]?[\s]*([\d]{4}-[\d]{1,2}-[\d]{1,2}\s[\d]{1,2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`付款时间[：:]?[\s]*([\d]{4}-[\d]{1,2}-[\d]{1,2}\s[\d]{1,2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`创建时间[：:]?[\s]*([\d]{4}-[\d]{1,2}-[\d]{1,2}\s[\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Chinese format with space
 		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)\s+([\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Chinese format without space
@@ -2006,8 +2006,8 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 
 	// Extract transaction time
 	timeRegexes := []*regexp.Regexp{
-		regexp.MustCompile(`转账时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
-		regexp.MustCompile(`交易时间[：:]?[\s]*([\d]{4}-[\d]{2}-[\d]{2}\s[\d]{2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`转账时间[：:]?[\s]*([\d]{4}-[\d]{1,2}-[\d]{1,2}\s[\d]{1,2}:[\d]{2}:[\d]{2})`),
+		regexp.MustCompile(`交易时间[：:]?[\s]*([\d]{4}-[\d]{1,2}-[\d]{1,2}\s[\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Chinese format with space
 		regexp.MustCompile(`([\d]{4}年[\d]{1,2}月[\d]{1,2}日)\s+([\d]{1,2}:[\d]{2}:[\d]{2})`),
 		// Chinese format without space

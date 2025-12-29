@@ -36,6 +36,7 @@ func (h *PaymentHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/:id/suggest-invoices", h.SuggestInvoices)
 	r.POST("", h.Create)
 	r.POST("/upload-screenshot", h.UploadScreenshot)
+	r.POST("/upload-screenshot/cancel", h.CancelUploadScreenshot)
 	r.POST("/:id/reparse", h.ReparseScreenshot)
 	r.PUT("/:id", h.Update)
 	r.DELETE("/:id", h.Delete)
@@ -194,6 +195,21 @@ func (h *PaymentHandler) UploadScreenshot(c *gin.Context) {
 		ScreenshotPath: relPath,
 	})
 	if err != nil {
+		// Allow continuing the normal OCR flow even if transaction time is missing/unparseable.
+		// Keep the uploaded screenshot so the user can manually correct fields in the UI.
+		if errors.Is(err, services.ErrMissingTransactionTime) {
+			if extracted == nil {
+				extracted = &services.PaymentExtractedData{RawText: "", PrettyText: ""}
+			}
+			utils.Success(c, 200, "截图上传成功，但无法识别交易时间，请在下方手动选择交易时间", gin.H{
+				"payment":         nil,
+				"extracted":       extracted,
+				"screenshot_path": relPath,
+				"ocr_error":       "missing transaction time",
+			})
+			return
+		}
+
 		// Clean up the uploaded file on error
 		_ = os.Remove(filePath)
 		if errors.Is(err, services.ErrMissingTransactionTime) {
@@ -207,7 +223,31 @@ func (h *PaymentHandler) UploadScreenshot(c *gin.Context) {
 	utils.Success(c, 201, "支付截图上传成功", gin.H{
 		"payment":   payment,
 		"extracted": extracted,
+		"screenshot_path": relPath,
 	})
+}
+
+func (h *PaymentHandler) CancelUploadScreenshot(c *gin.Context) {
+	var input struct {
+		ScreenshotPath string `json:"screenshot_path" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		utils.Error(c, 400, "参数错误", err)
+		return
+	}
+
+	absPath, err := resolveUploadsFilePath(h.uploadsDir, input.ScreenshotPath)
+	if err != nil {
+		utils.Error(c, 400, "截图路径错误", err)
+		return
+	}
+
+	if rmErr := os.Remove(absPath); rmErr != nil && !os.IsNotExist(rmErr) {
+		utils.Error(c, 500, "删除截图文件失败", rmErr)
+		return
+	}
+
+	utils.Success(c, 200, "已取消上传", nil)
 }
 
 func (h *PaymentHandler) GetLinkedInvoices(c *gin.Context) {

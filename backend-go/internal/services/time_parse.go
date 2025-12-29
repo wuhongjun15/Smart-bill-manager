@@ -57,13 +57,41 @@ func parsePaymentTimeToUTC(s string, defaultLoc *time.Location) (time.Time, erro
 		defaultLoc = time.UTC
 	}
 
-	// OCR often yields "YYYY-MM-DD HH:mm:ss" (no offset).
-	if t, err := time.ParseInLocation("2006-01-02 15:04:05", s, defaultLoc); err == nil {
-		return t.UTC(), nil
+	dateTimeLayouts := []string{
+		// Common OCR formats (no timezone).
+		"2006-01-02 15:04:05",
+		"2006-1-2 15:04:05",
+		"2006-01-2 15:04:05",
+		"2006-1-02 15:04:05",
+
+		// Sometimes with slashes.
+		"2006/01/02 15:04:05",
+		"2006/1/2 15:04:05",
+
+		// Sometimes date and time are concatenated.
+		"2006-01-0215:04:05",
+		"2006-1-215:04:05",
+
+		// Sometimes with explicit offsets but no 'T'.
+		"2006-01-02 15:04:05-07:00",
+		"2006-1-2 15:04:05-07:00",
 	}
-	// Sometimes date-only.
-	if t, err := time.ParseInLocation("2006-01-02", s, defaultLoc); err == nil {
-		return t.UTC(), nil
+	for _, layout := range dateTimeLayouts {
+		if t, err := time.ParseInLocation(layout, s, defaultLoc); err == nil {
+			return t.UTC(), nil
+		}
+	}
+
+	dateOnlyLayouts := []string{
+		"2006-01-02",
+		"2006-1-2",
+		"2006/01/02",
+		"2006/1/2",
+	}
+	for _, layout := range dateOnlyLayouts {
+		if t, err := time.ParseInLocation(layout, s, defaultLoc); err == nil {
+			return t.UTC(), nil
+		}
 	}
 
 	return time.Time{}, fmt.Errorf("unsupported transaction_time format: %q", s)

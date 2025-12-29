@@ -39,12 +39,29 @@ type CreatePaymentInput struct {
 	PaymentMethod   *string `json:"payment_method"`
 	Description     *string `json:"description"`
 	TransactionTime string  `json:"transaction_time" binding:"required"`
+	ScreenshotPath  *string `json:"screenshot_path"`
+	ExtractedData   *string `json:"extracted_data"`
 }
 
 func (s *PaymentService) Create(input CreatePaymentInput) (*models.Payment, error) {
 	t, err := parseRFC3339ToUTC(input.TransactionTime)
 	if err != nil {
 		return nil, fmt.Errorf("transaction_time must be RFC3339: %w", err)
+	}
+
+	var screenshotPath *string
+	if input.ScreenshotPath != nil {
+		p := strings.TrimSpace(*input.ScreenshotPath)
+		if p != "" {
+			screenshotPath = &p
+		}
+	}
+	var extractedData *string
+	if input.ExtractedData != nil {
+		d := strings.TrimSpace(*input.ExtractedData)
+		if d != "" {
+			extractedData = &d
+		}
 	}
 
 	payment := &models.Payment{
@@ -56,6 +73,8 @@ func (s *PaymentService) Create(input CreatePaymentInput) (*models.Payment, erro
 		Description:       input.Description,
 		TransactionTime:   t.Format(time.RFC3339),
 		TransactionTimeTs: unixMilli(t),
+		ScreenshotPath:    screenshotPath,
+		ExtractedData:     extractedData,
 		TripAssignSrc:     assignSrcAuto,
 		TripAssignState:   assignStateNoMatch,
 	}
@@ -593,8 +612,12 @@ func (s *PaymentService) ReparseScreenshot(paymentID string) (*PaymentExtractedD
 	updateData["extracted_data"] = extractedDataJSON
 
 	// Update amount if extracted
-	if extracted.Amount != nil && *extracted.Amount > 0 {
-		updateData["amount"] = *extracted.Amount
+	if extracted.Amount != nil {
+		absAmount := math.Abs(*extracted.Amount)
+		if absAmount > 0 {
+			updateData["amount"] = absAmount
+			extracted.Amount = &absAmount
+		}
 	}
 
 	// Update merchant if extracted
@@ -608,8 +631,14 @@ func (s *PaymentService) ReparseScreenshot(paymentID string) (*PaymentExtractedD
 	}
 
 	// Update transaction time if extracted
-	if extracted.TransactionTime != nil {
-		updateData["transaction_time"] = *extracted.TransactionTime
+	if extracted.TransactionTime != nil && strings.TrimSpace(*extracted.TransactionTime) != "" {
+		shanghai := loadLocationOrUTC("Asia/Shanghai")
+		if payTime, err := parsePaymentTimeToUTC(*extracted.TransactionTime, shanghai); err == nil {
+			utcTimeStr := payTime.Format(time.RFC3339)
+			extracted.TransactionTime = &utcTimeStr
+			updateData["transaction_time"] = utcTimeStr
+			updateData["transaction_time_ts"] = unixMilli(payTime)
+		}
 	}
 
 	// Update the payment record

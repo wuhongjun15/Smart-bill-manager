@@ -160,6 +160,7 @@
       :header="'\u4E0A\u4F20\u652F\u4ED8\u622A\u56FE'"
       :style="{ width: '880px', maxWidth: '96vw' }"
       :closable="!uploadingScreenshot && !savingOcrResult"
+      @hide="cancelScreenshotUpload"
     >
       <div class="upload-screenshot-layout">
         <div
@@ -526,6 +527,7 @@ const selectedScreenshotName = ref('')
 const screenshotError = ref('')
 const ocrResult = ref<OcrExtractedData | null>(null)
 const uploadedPaymentId = ref<string | null>(null)
+const uploadedScreenshotPath = ref<string | null>(null)
 const screenshotInput = ref<HTMLInputElement | null>(null)
 
 const triggerScreenshotChoose = (event: MouseEvent) => {
@@ -569,6 +571,7 @@ const setScreenshotFile = (file?: File) => {
   selectedScreenshotName.value = file.name
   ocrResult.value = null
   uploadedPaymentId.value = null
+  uploadedScreenshotPath.value = null
 }
 
 const onScreenshotDrop = (event: DragEvent) => {
@@ -589,6 +592,7 @@ const clearSelectedScreenshot = () => {
   screenshotError.value = ''
   ocrResult.value = null
   uploadedPaymentId.value = null
+  uploadedScreenshotPath.value = null
   if (screenshotInput.value) screenshotInput.value.value = ''
 }
 
@@ -597,7 +601,7 @@ const ocrForm = reactive({
   merchant: '',
   payment_method: '',
   description: '',
-  transaction_time: new Date(),
+  transaction_time: null as Date | null,
   order_number: '',
 })
 const ocrErrors = reactive({ amount: '', transaction_time: '' })
@@ -774,26 +778,36 @@ const handleScreenshotUpload = async () => {
   try {
     const res = await paymentApi.uploadScreenshot(selectedScreenshotFile.value)
     if (res.data.success && res.data.data) {
-      const { payment, extracted, ocr_error } = res.data.data as any
-      uploadedPaymentId.value = payment.id
+      const { payment, extracted, ocr_error, screenshot_path } = res.data.data as any
+      uploadedPaymentId.value = payment?.id || null
+      uploadedScreenshotPath.value = screenshot_path || null
       ocrResult.value = extracted
 
       ocrForm.amount = extracted.amount || 0
       ocrForm.merchant = extracted.merchant || ''
       ocrForm.payment_method = normalizePaymentMethodText(extracted.payment_method || '')
       ocrForm.order_number = extracted.order_number || ''
-      ocrForm.transaction_time = extracted.transaction_time ? new Date(extracted.transaction_time) : new Date()
+      if (extracted.transaction_time) {
+        const t = dayjs(extracted.transaction_time)
+        ocrForm.transaction_time = t.isValid() ? t.toDate() : null
+      } else {
+        ocrForm.transaction_time = null
+      }
       ocrForm.description = ''
 
       if (ocr_error) {
         toast.add({
           severity: 'warn',
-          summary: `\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0C\u4F46 OCR \u8BC6\u522B\u5931\u8D25\uFF1A${ocr_error}`,
+          summary: uploadedPaymentId.value
+            ? `\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0C\u4F46 OCR \u8BC6\u522B\u5931\u8D25\uFF1A${ocr_error}`
+            : '\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0C\u4F46\u672A\u8BC6\u522B\u5230\u4EA4\u6613\u65F6\u95F4\uFF0C\u8BF7\u624B\u52A8\u9009\u62E9\u4EA4\u6613\u65F6\u95F4',
           life: 5000,
         })
         notifications.add({
           severity: 'warn',
-          title: '\u652F\u4ED8\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0COCR \u5931\u8D25',
+          title: uploadedPaymentId.value
+            ? '\u652F\u4ED8\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0COCR \u5931\u8D25'
+            : '\u652F\u4ED8\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0C\u9700\u624B\u52A8\u8865\u5168',
           detail: selectedScreenshotName.value || undefined,
         })
       } else {
@@ -823,12 +837,12 @@ const handleSaveOcrResult = async () => {
   if (!validateOcrForm()) return
   savingOcrResult.value = true
   try {
-    const payload = {
+    const payload: any = {
       amount: Number(ocrForm.amount),
       merchant: ocrForm.merchant,
       payment_method: normalizePaymentMethodText(ocrForm.payment_method),
       description: ocrForm.description,
-      transaction_time: dayjs(ocrForm.transaction_time).toISOString(),
+      transaction_time: dayjs(ocrForm.transaction_time as Date).toISOString(),
     }
 
     if (uploadedPaymentId.value) {
@@ -840,6 +854,8 @@ const handleSaveOcrResult = async () => {
         detail: `${formatMoney(payload.amount)} ${payload.merchant || ''}`.trim(),
       })
     } else {
+      if (uploadedScreenshotPath.value) payload.screenshot_path = uploadedScreenshotPath.value
+      if (ocrResult.value) payload.extracted_data = JSON.stringify(ocrResult.value)
       await paymentApi.create(payload)
       toast.add({ severity: 'success', summary: '\u652F\u4ED8\u8BB0\u5F55\u521B\u5EFA\u6210\u529F', life: 2000 })
       notifications.add({
@@ -861,6 +877,7 @@ const handleSaveOcrResult = async () => {
 
 const resetScreenshotUploadState = () => {
   uploadedPaymentId.value = null
+  uploadedScreenshotPath.value = null
   selectedScreenshotFile.value = null
   selectedScreenshotName.value = ''
   screenshotError.value = ''
@@ -869,7 +886,7 @@ const resetScreenshotUploadState = () => {
   ocrForm.merchant = ''
   ocrForm.payment_method = ''
   ocrForm.description = ''
-  ocrForm.transaction_time = new Date()
+  ocrForm.transaction_time = null
   ocrForm.order_number = ''
   uploadScreenshotModalVisible.value = false
 }
@@ -877,6 +894,8 @@ const resetScreenshotUploadState = () => {
 const cancelScreenshotUpload = () => {
   if (uploadedPaymentId.value) {
     paymentApi.delete(uploadedPaymentId.value).catch((error) => console.error('Failed to delete payment record:', error))
+  } else if (uploadedScreenshotPath.value) {
+    paymentApi.cancelUploadScreenshot(uploadedScreenshotPath.value).catch((error) => console.error('Failed to delete screenshot file:', error))
   }
   resetScreenshotUploadState()
 }
