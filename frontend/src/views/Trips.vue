@@ -362,13 +362,33 @@ const forcePickerBelow = async (pickerRef: { value: any } | any) => {
     const scrollY = window.scrollY || document.documentElement.scrollTop || 0
 
     const overlayWidth = overlay.getBoundingClientRect().width || overlay.offsetWidth
+    const overlayHeight = overlay.getBoundingClientRect().height || overlay.offsetHeight
+
     const minLeft = scrollX + 8
     const maxLeft = scrollX + window.innerWidth - overlayWidth - 8
     const left = Math.max(minLeft, Math.min(targetRect.left + scrollX, maxLeft))
-    const top = targetRect.bottom + scrollY + 6
+
+    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0
+    const spaceBelow = Math.floor(viewportH - targetRect.bottom - 12)
+    const spaceAbove = Math.floor(targetRect.top - 12)
+
+    // Prefer showing below when possible; otherwise choose the side with more space.
+    const minUsable = 320
+    let placeBelow = spaceBelow >= minUsable || spaceBelow >= spaceAbove
+    if (!placeBelow && spaceAbove <= 0) placeBelow = true
+
+    const maxHeight = Math.max(240, placeBelow ? spaceBelow : spaceAbove)
+    const needsScroll = overlayHeight > maxHeight
+
+    overlay.style.maxHeight = needsScroll ? `${maxHeight}px` : ''
+    overlay.style.overflow = needsScroll ? 'auto' : ''
+
+    const top = placeBelow
+      ? targetRect.bottom + scrollY + 6
+      : targetRect.top + scrollY - Math.min(overlayHeight, maxHeight) - 6
 
     overlay.style.left = `${left}px`
-    overlay.style.top = `${top}px`
+    overlay.style.top = `${Math.max(scrollY + 8, top)}px`
     overlay.style.right = 'auto'
     overlay.style.bottom = 'auto'
   }
@@ -961,9 +981,14 @@ onMounted(async () => {
 }
 
 .dp-footer {
+  position: sticky;
+  bottom: 0;
   display: flex;
   justify-content: flex-end;
   padding-top: 10px;
+  padding-bottom: 2px;
+  background: var(--p-surface-0, #ffffff);
+  border-top: 1px solid rgba(2, 6, 23, 0.06);
 }
 
 .field {
