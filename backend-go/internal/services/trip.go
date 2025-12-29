@@ -298,6 +298,27 @@ func (s *TripService) GetSummary(tripID string) (*TripSummary, error) {
 	return out, nil
 }
 
+func (s *TripService) GetAllSummaries() ([]TripSummary, error) {
+	db := database.GetDB()
+
+	var out []TripSummary
+	err := db.
+		Table("trips AS t").
+		Select(`
+			t.id AS trip_id,
+			COUNT(DISTINCT p.id) AS payment_count,
+			COALESCE(SUM(p.amount), 0) AS total_amount,
+			COUNT(DISTINCT l.invoice_id) AS linked_invoices,
+			COALESCE(SUM(CASE WHEN p.id IS NULL THEN 0 WHEN l.invoice_id IS NULL THEN 1 ELSE 0 END), 0) AS unlinked_pays
+		`).
+		Joins("LEFT JOIN payments AS p ON p.trip_id = t.id").
+		Joins("LEFT JOIN invoice_payment_links AS l ON l.payment_id = p.id").
+		Group("t.id").
+		Order("t.start_time_ts DESC").
+		Scan(&out).Error
+	return out, err
+}
+
 type TripPaymentInvoice struct {
 	ID            string   `json:"id"`
 	InvoiceNumber *string  `json:"invoice_number"`

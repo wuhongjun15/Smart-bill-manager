@@ -127,6 +127,84 @@ func (r *PaymentRepository) GetStats(startDate, endDate string) (*models.Payment
 	return stats, nil
 }
 
+// GetStatsByTs uses SQL aggregation to compute stats efficiently.
+// startTs/endTs are UTC unix milliseconds; 0 means unbounded.
+func (r *PaymentRepository) GetStatsByTs(startTs, endTs int64) (*models.PaymentStats, error) {
+	applyFilter := func(q *gorm.DB) *gorm.DB {
+		if startTs > 0 {
+			q = q.Where("transaction_time_ts >= ?", startTs)
+		}
+		if endTs > 0 {
+			q = q.Where("transaction_time_ts <= ?", endTs)
+		}
+		return q
+	}
+
+	stats := &models.PaymentStats{
+		CategoryStats: make(map[string]float64),
+		MerchantStats: make(map[string]float64),
+		DailyStats:    make(map[string]float64),
+	}
+
+	type totalsRow struct {
+		TotalAmount float64 `gorm:"column:total_amount"`
+		TotalCount  int64   `gorm:"column:total_count"`
+	}
+	var totals totalsRow
+	if err := applyFilter(database.GetDB().Table("payments")).
+		Select("COALESCE(SUM(amount), 0) AS total_amount, COUNT(*) AS total_count").
+		Scan(&totals).Error; err != nil {
+		return nil, err
+	}
+	stats.TotalAmount = totals.TotalAmount
+	stats.TotalCount = int(totals.TotalCount)
+
+	type kvRow struct {
+		Key   string  `gorm:"column:k"`
+		Total float64 `gorm:"column:total"`
+	}
+
+	// Category stats
+	var catRows []kvRow
+	if err := applyFilter(database.GetDB().Table("payments")).
+		Select(`CASE WHEN category IS NULL OR TRIM(category) = '' THEN '未分类' ELSE category END AS k, COALESCE(SUM(amount), 0) AS total`).
+		Group("k").
+		Scan(&catRows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range catRows {
+		stats.CategoryStats[r.Key] = r.Total
+	}
+
+	// Merchant stats
+	var merchRows []kvRow
+	if err := applyFilter(database.GetDB().Table("payments")).
+		Select(`CASE WHEN merchant IS NULL OR TRIM(merchant) = '' THEN '未知商家' ELSE merchant END AS k, COALESCE(SUM(amount), 0) AS total`).
+		Group("k").
+		Scan(&merchRows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range merchRows {
+		stats.MerchantStats[r.Key] = r.Total
+	}
+
+	// Daily stats (YYYY-MM-DD from RFC3339 string)
+	var dayRows []kvRow
+	if err := applyFilter(database.GetDB().Table("payments")).
+		Select(`SUBSTR(transaction_time, 1, 10) AS k, COALESCE(SUM(amount), 0) AS total`).
+		Group("k").
+		Scan(&dayRows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range dayRows {
+		if len(r.Key) == 10 {
+			stats.DailyStats[r.Key] = r.Total
+		}
+	}
+
+	return stats, nil
+}
+
 // GetLinkedInvoices returns all invoices linked to a payment
 func (r *PaymentRepository) GetLinkedInvoices(paymentID string) ([]models.Invoice, error) {
 	var invoices []models.Invoice

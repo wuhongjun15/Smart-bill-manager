@@ -110,6 +110,52 @@ func (s *PaymentService) GetAll(filter PaymentFilterInput) ([]models.Payment, er
 	})
 }
 
+type PaymentListItem struct {
+	models.Payment
+	InvoiceCount int `json:"invoiceCount"`
+}
+
+func (s *PaymentService) GetAllWithInvoiceCounts(filter PaymentFilterInput) ([]PaymentListItem, error) {
+	payments, err := s.GetAll(filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(payments) == 0 {
+		return []PaymentListItem{}, nil
+	}
+
+	ids := make([]string, 0, len(payments))
+	for _, p := range payments {
+		ids = append(ids, p.ID)
+	}
+
+	type row struct {
+		PaymentID string `gorm:"column:payment_id"`
+		Cnt       int    `gorm:"column:cnt"`
+	}
+	var rows []row
+	_ = database.GetDB().
+		Table("invoice_payment_links").
+		Select("payment_id, COUNT(*) AS cnt").
+		Where("payment_id IN ?", ids).
+		Group("payment_id").
+		Scan(&rows).Error
+
+	counts := make(map[string]int, len(rows))
+	for _, r := range rows {
+		counts[strings.TrimSpace(r.PaymentID)] = r.Cnt
+	}
+
+	out := make([]PaymentListItem, 0, len(payments))
+	for _, p := range payments {
+		out = append(out, PaymentListItem{
+			Payment:      p,
+			InvoiceCount: counts[p.ID],
+		})
+	}
+	return out, nil
+}
+
 func (s *PaymentService) GetByID(id string) (*models.Payment, error) {
 	return s.repo.FindByID(id)
 }
@@ -266,7 +312,23 @@ func (s *PaymentService) Delete(id string) error {
 }
 
 func (s *PaymentService) GetStats(startDate, endDate string) (*models.PaymentStats, error) {
-	return s.repo.GetStats(startDate, endDate)
+	startTs := int64(0)
+	endTs := int64(0)
+	if strings.TrimSpace(startDate) != "" {
+		if t, err := parseRFC3339ToUTC(startDate); err == nil {
+			startTs = unixMilli(t)
+		} else {
+			return nil, fmt.Errorf("invalid startDate: %w", err)
+		}
+	}
+	if strings.TrimSpace(endDate) != "" {
+		if t, err := parseRFC3339ToUTC(endDate); err == nil {
+			endTs = unixMilli(t)
+		} else {
+			return nil, fmt.Errorf("invalid endDate: %w", err)
+		}
+	}
+	return s.repo.GetStatsByTs(startTs, endTs)
 }
 
 // CreateFromScreenshot creates a payment from a screenshot with OCR

@@ -143,13 +143,20 @@ func main() {
 
 	// Dashboard endpoint
 	protectedGroup.GET("/dashboard", func(c *gin.Context) {
-		now := time.Now()
-		firstDayOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-		lastDayOfMonth := firstDayOfMonth.AddDate(0, 1, -1)
+		// Use Asia/Shanghai for "本月" boundaries to match OCR/default time parsing.
+		loc, err := time.LoadLocation("Asia/Shanghai")
+		if err != nil {
+			loc = time.UTC
+		}
+		now := time.Now().In(loc)
+		firstDayOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+		firstDayNextMonth := firstDayOfMonth.AddDate(0, 1, 0)
+		// Inclusive upper bound for APIs that use <= endDate.
+		lastMomentOfMonth := firstDayNextMonth.Add(-time.Millisecond)
 
 		paymentStats, _ := paymentService.GetStats(
-			firstDayOfMonth.Format(time.RFC3339),
-			lastDayOfMonth.Format(time.RFC3339),
+			firstDayOfMonth.Format(time.RFC3339Nano),
+			lastMomentOfMonth.Format(time.RFC3339Nano),
 		)
 		invoiceStats, _ := invoiceService.GetStats()
 		emailStatus, _ := emailService.GetMonitoringStatus()

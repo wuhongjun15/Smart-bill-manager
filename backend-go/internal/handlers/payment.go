@@ -48,7 +48,7 @@ func (h *PaymentHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	payments, err := h.paymentService.GetAll(filter)
+	payments, err := h.paymentService.GetAllWithInvoiceCounts(filter)
 	if err != nil {
 		utils.Error(c, 500, "获取支付记录失败", err)
 		return

@@ -12,6 +12,8 @@ import type {
 export const tripsApi = {
   list: () => api.get<ApiResponse<Trip[]>>('/trips'),
 
+  getSummaries: () => api.get<ApiResponse<TripSummary[]>>('/trips/summaries'),
+
   create: (trip: Omit<Trip, 'id' | 'created_at' | 'updated_at'>) =>
     api.post<ApiResponse<{ trip: Trip; changes?: AssignmentChangeSummary }>>('/trips', trip),
 

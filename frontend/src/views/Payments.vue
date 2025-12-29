@@ -100,7 +100,7 @@
           </Column>
           <Column :header="'\u5173\u8054\u53D1\u7968'" :style="{ width: '130px' }">
             <template #body="{ data: row }">
-              <Button class="p-button-text" :label="`\u67E5\u770B (${linkedInvoicesCount[row.id] || 0})`" @click="viewLinkedInvoices(row)" />
+              <Button class="p-button-text" :label="`\u67E5\u770B (${row.invoiceCount || 0})`" @click="viewLinkedInvoices(row)" />
             </template>
           </Column>
           <Column :header="'\u64CD\u4F5C'" :style="{ width: '170px' }">
@@ -606,7 +606,6 @@ const ocrErrors = reactive({ amount: '', transaction_time: '' })
 const linkedInvoicesModalVisible = ref(false)
 const loadingLinkedInvoices = ref(false)
 const linkedInvoices = ref<Invoice[]>([])
-const linkedInvoicesCount = ref<Record<string, number>>({})
 const currentPaymentForInvoices = ref<Payment | null>(null)
 const loadingSuggestedInvoices = ref(false)
 const suggestedInvoices = ref<Invoice[]>([])
@@ -675,30 +674,8 @@ const normalizePaymentMethodText = (value?: string | null) => {
   return s.replace(/[（）]/g, (m) => (m === '（' ? '(' : ')')).trim()
 }
 
-const loadLinkedInvoicesCount = async () => {
-  try {
-    const counts: Record<string, number> = {}
-    for (const payment of payments.value) {
-      try {
-        const res = await paymentApi.getPaymentInvoices(payment.id)
-        if (res.data.success && res.data.data) counts[payment.id] = res.data.data.length
-      } catch {
-        counts[payment.id] = 0
-      }
-    }
-    linkedInvoicesCount.value = counts
-  } catch (error) {
-    console.error('Load linked invoices count failed:', error)
-  }
-}
-
-const loadPaymentsWithCount = async () => {
-  await loadPayments()
-  await loadLinkedInvoicesCount()
-}
-
 const handleDateChange = () => {
-  loadPaymentsWithCount()
+  loadPayments()
   loadStats()
 }
 
@@ -751,7 +728,7 @@ const handleSubmit = async () => {
       })
     }
     modalVisible.value = false
-    await loadPaymentsWithCount()
+    await loadPayments()
     await loadStats()
   } catch {
     toast.add({ severity: 'error', summary: '\u64CD\u4F5C\u5931\u8D25', life: 3000 })
@@ -775,7 +752,7 @@ const handleDelete = async (id: string) => {
     await paymentApi.delete(id)
     toast.add({ severity: 'success', summary: '\u5220\u9664\u6210\u529F', life: 2000 })
     notifications.add({ severity: 'info', title: '\u652F\u4ED8\u8BB0\u5F55\u5DF2\u5220\u9664', detail: id })
-    await loadPaymentsWithCount()
+    await loadPayments()
     await loadStats()
   } catch {
     toast.add({ severity: 'error', summary: '\u5220\u9664\u5931\u8D25', life: 3000 })
@@ -873,7 +850,7 @@ const handleSaveOcrResult = async () => {
     }
 
     resetScreenshotUploadState()
-    await loadPaymentsWithCount()
+    await loadPayments()
     await loadStats()
   } catch {
     toast.add({ severity: 'error', summary: '\u4FDD\u5B58\u5931\u8D25', life: 3000 })
@@ -952,7 +929,7 @@ const handleLinkInvoiceToPayment = async (invoiceId: string) => {
     await invoiceApi.linkPayment(invoiceId, currentPaymentForInvoices.value.id)
     toast.add({ severity: 'success', summary: '\u5173\u8054\u6210\u529F', life: 2000 })
     await viewLinkedInvoices(currentPaymentForInvoices.value)
-    await loadLinkedInvoicesCount()
+    await loadPayments()
   } catch (error: unknown) {
     const err = error as { response?: { data?: { message?: string } } }
     toast.add({ severity: 'error', summary: err.response?.data?.message || '\u5173\u8054\u5931\u8D25', life: 3500 })
@@ -968,7 +945,7 @@ const handleUnlinkInvoiceFromPayment = async (invoiceId: string) => {
     await invoiceApi.unlinkPayment(invoiceId, currentPaymentForInvoices.value.id)
     toast.add({ severity: 'success', summary: '\u53D6\u6D88\u5173\u8054\u6210\u529F', life: 2000 })
     await viewLinkedInvoices(currentPaymentForInvoices.value)
-    await loadLinkedInvoicesCount()
+    await loadPayments()
   } catch (error: unknown) {
     const err = error as { response?: { data?: { message?: string } } }
     toast.add({ severity: 'error', summary: err.response?.data?.message || '\u53D6\u6D88\u5173\u8054\u5931\u8D25', life: 3500 })
@@ -1020,7 +997,7 @@ const handleReparseOcr = async (paymentId: string) => {
       notifications.add({ severity: 'success', title: '支付截图已重新解析', detail: paymentId })
       const detailRes = await paymentApi.getById(paymentId)
       if (detailRes.data.success && detailRes.data.data) detailPayment.value = detailRes.data.data
-      await loadPaymentsWithCount()
+      await loadPayments()
     }
   } catch (error: unknown) {
     const err = error as { response?: { data?: { message?: string; error?: string } } }
@@ -1055,7 +1032,7 @@ const tryOpenMatchFromRoute = async () => {
 
 onMounted(() => {
   void (async () => {
-    await loadPaymentsWithCount()
+    await loadPayments()
     await loadStats()
     await tryOpenMatchFromRoute()
   })()

@@ -96,34 +96,59 @@ func (r *InvoiceRepository) Delete(id string) error {
 }
 
 func (r *InvoiceRepository) GetStats() (*models.InvoiceStats, error) {
-	var invoices []models.Invoice
-
-	if err := database.GetDB().Find(&invoices).Error; err != nil {
-		return nil, err
-	}
-
 	stats := &models.InvoiceStats{
 		BySource: make(map[string]int),
 		ByMonth:  make(map[string]float64),
 	}
 
-	for _, inv := range invoices {
-		stats.TotalCount++
-		if inv.Amount != nil {
-			stats.TotalAmount += *inv.Amount
-		}
+	type totalsRow struct {
+		TotalCount  int64   `gorm:"column:total_count"`
+		TotalAmount float64 `gorm:"column:total_amount"`
+	}
+	var totals totalsRow
+	if err := database.GetDB().
+		Table("invoices").
+		Select("COUNT(*) AS total_count, COALESCE(SUM(amount), 0) AS total_amount").
+		Scan(&totals).Error; err != nil {
+		return nil, err
+	}
+	stats.TotalCount = int(totals.TotalCount)
+	stats.TotalAmount = totals.TotalAmount
 
-		source := inv.Source
-		if source == "" {
-			source = "unknown"
-		}
-		stats.BySource[source]++
+	// By source
+	type srcRow struct {
+		Source string `gorm:"column:src"`
+		Cnt    int64  `gorm:"column:cnt"`
+	}
+	var srcRows []srcRow
+	if err := database.GetDB().
+		Table("invoices").
+		Select(`CASE WHEN source IS NULL OR TRIM(source) = '' THEN 'unknown' ELSE source END AS src, COUNT(*) AS cnt`).
+		Group("src").
+		Scan(&srcRows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range srcRows {
+		stats.BySource[r.Source] = int(r.Cnt)
+	}
 
-		if inv.InvoiceDate != nil && len(*inv.InvoiceDate) >= 7 {
-			month := (*inv.InvoiceDate)[:7]
-			if inv.Amount != nil {
-				stats.ByMonth[month] += *inv.Amount
-			}
+	// By month (YYYY-MM)
+	type monthRow struct {
+		Month string  `gorm:"column:m"`
+		Total float64 `gorm:"column:total"`
+	}
+	var monthRows []monthRow
+	if err := database.GetDB().
+		Table("invoices").
+		Where("invoice_date IS NOT NULL AND LENGTH(invoice_date) >= 7 AND amount IS NOT NULL").
+		Select(`SUBSTR(invoice_date, 1, 7) AS m, COALESCE(SUM(amount), 0) AS total`).
+		Group("m").
+		Scan(&monthRows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range monthRows {
+		if len(r.Month) == 7 {
+			stats.ByMonth[r.Month] = r.Total
 		}
 	}
 

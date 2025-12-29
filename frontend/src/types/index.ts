@@ -11,6 +11,7 @@ export interface Payment {
   description?: string;
   transaction_time: string;
   transaction_time_ts?: number;
+  invoiceCount?: number;
   screenshot_path?: string;
   extracted_data?: string;
   created_at?: string;

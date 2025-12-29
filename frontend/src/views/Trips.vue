@@ -847,9 +847,11 @@ const loadTrips = async () => {
   trips.value = res.data.data || []
 }
 
-const loadSummary = async (tripId: string) => {
-  const res = await tripsApi.getSummary(tripId)
-  if (res.data.data) summaries[tripId] = res.data.data
+const loadSummaries = async () => {
+  const res = await tripsApi.getSummaries()
+  const list = res.data.data || []
+  for (const k of Object.keys(summaries)) delete summaries[k]
+  for (const s of list) summaries[s.trip_id] = s
 }
 
 const loadTripPayments = async (tripId: string) => {
@@ -927,7 +929,7 @@ const handleTripOpen = (e: { index: number }) => {
 
 const reloadAll = async () => {
   await loadTrips()
-  await Promise.all(trips.value.map((t) => loadSummary(t.id)))
+  await loadSummaries()
   // keep payments lazy; load on demand if already opened (simple: just refresh cache)
   for (const t of trips.value) {
     if (tripPayments[t.id]) await loadTripPayments(t.id)

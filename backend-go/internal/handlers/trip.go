@@ -18,6 +18,7 @@ func NewTripHandler(tripService *services.TripService) *TripHandler {
 
 func (h *TripHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("", h.GetAll)
+	r.GET("/summaries", h.GetSummaries)
 	r.POST("", h.Create)
 	r.GET("/pending-payments", h.GetPendingPayments)
 	r.POST("/pending-payments/:paymentId/assign", h.AssignPendingPayment)
@@ -28,6 +29,15 @@ func (h *TripHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/:id/payments", h.GetPayments)
 	r.GET("/:id/cascade-preview", h.CascadePreview)
 	r.DELETE("/:id", h.DeleteCascade)
+}
+
+func (h *TripHandler) GetSummaries(c *gin.Context) {
+	out, err := h.tripService.GetAllSummaries()
+	if err != nil {
+		utils.Error(c, 500, "Failed to get trip summaries", err)
+		return
+	}
+	utils.SuccessData(c, out)
 }
 
 func (h *TripHandler) GetAll(c *gin.Context) {
