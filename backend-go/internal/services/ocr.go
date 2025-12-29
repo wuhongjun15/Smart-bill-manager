@@ -1786,17 +1786,19 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 	}
 
 	// Extract merchant/receiver with additional patterns
-	// Priority: 商品 (short name) > 收款方/收款人 > 商户全称 (full company name)
+	// Priority: 商户全称标签 > 收款方/收款人/转账给 > 商品行（低置信度） > 通用全名
 	merchantRegexes := []*regexp.Regexp{
+		// Explicit full-name label
+		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n\r]+)`),
 		// WeChat QR transfer style: "扫二维码付款-给XXXX"
 		regexp.MustCompile(`扫(?:码|二维码)付款[-—－]?给([^\n\r]+)`),
-		// Highest priority: short merchant name after "商品"
-		// NOTE: Require delimiter to avoid matching "商品说明" -> "说明".
-		regexp.MustCompile(`商品[：:][\s]*([^\s(（\n]+)`),
-		regexp.MustCompile(`商品[\s]+([^\s(（\n]+)`),
+		// 收款方/收款人
 		regexp.MustCompile(`收款方[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`收款人[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`转账给([^\s¥￥\n]+)`),
+		// 商品（低置信度兜底）
+		regexp.MustCompile(`商品[：:][\s]*([^\s(（\n]+)`),
+		regexp.MustCompile(`商品[\s]+([^\s(（\n]+)`),
 		// Lower priority: full merchant name
 		merchantFullNameRegex,
 	}
@@ -1809,9 +1811,26 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 					continue
 				}
 				if merchant != "" && merchant != "说明" {
-					data.Merchant = &merchant
-					data.MerchantSource = "wechat_label"
-					data.MerchantConfidence = 0.9
+					switch {
+					case strings.Contains(re.String(), "商户全称"):
+						data.Merchant = &merchant
+						data.MerchantSource = "wechat_fullname_label"
+						data.MerchantConfidence = 0.98
+					case strings.Contains(re.String(), "收款方") || strings.Contains(re.String(), "收款人") || strings.Contains(re.String(), "转账给"):
+						data.Merchant = &merchant
+						data.MerchantSource = "wechat_label"
+						data.MerchantConfidence = 0.9
+					case strings.Contains(re.String(), "商品"):
+						if data.Merchant == nil {
+							data.Merchant = &merchant
+							data.MerchantSource = "wechat_item"
+							data.MerchantConfidence = 0.4
+						}
+					default:
+						data.Merchant = &merchant
+						data.MerchantSource = "wechat_fullname"
+						data.MerchantConfidence = 0.7
+					}
 				}
 				break
 			}
