@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -82,6 +83,13 @@ func AuthRateLimitMiddleware() gin.HandlerFunc {
 	limiter := newRateLimiter(15*time.Minute, 20) // 20 requests per 15 minutes
 
 	return func(c *gin.Context) {
+		// setup-required is used by the frontend router guard and may be hit frequently (refresh/multi-tabs).
+		// Do not apply the strict auth limiter to it to avoid degrading UX.
+		if strings.HasSuffix(c.Request.URL.Path, "/setup-required") {
+			c.Next()
+			return
+		}
+
 		ip := c.ClientIP()
 		if !limiter.allow(ip) {
 			utils.Error(c, 429, "请求过于频繁，请稍后再试", nil)

@@ -75,35 +75,36 @@ setAuthErrorHandler(() => {
 router.beforeEach(async (to, _from, next) => {
   const authStore = useAuthStore()
 
-  // Check if setup is required
+  // Only check setup status when needed:
+  // - when user tries to visit /setup
+  // - when user is not authenticated (first install / logged out)
+  let setupResponse: { setupRequired: boolean } | null = null
   let setupCheckFailed = false
-  try {
-    const setupResponse = await authStore.checkSetupRequired()
-
-    if (setupResponse === null) {
+  if (to.path === '/setup' || !authStore.isAuthenticated) {
+    try {
+      setupResponse = await authStore.checkSetupRequired()
+      if (setupResponse === null) {
+        setupCheckFailed = true
+        console.warn('Setup check returned null - setup status unknown')
+      }
+    } catch (error) {
+      console.error('Failed to check setup status:', error)
       setupCheckFailed = true
-      console.warn('Setup check returned null - setup status unknown')
-    } else if (setupResponse.setupRequired) {
-      if (to.path !== '/setup') {
-        next('/setup')
-        return
-      }
-      next()
-      return
-    } else {
-      if (to.path === '/setup') {
-        next('/login')
-        return
-      }
     }
-  } catch (error) {
-    console.error('Failed to check setup status:', error)
-    setupCheckFailed = true
   }
 
-  // If setup status is unknown, do not allow visiting setup page (prevents bypass when admin exists).
-  if (setupCheckFailed && to.path === '/setup') {
-    next('/login')
+  if (to.path === '/setup') {
+    // If setup is not required (admin already exists) or status is unknown, always redirect to login.
+    if (setupCheckFailed || (setupResponse && !setupResponse.setupRequired)) {
+      next('/login')
+      return
+    }
+    next()
+    return
+  }
+
+  if (!authStore.isAuthenticated && setupResponse && setupResponse.setupRequired) {
+    next('/setup')
     return
   }
 
