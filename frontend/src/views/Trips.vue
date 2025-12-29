@@ -243,7 +243,8 @@
               showTime
               showSeconds
               :manualInput="false"
-              @show="() => forcePickerBelow(tripStartPicker)"
+              @show="() => onPickerShow(tripStartPicker)"
+              @hide="() => onPickerHide(tripStartPicker)"
             >
               <template #footer>
                 <div class="dp-footer">
@@ -262,7 +263,8 @@
               showTime
               showSeconds
               :manualInput="false"
-              @show="() => forcePickerBelow(tripEndPicker)"
+              @show="() => onPickerShow(tripEndPicker)"
+              @hide="() => onPickerHide(tripEndPicker)"
             >
               <template #footer>
                 <div class="dp-footer">
@@ -345,56 +347,125 @@ const closeDatePicker = (pickerRef: { value: any } | any) => {
   inst.overlayVisible = false
 }
 
-const forcePickerBelow = async (pickerRef: { value: any } | any) => {
-  if (typeof window === 'undefined') return
-  await nextTick()
+const OPEN_PICKERS = new Set<any>()
+let viewportListenerAttached = false
+let viewportRaf = 0
 
-  const inst = pickerRef?.value ?? pickerRef
+const resetOverlayStyle = (inst: any) => {
+  const overlay = inst?.overlay as HTMLElement | undefined
+  if (!overlay) return
+  overlay.style.transform = ''
+  overlay.style.transformOrigin = ''
+  overlay.style.maxHeight = ''
+  overlay.style.maxWidth = ''
+  overlay.style.overflow = ''
+}
+
+const repositionPickerBelow = (inst: any) => {
+  if (typeof window === 'undefined') return
+  if (!inst?.overlayVisible) return
+
   const overlay = inst?.overlay as HTMLElement | undefined
   const root = inst?.$el as HTMLElement | undefined
   if (!overlay || !root) return
 
   const input = (root.querySelector('input') as HTMLElement | null) || root
+  const targetRect = input.getBoundingClientRect()
 
-  const apply = () => {
-    const targetRect = input.getBoundingClientRect()
-    const scrollX = window.scrollX || document.documentElement.scrollLeft || 0
-    const scrollY = window.scrollY || document.documentElement.scrollTop || 0
+  const scrollX = window.scrollX || document.documentElement.scrollLeft || 0
+  const scrollY = window.scrollY || document.documentElement.scrollTop || 0
+  const viewportW = window.innerWidth || document.documentElement.clientWidth || 0
+  const viewportH = window.innerHeight || document.documentElement.clientHeight || 0
 
-    const overlayWidth = overlay.getBoundingClientRect().width || overlay.offsetWidth
-    const overlayHeight = overlay.getBoundingClientRect().height || overlay.offsetHeight
+  // Reset any previous scaling before measuring.
+  overlay.style.transform = ''
+  overlay.style.transformOrigin = ''
+  overlay.style.maxHeight = ''
+  overlay.style.maxWidth = ''
+  overlay.style.overflow = ''
 
-    const minLeft = scrollX + 8
-    const maxLeft = scrollX + window.innerWidth - overlayWidth - 8
-    const left = Math.max(minLeft, Math.min(targetRect.left + scrollX, maxLeft))
+  const naturalRect = overlay.getBoundingClientRect()
+  const naturalW = naturalRect.width || overlay.offsetWidth || 1
+  const naturalH = naturalRect.height || overlay.offsetHeight || 1
 
-    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0
-    const spaceBelow = Math.floor(viewportH - targetRect.bottom - 12)
-    const spaceAbove = Math.floor(targetRect.top - 12)
+  const margin = 8
+  const belowGap = 6
+  const availableW = Math.max(0, viewportW - margin * 2)
+  const availableH = Math.max(0, viewportH - targetRect.bottom - belowGap - margin)
 
-    // Prefer showing below when possible; otherwise choose the side with more space.
-    const minUsable = 320
-    let placeBelow = spaceBelow >= minUsable || spaceBelow >= spaceAbove
-    if (!placeBelow && spaceAbove <= 0) placeBelow = true
+  const scaleW = availableW > 0 ? availableW / naturalW : 1
+  const scaleH = availableH > 0 ? availableH / naturalH : 1
+  let scale = Math.min(1, scaleW, scaleH)
 
-    const maxHeight = Math.max(240, placeBelow ? spaceBelow : spaceAbove)
-    const needsScroll = overlayHeight > maxHeight
+  const minScale = 0.75
+  if (scale < minScale) scale = minScale
 
-    overlay.style.maxHeight = needsScroll ? `${maxHeight}px` : ''
-    overlay.style.overflow = needsScroll ? 'auto' : ''
+  overlay.style.transformOrigin = 'top left'
+  overlay.style.transform = scale < 1 ? `scale(${scale})` : ''
 
-    const top = placeBelow
-      ? targetRect.bottom + scrollY + 6
-      : targetRect.top + scrollY - Math.min(overlayHeight, maxHeight) - 6
+  const scaledW = naturalW * scale
+  const minLeft = scrollX + margin
+  const maxLeft = scrollX + viewportW - scaledW - margin
+  const left = Math.max(minLeft, Math.min(targetRect.left + scrollX, maxLeft))
+  const top = targetRect.bottom + scrollY + belowGap
 
-    overlay.style.left = `${left}px`
-    overlay.style.top = `${Math.max(scrollY + 8, top)}px`
-    overlay.style.right = 'auto'
-    overlay.style.bottom = 'auto'
+  // If even after scaling the overlay is taller than available space, cap height and allow scrolling (still below).
+  if (availableH > 0 && naturalH * scale > availableH) {
+    overlay.style.maxHeight = `${Math.max(220, Math.floor(availableH / scale))}px`
+    overlay.style.overflow = 'auto'
   }
 
-  apply()
-  window.requestAnimationFrame(apply)
+  overlay.style.left = `${left}px`
+  overlay.style.top = `${top}px`
+  overlay.style.right = 'auto'
+  overlay.style.bottom = 'auto'
+}
+
+const onViewportChange = () => {
+  if (typeof window === 'undefined') return
+  if (viewportRaf) return
+  viewportRaf = window.requestAnimationFrame(() => {
+    viewportRaf = 0
+    for (const inst of OPEN_PICKERS) repositionPickerBelow(inst)
+  })
+}
+
+const attachViewportListeners = () => {
+  if (typeof window === 'undefined') return
+  if (viewportListenerAttached) return
+  viewportListenerAttached = true
+  window.addEventListener('resize', onViewportChange, { passive: true })
+  // capture=true so it also reacts when dialog scroll container scrolls
+  window.addEventListener('scroll', onViewportChange, { passive: true, capture: true } as any)
+}
+
+const detachViewportListeners = () => {
+  if (typeof window === 'undefined') return
+  if (!viewportListenerAttached) return
+  if (OPEN_PICKERS.size > 0) return
+  viewportListenerAttached = false
+  window.removeEventListener('resize', onViewportChange as any)
+  window.removeEventListener('scroll', onViewportChange as any, true as any)
+}
+
+const onPickerShow = async (pickerRef: { value: any } | any) => {
+  const inst = pickerRef?.value ?? pickerRef
+  if (!inst) return
+  OPEN_PICKERS.add(inst)
+  attachViewportListeners()
+  await nextTick()
+  repositionPickerBelow(inst)
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => repositionPickerBelow(inst))
+  }
+}
+
+const onPickerHide = (pickerRef: { value: any } | any) => {
+  const inst = pickerRef?.value ?? pickerRef
+  if (!inst) return
+  OPEN_PICKERS.delete(inst)
+  resetOverlayStyle(inst)
+  detachViewportListeners()
 }
 
 const trips = ref<Trip[]>([])
