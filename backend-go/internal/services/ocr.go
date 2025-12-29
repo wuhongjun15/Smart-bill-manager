@@ -129,13 +129,19 @@ func ocrEngineInstallHint(engine string) string {
 
 // PaymentExtractedData represents extracted payment information
 type PaymentExtractedData struct {
-	Amount          *float64 `json:"amount"`
-	Merchant        *string  `json:"merchant"`
-	TransactionTime *string  `json:"transaction_time"`
-	PaymentMethod   *string  `json:"payment_method"`
-	OrderNumber     *string  `json:"order_number"`
-	RawText         string   `json:"raw_text"`
-	PrettyText      string   `json:"pretty_text,omitempty"`
+	Amount                *float64 `json:"amount"`
+	AmountSource          string   `json:"amount_source,omitempty"`
+	Merchant              *string  `json:"merchant"`
+	MerchantSource        string   `json:"merchant_source,omitempty"`
+	MerchantConfidence    float64  `json:"merchant_confidence,omitempty"`
+	TransactionTime       *string  `json:"transaction_time"`
+	TransactionTimeSource string   `json:"transaction_time_source,omitempty"`
+	PaymentMethod         *string  `json:"payment_method"`
+	PaymentMethodSource   string   `json:"payment_method_source,omitempty"`
+	OrderNumber           *string  `json:"order_number"`
+	OrderNumberSource     string   `json:"order_number_source,omitempty"`
+	RawText               string   `json:"raw_text"`
+	PrettyText            string   `json:"pretty_text,omitempty"`
 }
 
 type InvoiceLineItem struct {
@@ -147,15 +153,21 @@ type InvoiceLineItem struct {
 
 // InvoiceExtractedData represents extracted invoice information
 type InvoiceExtractedData struct {
-	InvoiceNumber *string           `json:"invoice_number"`
-	InvoiceDate   *string           `json:"invoice_date"`
-	Amount        *float64          `json:"amount"`
-	TaxAmount     *float64          `json:"tax_amount"`
-	SellerName    *string           `json:"seller_name"`
-	BuyerName     *string           `json:"buyer_name"`
-	Items         []InvoiceLineItem `json:"items,omitempty"`
-	RawText       string            `json:"raw_text"`
-	PrettyText    string            `json:"pretty_text,omitempty"`
+	InvoiceNumber       *string           `json:"invoice_number"`
+	InvoiceNumberSource string            `json:"invoice_number_source,omitempty"`
+	InvoiceDate         *string           `json:"invoice_date"`
+	InvoiceDateSource   string            `json:"invoice_date_source,omitempty"`
+	Amount              *float64          `json:"amount"`
+	AmountSource        string            `json:"amount_source,omitempty"`
+	TaxAmount           *float64          `json:"tax_amount"`
+	TaxAmountSource     string            `json:"tax_amount_source,omitempty"`
+	SellerName          *string           `json:"seller_name"`
+	SellerNameSource    string            `json:"seller_name_source,omitempty"`
+	BuyerName           *string           `json:"buyer_name"`
+	BuyerNameSource     string            `json:"buyer_name_source,omitempty"`
+	Items               []InvoiceLineItem `json:"items,omitempty"`
+	RawText             string            `json:"raw_text"`
+	PrettyText          string            `json:"pretty_text,omitempty"`
 }
 
 // OCRCLIResponse represents the response from the Python OCR CLI script.
@@ -1767,6 +1779,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
 			if amount := parseAmount(match[1]); amount != nil && *amount >= MinValidAmount {
 				data.Amount = amount
+				data.AmountSource = "wechat_amount_label"
 				break
 			}
 		}
@@ -1797,6 +1810,8 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 				}
 				if merchant != "" && merchant != "说明" {
 					data.Merchant = &merchant
+					data.MerchantSource = "wechat_label"
+					data.MerchantConfidence = 0.9
 				}
 				break
 			}
@@ -1821,6 +1836,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
 			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
+			data.TransactionTimeSource = "wechat_time_label"
 			break
 		}
 	}
@@ -1838,6 +1854,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
 			orderNum := strings.ReplaceAll(match[1], " ", "")
 			data.OrderNumber = &orderNum
+			data.OrderNumberSource = "wechat_order"
 			break
 		}
 	}
@@ -1851,6 +1868,7 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 			method := strings.TrimSpace(match[1])
 			if method != "" {
 				data.PaymentMethod = &method
+				data.PaymentMethodSource = "wechat_method_label"
 				break
 			}
 		}
@@ -1858,6 +1876,9 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 	// If no specific payment method found, use default
 	if data.PaymentMethod == nil {
 		data.PaymentMethod = inferPaymentMethodFromText(text)
+		if data.PaymentMethod != nil && data.PaymentMethodSource == "" {
+			data.PaymentMethodSource = "wechat_infer"
+		}
 	}
 }
 
@@ -1877,6 +1898,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
 			if amount := parseAmount(match[1]); amount != nil && *amount >= MinValidAmount {
 				data.Amount = amount
+				data.AmountSource = "alipay_amount_label"
 				break
 			}
 		}
@@ -1885,6 +1907,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 	// Extract merchant - prioritize short names
 	if m := extractAlipayMerchantFromBillDetail(text); m != "" {
 		data.Merchant = &m
+		data.MerchantSource = "alipay_bill_detail"
 	}
 	merchantRegexes := []*regexp.Regexp{
 		// NOTE: Require delimiter to avoid matching "商品说明" -> "说明".
@@ -1905,6 +1928,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 				continue
 			}
 			data.Merchant = &merchant
+			data.MerchantSource = "alipay_label"
 			break
 		}
 	}
@@ -1929,6 +1953,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
 			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
+			data.TransactionTimeSource = "alipay_time_label"
 			break
 		}
 	}
@@ -1943,8 +1968,9 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 	}
 	for _, re := range orderRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
-			orderNum := match[1]
+			orderNum := strings.ReplaceAll(match[1], " ", "")
 			data.OrderNumber = &orderNum
+			data.OrderNumberSource = "alipay_order"
 			break
 		}
 	}
@@ -1960,6 +1986,7 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 				method = sanitizePaymentMethod(method)
 				if method != "" {
 					data.PaymentMethod = &method
+					data.PaymentMethodSource = "alipay_method_label"
 				}
 				break
 			}
@@ -1968,6 +1995,9 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 	// If no specific payment method found, use default
 	if data.PaymentMethod == nil {
 		data.PaymentMethod = inferPaymentMethodFromText(text)
+		if data.PaymentMethod != nil && data.PaymentMethodSource == "" {
+			data.PaymentMethodSource = "alipay_infer"
+		}
 	}
 }
 
@@ -1986,6 +2016,7 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
 			if amount := parseAmount(match[1]); amount != nil && *amount >= MinValidAmount {
 				data.Amount = amount
+				data.AmountSource = "bank_amount_label"
 				break
 			}
 		}
@@ -2007,6 +2038,7 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 				continue
 			}
 			data.Merchant = &merchant
+			data.MerchantSource = "bank_label"
 			break
 		}
 	}
@@ -2025,6 +2057,7 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
 			timeStr := extractTimeFromMatch(match)
 			data.TransactionTime = &timeStr
+			data.TransactionTimeSource = "bank_time_label"
 			break
 		}
 	}
@@ -2040,6 +2073,7 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 				method = sanitizePaymentMethod(method)
 				if method != "" {
 					data.PaymentMethod = &method
+					data.PaymentMethodSource = "bank_method_label"
 				}
 				break
 			}
@@ -2048,6 +2082,9 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 	// If no specific payment method found, use default
 	if data.PaymentMethod == nil {
 		data.PaymentMethod = inferPaymentMethodFromText(text)
+		if data.PaymentMethod != nil && data.PaymentMethodSource == "" {
+			data.PaymentMethodSource = "bank_infer"
+		}
 	}
 }
 
@@ -2204,6 +2241,9 @@ func (s *OCRService) extractAmount(text string, data *PaymentExtractedData) {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
 			if amount := parseAmount(match[1]); amount != nil && *amount >= MinValidAmount {
 				data.Amount = amount
+				if data.AmountSource == "" {
+					data.AmountSource = "generic_amount"
+				}
 				return
 			}
 		}
@@ -2217,6 +2257,10 @@ func (s *OCRService) extractGenericMerchant(text string, data *PaymentExtractedD
 		merchant := strings.TrimSpace(match[1])
 		if merchant != "" && len(merchant) < MaxMerchantNameLength {
 			data.Merchant = &merchant
+			if data.MerchantSource == "" {
+				data.MerchantSource = "generic_merchant_suffix"
+				data.MerchantConfidence = 0.4
+			}
 		}
 	}
 }
@@ -3409,7 +3453,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	for _, re := range invoiceNumRegexes {
 		if match := re.FindStringSubmatch(parsedText); len(match) > 1 {
 			invoiceNum := match[1]
-			data.InvoiceNumber = &invoiceNum
+			setStringWithSource(&data.InvoiceNumber, &data.InvoiceNumberSource, invoiceNum, "label")
 			break
 		}
 	}
@@ -3422,7 +3466,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		standaloneNumRegex := regexp.MustCompile(`(?m)^(\d{8}|\d{20,25})$`)
 		if match := standaloneNumRegex.FindStringSubmatch(parsedText); len(match) > 1 {
 			invoiceNum := match[1]
-			data.InvoiceNumber = &invoiceNum
+			setStringWithSource(&data.InvoiceNumber, &data.InvoiceNumberSource, invoiceNum, "standalone")
 		}
 	}
 
@@ -3435,7 +3479,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	for _, re := range dateRegexes {
 		if match := re.FindStringSubmatch(parsedText); len(match) > 1 {
 			date := match[1]
-			data.InvoiceDate = &date
+			setStringWithSource(&data.InvoiceDate, &data.InvoiceDateSource, date, "label")
 			break
 		}
 	}
@@ -3445,7 +3489,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		if match := spaceDelimitedDatePattern.FindStringSubmatch(parsedText); len(match) > 3 {
 			// Reconstruct date: "2025年07月02日"
 			date := fmt.Sprintf("%s年%s月%s日", match[1], match[2], match[3])
-			data.InvoiceDate = &date
+			setStringWithSource(&data.InvoiceDate, &data.InvoiceDateSource, date, "spaced_label")
 		}
 	}
 
@@ -3455,7 +3499,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		standaloneDateRegex := regexp.MustCompile(`(\d{4}年\d{1,2}月\d{1,2}日)`)
 		if match := standaloneDateRegex.FindStringSubmatch(parsedText); len(match) > 1 {
 			date := match[1]
-			data.InvoiceDate = &date
+			setStringWithSource(&data.InvoiceDate, &data.InvoiceDateSource, date, "standalone")
 		}
 	}
 
@@ -3472,7 +3516,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	for _, re := range amountRegexes {
 		if match := re.FindStringSubmatch(parsedText); len(match) > 1 {
 			if amount := parseAmount(match[1]); amount != nil {
-				data.Amount = amount
+				setAmountWithSource(&data.Amount, &data.AmountSource, amount, "tax_total_label")
 				break
 			}
 		}
@@ -3485,7 +3529,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		chineseAmountRegex := regexp.MustCompile(`[零壹贰叁肆伍陆柒捌玖拾佰仟万萬亿]+圆整[\s\n\r]*[¥￥]?\s*[\n\r]?\s*([\d,.]+)`)
 		if match := chineseAmountRegex.FindStringSubmatch(parsedText); len(match) > 1 {
 			if amount := parseAmount(match[1]); amount != nil {
-				data.Amount = amount
+				setAmountWithSource(&data.Amount, &data.AmountSource, amount, "chinese_amount")
 			}
 		}
 	}
@@ -3502,7 +3546,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 			lastMatch := matches[len(matches)-1]
 			if len(lastMatch) > 1 {
 				if amount := parseAmount(lastMatch[1]); amount != nil {
-					data.Amount = amount
+					setAmountWithSource(&data.Amount, &data.AmountSource, amount, "standalone_amount")
 				}
 			}
 		}
@@ -3526,7 +3570,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	}
 	if maxAmt != nil {
 		if data.Amount == nil || *data.Amount < *maxAmt {
-			data.Amount = maxAmt
+			setAmountWithSource(&data.Amount, &data.AmountSource, maxAmt, "max_currency")
 		}
 	}
 
@@ -3538,7 +3582,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	for _, re := range taxRegexes {
 		if match := re.FindStringSubmatch(parsedText); len(match) > 1 {
 			if tax := parseAmount(match[1]); tax != nil {
-				data.TaxAmount = tax
+				setAmountWithSource(&data.TaxAmount, &data.TaxAmountSource, tax, "tax_label")
 				break
 			}
 		}
@@ -3546,8 +3590,12 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 
 	// Use position-based method to extract buyer and seller names
 	buyer, seller := s.extractBuyerAndSellerByPosition(parsedText)
-	data.BuyerName = buyer
-	data.SellerName = seller
+	if buyer != nil {
+		setStringWithSource(&data.BuyerName, &data.BuyerNameSource, *buyer, "position")
+	}
+	if seller != nil {
+		setStringWithSource(&data.SellerName, &data.SellerNameSource, *seller, "position")
+	}
 
 	// If position-based method didn't find buyer, try fallback regex methods
 	if data.BuyerName == nil {
@@ -3564,7 +3612,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 				// Filter out section headers like "信息" (information) that might be captured
 				// Also filter out labels like "名称：" or "名称:"
 				if buyer != "" && buyer != "信" && buyer != "息" && buyer != "名称：" && buyer != "名称:" {
-					data.BuyerName = &buyer
+					setStringWithSource(&data.BuyerName, &data.BuyerNameSource, buyer, "buyer_label")
 					break
 				}
 			}
@@ -3580,7 +3628,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 				buyer := strings.TrimSpace(match[2])
 				// Filter out labels and section markers
 				if buyer != "" && buyer != "销" && buyer != "售" && buyer != "方" && buyer != "名称：" && buyer != "名称:" {
-					data.BuyerName = &buyer
+					setStringWithSource(&data.BuyerName, &data.BuyerNameSource, buyer, "buyer_section")
 				}
 			}
 		}
@@ -3590,7 +3638,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 			individualRegex := regexp.MustCompile(`(个人)`)
 			if match := individualRegex.FindStringSubmatch(parsedText); len(match) > 1 {
 				buyer := match[1]
-				data.BuyerName = &buyer
+				setStringWithSource(&data.BuyerName, &data.BuyerNameSource, buyer, "buyer_individual")
 			}
 		}
 
@@ -3614,7 +3662,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 				seller := strings.TrimSpace(match[1])
 				// Filter out section headers like "信息" (information) that might be captured
 				if seller != "" && seller != "信" && seller != "息" {
-					data.SellerName = &seller
+					setStringWithSource(&data.SellerName, &data.SellerNameSource, seller, "seller_label")
 					break
 				}
 			}
@@ -3629,7 +3677,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 			if match := sellerSectionRegex.FindStringSubmatch(parsedText); len(match) > 2 {
 				seller := strings.TrimSpace(match[2])
 				if seller != "" && seller != "购" && seller != "买" && seller != "方" {
-					data.SellerName = &seller
+					setStringWithSource(&data.SellerName, &data.SellerNameSource, seller, "seller_section")
 				}
 			}
 		}
@@ -3644,7 +3692,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 				// Additional validation: check if this looks like a company name
 				// Sellers should not be "个人" (individual) - that would be a buyer
 				if seller != "" && len(seller) > 2 && seller != "个人" {
-					data.SellerName = &seller
+					setStringWithSource(&data.SellerName, &data.SellerNameSource, seller, "seller_taxid_name")
 				}
 			}
 		}
@@ -3688,6 +3736,44 @@ func parseAmount(s string) *float64 {
 	}
 
 	return &amount
+}
+
+func setPtrIfEmpty(target **string, val string) {
+	if target == nil {
+		return
+	}
+	if strings.TrimSpace(val) == "" {
+		return
+	}
+	if *target == nil || strings.TrimSpace(**target) == "" {
+		v := strings.TrimSpace(val)
+		*target = &v
+	}
+}
+
+func setStringWithSource(target **string, source *string, val, src string) {
+	if strings.TrimSpace(val) == "" {
+		return
+	}
+	if *target == nil || strings.TrimSpace(**target) == "" {
+		v := strings.TrimSpace(val)
+		*target = &v
+		if source != nil && src != "" {
+			*source = src
+		}
+	}
+}
+
+func setAmountWithSource(target **float64, source *string, val *float64, src string) {
+	if val == nil {
+		return
+	}
+	if *target == nil || **target == 0 {
+		*target = val
+		if source != nil && src != "" {
+			*source = src
+		}
+	}
 }
 
 // ExtractedDataToJSON converts extracted data to JSON string

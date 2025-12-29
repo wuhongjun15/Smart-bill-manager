@@ -280,6 +280,64 @@
 
         <Divider />
 
+        <div v-if="getInvoiceExtracted(previewInvoice)" class="ocr-fields">
+          <div class="section-title">OCR 摘要</div>
+          <div class="field-row">
+            <span>发票号码</span>
+            <span>
+              {{ getInvoiceExtracted(previewInvoice)?.invoice_number || '-' }}
+              <small v-if="getInvoiceExtracted(previewInvoice)?.invoice_number_source" class="ocr-hint">
+                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.invoice_number_source) }}
+              </small>
+            </span>
+          </div>
+          <div class="field-row">
+            <span>开票日期</span>
+            <span>
+              {{ getInvoiceExtracted(previewInvoice)?.invoice_date || '-' }}
+              <small v-if="getInvoiceExtracted(previewInvoice)?.invoice_date_source" class="ocr-hint">
+                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.invoice_date_source) }}
+              </small>
+            </span>
+          </div>
+          <div class="field-row">
+            <span>价税合计</span>
+            <span>
+              {{ getInvoiceExtracted(previewInvoice)?.amount ?? '-' }}
+              <small v-if="getInvoiceExtracted(previewInvoice)?.amount_source" class="ocr-hint">
+                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.amount_source) }}
+              </small>
+            </span>
+          </div>
+          <div class="field-row">
+            <span>税额</span>
+            <span>
+              {{ getInvoiceExtracted(previewInvoice)?.tax_amount ?? '-' }}
+              <small v-if="getInvoiceExtracted(previewInvoice)?.tax_amount_source" class="ocr-hint">
+                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.tax_amount_source) }}
+              </small>
+            </span>
+          </div>
+          <div class="field-row">
+            <span>销售方</span>
+            <span>
+              {{ getInvoiceExtracted(previewInvoice)?.seller_name || '-' }}
+              <small v-if="getInvoiceExtracted(previewInvoice)?.seller_name_source" class="ocr-hint">
+                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.seller_name_source) }}
+              </small>
+            </span>
+          </div>
+          <div class="field-row">
+            <span>购买方</span>
+            <span>
+              {{ getInvoiceExtracted(previewInvoice)?.buyer_name || '-' }}
+              <small v-if="getInvoiceExtracted(previewInvoice)?.buyer_name_source" class="ocr-hint">
+                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.buyer_name_source) }}
+              </small>
+            </span>
+          </div>
+        </div>
+
         <div v-if="getInvoiceRawText(previewInvoice) || getInvoicePrettyText(previewInvoice)" class="raw-section">
           <div class="raw-title">OCR &#25991;&#26412;</div>
           <Accordion>
@@ -322,6 +380,42 @@ import { useToast } from 'primevue/usetoast'
 import { invoiceApi, FILE_BASE_URL } from '@/api'
 import { useNotificationStore } from '@/stores/notifications'
 import type { Invoice, Payment } from '@/types'
+
+interface InvoiceExtractedData {
+  invoice_number?: string
+  invoice_number_source?: string
+  invoice_date?: string
+  invoice_date_source?: string
+  amount?: number
+  amount_source?: string
+  tax_amount?: number
+  tax_amount_source?: string
+  seller_name?: string
+  seller_name_source?: string
+  buyer_name?: string
+  buyer_name_source?: string
+}
+
+const formatSourceLabel = (src?: string) => {
+  if (!src) return ''
+  const map: Record<string, string> = {
+    label: '标签',
+    standalone: '独立行匹配',
+    spaced_label: '空格分隔标签',
+    tax_total_label: '价税合计标签',
+    chinese_amount: '大写金额附近',
+    standalone_amount: '独立金额',
+    max_currency: '最大金额',
+    tax_label: '税额标签',
+    position: '版面位置',
+    buyer_label: '购买方标签',
+    buyer_section: '购买方区块',
+    buyer_individual: '个人',
+    seller_label: '销售方标签',
+    seller_section: '销售方区块',
+  }
+  return map[src] || src
+}
 
 const toast = useToast()
 const notifications = useNotificationStore()
@@ -689,6 +783,16 @@ const getInvoicePrettyText = (invoice: Invoice | null) => {
     return data.pretty_text || ''
   } catch {
     return ''
+  }
+}
+
+const getInvoiceExtracted = (invoice: Invoice | null): InvoiceExtractedData | null => {
+  if (!invoice?.extracted_data) return null
+  try {
+    const data = JSON.parse(invoice.extracted_data)
+    return data as InvoiceExtractedData
+  } catch {
+    return null
   }
 }
 
@@ -1063,5 +1167,25 @@ onMounted(() => {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
+}
+
+.ocr-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ocr-fields .field-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.95rem;
+}
+
+.ocr-hint {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--color-text-tertiary);
+  font-size: 0.8rem;
 }
 </style>

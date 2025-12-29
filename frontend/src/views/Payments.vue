@@ -221,25 +221,41 @@
               :min="0"
               :useGrouping="false"
             />
+            <small v-if="ocrResult?.amount_source" class="sbm-ocr-hint">
+              &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.amount_source) }}
+            </small>
             <small v-if="ocrErrors.amount" class="p-error">{{ ocrErrors.amount }}</small>
           </div>
-            <div class="col-12 md:col-6 field">
-              <label for="ocr_merchant">&#21830;&#23478;</label>
-              <InputText id="ocr_merchant" v-model.trim="ocrForm.merchant" />
-            </div>
-            <div class="col-12 md:col-6 field">
-              <label for="ocr_method">&#25903;&#20184;&#26041;&#24335;</label>
-              <InputText id="ocr_method" v-model.trim="ocrForm.payment_method" />
-            </div>
-            <div class="col-12 field">
-              <label for="ocr_time">&#20132;&#26131;&#26102;&#38388;</label>
-              <DatePicker id="ocr_time" v-model="ocrForm.transaction_time" showTime :manualInput="false" />
-              <small v-if="ocrErrors.transaction_time" class="p-error">{{ ocrErrors.transaction_time }}</small>
-            </div>
-            <div class="col-12 field">
-              <label for="ocr_order">&#20132;&#26131;&#21333;&#21495; (&#21487;&#36873;)</label>
-              <InputText id="ocr_order" v-model.trim="ocrForm.order_number" />
-            </div>
+          <div class="col-12 md:col-6 field">
+            <label for="ocr_merchant">&#21830;&#23478;</label>
+            <InputText id="ocr_merchant" v-model.trim="ocrForm.merchant" />
+            <small v-if="ocrResult?.merchant_source" class="sbm-ocr-hint">
+              &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.merchant_source) }}
+              <span v-if="ocrResult?.merchant_confidence"> &#65288;&#20449;&#24230; {{ (ocrResult?.merchant_confidence * 100).toFixed(0) }}%&#65289;</span>
+            </small>
+          </div>
+          <div class="col-12 md:col-6 field">
+            <label for="ocr_method">&#25903;&#20184;&#26041;&#24335;</label>
+            <InputText id="ocr_method" v-model.trim="ocrForm.payment_method" />
+            <small v-if="ocrResult?.payment_method_source" class="sbm-ocr-hint">
+              &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.payment_method_source) }}
+            </small>
+          </div>
+          <div class="col-12 field">
+            <label for="ocr_time">&#20132;&#26131;&#26102;&#38388;</label>
+            <DatePicker id="ocr_time" v-model="ocrForm.transaction_time" showTime :manualInput="false" />
+            <small v-if="ocrErrors.transaction_time" class="p-error">{{ ocrErrors.transaction_time }}</small>
+            <small v-if="ocrResult?.transaction_time_source" class="sbm-ocr-hint">
+              &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.transaction_time_source) }}
+            </small>
+          </div>
+          <div class="col-12 field">
+            <label for="ocr_order">&#20132;&#26131;&#21333;&#21495; (&#21487;&#36873;)</label>
+            <InputText id="ocr_order" v-model.trim="ocrForm.order_number" />
+            <small v-if="ocrResult?.order_number_source" class="sbm-ocr-hint">
+              &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.order_number_source) }}
+            </small>
+          </div>
             <div class="col-12 field">
               <label for="ocr_desc">&#22791;&#27880;</label>
               <Textarea id="ocr_desc" v-model="ocrForm.description" autoResize rows="3" />
@@ -497,6 +513,12 @@ interface OcrExtractedData {
   transaction_time?: string
   payment_method?: string
   order_number?: string
+  amount_source?: string
+  merchant_source?: string
+  merchant_confidence?: number
+  transaction_time_source?: string
+  payment_method_source?: string
+  order_number_source?: string
   raw_text?: string
   pretty_text?: string
 }
@@ -912,6 +934,33 @@ const cancelScreenshotUpload = () => {
     paymentApi.cancelUploadScreenshot(uploadedScreenshotPath.value).catch((error) => console.error('Failed to delete screenshot file:', error))
   }
   resetScreenshotUploadState()
+}
+
+const formatSourceLabel = (src?: string) => {
+  if (!src) return ''
+  const map: Record<string, string> = {
+    wechat_amount_label: '微信金额标签',
+    alipay_amount_label: '支付宝金额标签',
+    bank_amount_label: '银行金额标签',
+    generic_amount: '通用金额匹配',
+    wechat_label: '微信字段标签',
+    alipay_label: '支付宝字段标签',
+    bank_label: '银行字段标签',
+    alipay_bill_detail: '支付宝账单详情',
+    generic_merchant_suffix: '通用商家匹配',
+    wechat_time_label: '微信时间标签',
+    alipay_time_label: '支付宝时间标签',
+    bank_time_label: '银行时间标签',
+    wechat_order: '微信单号标签',
+    alipay_order: '支付宝单号标签',
+    wechat_method_label: '微信支付方式标签',
+    alipay_method_label: '支付宝支付方式标签',
+    bank_method_label: '银行支付方式标签',
+    wechat_infer: '微信推断',
+    alipay_infer: '支付宝推断',
+    bank_infer: '银行推断',
+  }
+  return map[src] || src
 }
 
 const viewLinkedInvoices = async (payment: Payment) => {
@@ -1445,5 +1494,11 @@ watch(
   max-height: 320px;
   object-fit: contain;
   border-radius: var(--radius-md);
+}
+
+.sbm-ocr-hint {
+  display: block;
+  color: var(--text-color-secondary);
+  margin-top: 2px;
 }
 </style>
