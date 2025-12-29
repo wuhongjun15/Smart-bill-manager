@@ -126,7 +126,14 @@
         <div class="grid">
           <div class="col-12 md:col-6 field">
             <label for="amount">&#37329;&#39069;</label>
-            <InputNumber id="amount" v-model="form.amount" :minFractionDigits="2" :maxFractionDigits="2" :min="0" />
+            <InputNumber
+              id="amount"
+              v-model="form.amount"
+              :minFractionDigits="2"
+              :maxFractionDigits="2"
+              :min="0"
+              :useGrouping="false"
+            />
             <small v-if="errors.amount" class="p-error">{{ errors.amount }}</small>
           </div>
           <div class="col-12 md:col-6 field">
@@ -204,11 +211,18 @@
 
         <form v-else class="p-fluid" @submit.prevent="handleSaveOcrResult">
           <div class="grid">
-            <div class="col-12 md:col-6 field">
-              <label for="ocr_amount">&#37329;&#39069;</label>
-              <InputNumber id="ocr_amount" v-model="ocrForm.amount" :minFractionDigits="2" :maxFractionDigits="2" :min="0" />
-              <small v-if="ocrErrors.amount" class="p-error">{{ ocrErrors.amount }}</small>
-            </div>
+          <div class="col-12 md:col-6 field">
+            <label for="ocr_amount">&#37329;&#39069;</label>
+            <InputNumber
+              id="ocr_amount"
+              v-model="ocrForm.amount"
+              :minFractionDigits="2"
+              :maxFractionDigits="2"
+              :min="0"
+              :useGrouping="false"
+            />
+            <small v-if="ocrErrors.amount" class="p-error">{{ ocrErrors.amount }}</small>
+          </div>
             <div class="col-12 md:col-6 field">
               <label for="ocr_merchant">&#21830;&#23478;</label>
               <InputText id="ocr_merchant" v-model.trim="ocrForm.merchant" />

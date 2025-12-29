@@ -1775,6 +1775,8 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 	// Extract merchant/receiver with additional patterns
 	// Priority: 商品 (short name) > 收款方/收款人 > 商户全称 (full company name)
 	merchantRegexes := []*regexp.Regexp{
+		// WeChat QR transfer style: "扫二维码付款-给XXXX"
+		regexp.MustCompile(`扫(?:码|二维码)付款[-—－]?给([^\n\r]+)`),
 		// Highest priority: short merchant name after "商品"
 		// NOTE: Require delimiter to avoid matching "商品说明" -> "说明".
 		regexp.MustCompile(`商品[：:][\s]*([^\s(（\n]+)`),
@@ -1790,6 +1792,9 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 			merchant := strings.TrimSpace(match[1])
 			if merchant != "" {
 				merchant = sanitizePaymentField(merchant)
+				if merchant == "备注" {
+					continue
+				}
 				if merchant != "" && merchant != "说明" {
 					data.Merchant = &merchant
 				}
@@ -1826,10 +1831,12 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		regexp.MustCompile(`商户单号[：:]?[\s]*([\d]+)`),
 		regexp.MustCompile(`订单号[：:]?[\s]*([\d]+)`),
 		regexp.MustCompile(`流水号[：:]?[\s]*([\d]+)`),
+		// Transfer receipts sometimes wrap lines or insert spaces
+		regexp.MustCompile(`转账单号[：:]?[\s]*([\d][\d\s]+)`),
 	}
 	for _, re := range orderRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
-			orderNum := match[1]
+			orderNum := strings.ReplaceAll(match[1], " ", "")
 			data.OrderNumber = &orderNum
 			break
 		}
