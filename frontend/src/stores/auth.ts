@@ -3,8 +3,8 @@ import { ref, computed } from 'vue'
 import { authApi, setToken, setStoredUser, getStoredUser, clearAuth } from '@/api/auth'
 import type { User } from '@/types'
 
-// Cache TTL for setup-required check (10 seconds)
-const SETUP_CACHE_TTL_MS = 10000
+// Cache TTL for setup-required check (5 minutes)
+const SETUP_CACHE_TTL_MS = 5 * 60 * 1000
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(getStoredUser())

@@ -101,9 +101,9 @@ router.beforeEach(async (to, _from, next) => {
     setupCheckFailed = true
   }
 
-  // If setup check failed, allow access to setup page to prevent lockout
+  // If setup status is unknown, do not allow visiting setup page (prevents bypass when admin exists).
   if (setupCheckFailed && to.path === '/setup') {
-    next()
+    next('/login')
     return
   }
 
@@ -111,10 +111,6 @@ router.beforeEach(async (to, _from, next) => {
     if (!authStore.isAuthenticated) {
       const verified = await authStore.verifyToken()
       if (!verified) {
-        if (setupCheckFailed) {
-          next('/setup')
-          return
-        }
         next('/login')
         return
       }

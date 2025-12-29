@@ -164,10 +164,7 @@ func (h *AuthHandler) SetupRequired(c *gin.Context) {
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"success":       true,
-		"setupRequired": !hasUsers,
-	})
+	utils.SuccessData(c, gin.H{"setupRequired": !hasUsers})
 }
 
 type SetupInput struct {
@@ -177,6 +174,16 @@ type SetupInput struct {
 }
 
 func (h *AuthHandler) SetupAdmin(c *gin.Context) {
+	hasUsers, err := h.authService.HasUsers()
+	if err != nil {
+		utils.Error(c, 500, "检查用户失败", err)
+		return
+	}
+	if hasUsers {
+		utils.Error(c, 403, "已完成初始化，请直接登录", nil)
+		return
+	}
+
 	var input SetupInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		utils.Error(c, 400, "用户名和密码不能为空", err)
