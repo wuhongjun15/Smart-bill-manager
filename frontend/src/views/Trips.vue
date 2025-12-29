@@ -243,6 +243,7 @@
               showTime
               showSeconds
               :manualInput="false"
+              @show="() => forcePickerBelow(tripStartPicker)"
             >
               <template #footer>
                 <div class="dp-footer">
@@ -261,6 +262,7 @@
               showTime
               showSeconds
               :manualInput="false"
+              @show="() => forcePickerBelow(tripEndPicker)"
             >
               <template #footer>
                 <div class="dp-footer">
@@ -303,7 +305,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import Accordion from 'primevue/accordion'
 import AccordionTab from 'primevue/accordiontab'
 import Button from 'primevue/button'
@@ -341,6 +343,38 @@ const closeDatePicker = (pickerRef: { value: any } | any) => {
   const inst = pickerRef?.value ?? pickerRef
   if (!inst) return
   inst.overlayVisible = false
+}
+
+const forcePickerBelow = async (pickerRef: { value: any } | any) => {
+  if (typeof window === 'undefined') return
+  await nextTick()
+
+  const inst = pickerRef?.value ?? pickerRef
+  const overlay = inst?.overlay as HTMLElement | undefined
+  const root = inst?.$el as HTMLElement | undefined
+  if (!overlay || !root) return
+
+  const input = (root.querySelector('input') as HTMLElement | null) || root
+
+  const apply = () => {
+    const targetRect = input.getBoundingClientRect()
+    const scrollX = window.scrollX || document.documentElement.scrollLeft || 0
+    const scrollY = window.scrollY || document.documentElement.scrollTop || 0
+
+    const overlayWidth = overlay.getBoundingClientRect().width || overlay.offsetWidth
+    const minLeft = scrollX + 8
+    const maxLeft = scrollX + window.innerWidth - overlayWidth - 8
+    const left = Math.max(minLeft, Math.min(targetRect.left + scrollX, maxLeft))
+    const top = targetRect.bottom + scrollY + 6
+
+    overlay.style.left = `${left}px`
+    overlay.style.top = `${top}px`
+    overlay.style.right = 'auto'
+    overlay.style.bottom = 'auto'
+  }
+
+  apply()
+  window.requestAnimationFrame(apply)
 }
 
 const trips = ref<Trip[]>([])
