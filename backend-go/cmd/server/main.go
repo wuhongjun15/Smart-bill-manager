@@ -43,6 +43,37 @@ func main() {
 		log.Fatal("Failed to migrate database:", err)
 	}
 
+	// Backward-compatible: if older builds created short column names, keep data by copying into new columns.
+	// Ignore errors because these legacy columns may not exist.
+	db.Exec("UPDATE payments SET trip_assignment_source = COALESCE(trip_assignment_source, trip_assign_src, 'auto')")
+	db.Exec("UPDATE payments SET trip_assignment_state = COALESCE(trip_assignment_state, trip_assign_state, 'no_match')")
+
+	// Backfill numeric timestamps for older rows (used for stats and trip auto-assignment).
+	db.Exec(`
+		UPDATE payments
+		SET transaction_time_ts = CAST(strftime('%s', transaction_time) AS INTEGER) * 1000
+		WHERE transaction_time_ts = 0
+		  AND transaction_time IS NOT NULL
+		  AND TRIM(transaction_time) != ''
+		  AND strftime('%s', transaction_time) IS NOT NULL
+	`)
+	db.Exec(`
+		UPDATE trips
+		SET start_time_ts = CAST(strftime('%s', start_time) AS INTEGER) * 1000
+		WHERE start_time_ts = 0
+		  AND start_time IS NOT NULL
+		  AND TRIM(start_time) != ''
+		  AND strftime('%s', start_time) IS NOT NULL
+	`)
+	db.Exec(`
+		UPDATE trips
+		SET end_time_ts = CAST(strftime('%s', end_time) AS INTEGER) * 1000
+		WHERE end_time_ts = 0
+		  AND end_time IS NOT NULL
+		  AND TRIM(end_time) != ''
+		  AND strftime('%s', end_time) IS NOT NULL
+	`)
+
 	// Create additional indexes
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_time ON payments(transaction_time)")

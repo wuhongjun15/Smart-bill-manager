@@ -8,8 +8,8 @@ import (
 type Payment struct {
 	ID                string    `json:"id" gorm:"primaryKey"`
 	TripID            *string   `json:"trip_id" gorm:"index"`
-	TripAssignSrc     string    `json:"trip_assignment_source" gorm:"not null;default:auto;index"`    // auto|manual|blocked
-	TripAssignState   string    `json:"trip_assignment_state" gorm:"not null;default:no_match;index"` // assigned|no_match|overlap|blocked
+	TripAssignSrc     string    `json:"trip_assignment_source" gorm:"column:trip_assignment_source;not null;default:auto;index"`   // auto|manual|blocked
+	TripAssignState   string    `json:"trip_assignment_state" gorm:"column:trip_assignment_state;not null;default:no_match;index"` // assigned|no_match|overlap|blocked
 	BadDebt           bool      `json:"bad_debt" gorm:"not null;default:false;index"`
 	Amount            float64   `json:"amount" gorm:"not null"`
 	Merchant          *string   `json:"merchant"`
