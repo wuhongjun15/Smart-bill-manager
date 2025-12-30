@@ -116,8 +116,8 @@
         <div class="upload-box sbm-dropzone" @click="triggerInvoiceChoose" @dragenter.prevent @dragover.prevent @drop.prevent="onInvoiceDrop">
           <div class="sbm-dropzone-hero">
             <i class="pi pi-cloud-upload" />
-            <div class="sbm-dropzone-title">\u62d6\u62fd\u6587\u4ef6\u5230\u6b64\u5904\uff0c\u6216\u8005\u70b9\u51fb\u9009\u62e9</div>
-            <div class="sbm-dropzone-sub">\u652f\u6301 PDF/PNG/JPG\uff0c\u6700\u5927 20MB</div>
+            <div class="sbm-dropzone-title">拖拽文件到此处，或者点击选择</div>
+            <div class="sbm-dropzone-sub">支持 PDF/PNG/JPG，最大 20MB</div>
             <Button type="button" icon="pi pi-plus" :label="'\u9009\u62E9\u6587\u4EF6'" :disabled="uploading || savingUploadOcr" @click.stop="chooseInvoiceFiles" />
           </div>
 
@@ -141,88 +141,88 @@
                 @click="removeSelectedFile(idx)"
               />
             </div>
-            <div class="file-hint">\u5df2\u9009\u62e9 {{ selectedFiles.length }} \u4e2a\u6587\u4ef6</div>
+            <div class="file-hint">已选择 {{ selectedFiles.length }} 个文件</div>
           </div>
         </div>
 
         <Message v-if="!uploadOcrResult" severity="info" :closable="false">
-          \u8bf7\u9009\u62e9\u6587\u4ef6\uff0c\u70b9\u51fb\u201c\u4e0a\u4f20\u201d\u89e3\u6790\u540e\u53ef\u5728\u4e0b\u65b9\u4fee\u6539\u8bc6\u522b\u7ed3\u679c\u3002
+          请选择文件，点击“上传”解析后可在下方修改识别结果。
         </Message>
 
         <form v-else class="p-fluid ocr-form" @submit.prevent="handleSaveUploadedInvoice">
           <div class="grid">
             <div class="col-12 md:col-6 field">
-              <label for="inv_num">\u53d1\u7968\u53f7\u7801</label>
+              <label for="inv_num">发票号码</label>
               <InputText id="inv_num" v-model.trim="uploadOcrForm.invoice_number" />
               <small
                 v-if="uploadOcrResult?.invoice_number_source || uploadOcrResult?.invoice_number_confidence"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.invoice_number_confidence)"
               >
-                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.invoice_number_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.invoice_number_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.invoice_number_confidence) }}\uff09</span>
+                来源：{{ formatSourceLabel(uploadOcrResult?.invoice_number_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.invoice_number_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.invoice_number_confidence) }}）</span>
               </small>
             </div>
             <div class="col-12 md:col-6 field">
-              <label for="inv_date">\u5f00\u7968\u65e5\u671f</label>
-              <InputText id="inv_date" v-model.trim="uploadOcrForm.invoice_date" placeholder="YYYY\u5e74MM\u6708DD\u65e5 \u6216 YYYY-MM-DD" />
+              <label for="inv_date">开票日期</label>
+              <InputText id="inv_date" v-model.trim="uploadOcrForm.invoice_date" placeholder="YYYY年MM月DD日 或 YYYY-MM-DD" />
               <small
                 v-if="uploadOcrResult?.invoice_date_source || uploadOcrResult?.invoice_date_confidence"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.invoice_date_confidence)"
               >
-                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.invoice_date_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.invoice_date_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.invoice_date_confidence) }}\uff09</span>
+                来源：{{ formatSourceLabel(uploadOcrResult?.invoice_date_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.invoice_date_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.invoice_date_confidence) }}）</span>
               </small>
             </div>
 
             <div class="col-12 md:col-6 field">
-              <label for="inv_amount">\u4ef7\u7a0e\u5408\u8ba1</label>
+              <label for="inv_amount">价税合计</label>
               <InputNumber id="inv_amount" v-model="uploadOcrForm.amount" :minFractionDigits="2" :maxFractionDigits="2" :min="0" :useGrouping="false" />
               <small
                 v-if="uploadOcrResult?.amount_source || uploadOcrResult?.amount_confidence"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.amount_confidence)"
               >
-                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.amount_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.amount_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.amount_confidence) }}\uff09</span>
+                来源：{{ formatSourceLabel(uploadOcrResult?.amount_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.amount_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.amount_confidence) }}）</span>
               </small>
             </div>
             <div class="col-12 md:col-6 field">
-              <label for="inv_tax">\u7a0e\u989d</label>
+              <label for="inv_tax">税额</label>
               <InputNumber id="inv_tax" v-model="uploadOcrForm.tax_amount" :minFractionDigits="2" :maxFractionDigits="2" :min="0" :useGrouping="false" />
               <small
                 v-if="uploadOcrResult?.tax_amount_source || uploadOcrResult?.tax_amount_confidence"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.tax_amount_confidence)"
               >
-                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.tax_amount_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.tax_amount_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.tax_amount_confidence) }}\uff09</span>
+                来源：{{ formatSourceLabel(uploadOcrResult?.tax_amount_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.tax_amount_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.tax_amount_confidence) }}）</span>
               </small>
             </div>
 
             <div class="col-12 md:col-6 field">
-              <label for="inv_seller">\u9500\u552e\u65b9</label>
+              <label for="inv_seller">销售方</label>
               <InputText id="inv_seller" v-model.trim="uploadOcrForm.seller_name" />
               <small
                 v-if="uploadOcrResult?.seller_name_source || uploadOcrResult?.seller_name_confidence"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.seller_name_confidence)"
               >
-                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.seller_name_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.seller_name_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.seller_name_confidence) }}\uff09</span>
+                来源：{{ formatSourceLabel(uploadOcrResult?.seller_name_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.seller_name_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.seller_name_confidence) }}）</span>
               </small>
             </div>
             <div class="col-12 md:col-6 field">
-              <label for="inv_buyer">\u8d2d\u4e70\u65b9</label>
+              <label for="inv_buyer">购买方</label>
               <InputText id="inv_buyer" v-model.trim="uploadOcrForm.buyer_name" />
               <small
                 v-if="uploadOcrResult?.buyer_name_source || uploadOcrResult?.buyer_name_confidence"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.buyer_name_confidence)"
               >
-                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.buyer_name_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.buyer_name_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.buyer_name_confidence) }}\uff09</span>
+                来源：{{ formatSourceLabel(uploadOcrResult?.buyer_name_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.buyer_name_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.buyer_name_confidence) }}）</span>
               </small>
             </div>
           </div>
