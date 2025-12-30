@@ -487,6 +487,8 @@ func (s *OCRService) isGarbledText(text string) bool {
 type PDFTextCLIResponse struct {
 	Success   bool   `json:"success"`
 	Text      string `json:"text"`
+	RawText   string `json:"raw_text,omitempty"`
+	Ordered   bool   `json:"ordered,omitempty"`
 	PageCount int    `json:"page_count,omitempty"`
 	Extractor string `json:"extractor,omitempty"`
 	Error     string `json:"error,omitempty"`
@@ -528,8 +530,13 @@ func (s *OCRService) extractTextWithPyMuPDF(pdfPath string) (string, error) {
 		return "", fmt.Errorf("PyMuPDF error: %s", result.Error)
 	}
 
-	fmt.Printf("[OCR] PyMuPDF extracted %d characters from %d pages (%s)\n", len(result.Text), result.PageCount, result.Extractor)
-	return result.Text, nil
+	text := result.Text
+	if strings.TrimSpace(text) == "" && strings.TrimSpace(result.RawText) != "" {
+		text = result.RawText
+	}
+
+	fmt.Printf("[OCR] PyMuPDF extracted %d characters from %d pages (%s, ordered=%v)\n", len(text), result.PageCount, result.Extractor, result.Ordered)
+	return text, nil
 }
 
 func (s *OCRService) isLikelyUsefulInvoicePDFText(text string) bool {

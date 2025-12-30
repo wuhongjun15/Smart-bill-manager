@@ -60,22 +60,43 @@ def main():
                     pass
 
             doc = fitz.open(pdf_path)
-            texts = []
+            raw_parts = []
+            ordered_parts = []
+            page_count = 0
+
             for page in doc:
+                page_count += 1
                 try:
-                    texts.append(page.get_text("text"))
+                    raw_parts.append(page.get_text("text") or "")
                 except Exception:
-                    # Keep going; some pages may fail.
+                    raw_parts.append("")
+                # Blocks with position, sorted by y then x
+                try:
+                    blocks = page.get_text("blocks") or []
+                    blocks = sorted(blocks, key=lambda b: (b[1], b[0]))
+                    for b in blocks:
+                        if len(b) >= 5 and b[4]:
+                            txt = str(b[4]).strip()
+                            if txt:
+                                ordered_parts.append(txt)
+                except Exception:
+                    # ignore this page ordering failure
                     continue
+
             doc.close()
 
-        text = "\n".join(t for t in texts if t)
+        raw_text = "\n".join(t for t in raw_parts if t)
+        ordered_text = "\n".join(ordered_parts)
+        final_text = ordered_text or raw_text
+
         print(
             json.dumps(
                 {
                     "success": True,
-                    "text": text,
-                    "page_count": len(texts),
+                    "text": final_text,
+                    "raw_text": raw_text,
+                    "ordered": bool(ordered_text),
+                    "page_count": page_count,
                     "extractor": f"pymupdf-{pymupdf_version}",
                 },
                 ensure_ascii=False,
@@ -97,4 +118,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
