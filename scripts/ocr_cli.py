@@ -100,6 +100,73 @@ def load_pil_image(path: str):
         return None
 
 
+def reorder_lines_by_box(lines: list[dict]) -> list[dict]:
+    """
+    Reorder OCR lines based on bounding boxes:
+    - Cluster by Y (row) with a tolerance based on median height
+    - Sort rows by top, and items within a row by left
+    If boxes are missing, original order is kept.
+    """
+    if not lines:
+        return lines
+
+    processed = []
+    for line in lines:
+        box = line.get("box") or []
+        if not box:
+            continue
+        try:
+            xs = [p[0] for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+            ys = [p[1] for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+            if not xs or not ys:
+                continue
+            minx, maxx = min(xs), max(xs)
+            miny, maxy = min(ys), max(ys)
+            processed.append(
+                {
+                    "line": line,
+                    "minx": minx,
+                    "maxx": maxx,
+                    "miny": miny,
+                    "maxy": maxy,
+                    "height": max(1.0, maxy - miny),
+                }
+            )
+        except Exception:
+            continue
+
+    if not processed:
+        return lines
+
+    heights = sorted(p["height"] for p in processed)
+    mid = len(heights) // 2
+    median_h = heights[mid] if len(heights) % 2 else (heights[mid - 1] + heights[mid]) / 2
+    row_tol = max(5.0, median_h * 0.6)
+
+    processed.sort(key=lambda p: (p["miny"], p["minx"]))
+
+    rows: list[list[dict]] = []
+    current_row: list[dict] = []
+    current_maxy = None
+    for p in processed:
+        if current_row and current_maxy is not None and p["miny"] > current_maxy + row_tol:
+            rows.append(current_row)
+            current_row = [p]
+            current_maxy = p["maxy"]
+        else:
+            current_row.append(p)
+            current_maxy = p["maxy"] if current_maxy is None else max(current_maxy, p["maxy"])
+    if current_row:
+        rows.append(current_row)
+
+    ordered = []
+    for row in rows:
+        row.sort(key=lambda p: p["minx"])
+        ordered.extend(row)
+
+    return [p["line"] for p in ordered]
+
+
 def build_variants(pil_img, profile: str, multipass: int, rotate180: bool):
     if pil_img is None or multipass <= 0:
         return []
@@ -235,13 +302,16 @@ def main():
                         line["box"] = boxes[idx]
 
                     lines.append(line)
-                    full_text_parts.append(text)
+
+                ordered = reorder_lines_by_box(lines)
+                for ln in ordered:
+                    full_text_parts.append(ln.get("text") or "")
 
                 return {
                     "text": "\n".join(full_text_parts),
-                    "lines": lines,
-                    "line_count": len(lines),
-                    "score": score_lines(lines),
+                    "lines": ordered,
+                    "line_count": len(ordered),
+                    "score": score_lines(ordered),
                     "backend": backend,
                     "backend_errors": backend_errors,
                     "params": param_summary,
