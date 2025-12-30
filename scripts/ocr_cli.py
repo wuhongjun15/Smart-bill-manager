@@ -167,6 +167,153 @@ def reorder_lines_by_box(lines: list[dict]) -> list[dict]:
     return [p["line"] for p in ordered]
 
 
+def apply_label_value_layout(lines: list[dict], profile: str) -> list[dict]:
+    """
+    Layout-aware postprocess for "bill detail" screenshots where OCR may output a label column
+    and a value column separately. We pair labels with their nearest value using box geometry,
+    then rewrite the label line into "标签：值" and remove the paired value line.
+
+    This makes downstream field parsing much more stable (especially with PP-OCRv5).
+    """
+    if profile != "default" or not lines:
+        return lines
+
+    label_set = {
+        "交易单号",
+        "商户单号",
+        "订单号",
+        "商品",
+        "服务",
+        "支付方式",
+        "付款方式",
+        "当前状态",
+        "支付时间",
+        "转账时间",
+        "商户全称",
+        "收单机构",
+    }
+
+    def norm(t: str) -> str:
+        return str(t or "").strip()
+
+    def is_label(t: str) -> bool:
+        return norm(t) in label_set
+
+    def box_of(line: dict):
+        box = line.get("box") or []
+        if not isinstance(box, (list, tuple)) or not box:
+            return None
+        try:
+            xs = [p[0] for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+            ys = [p[1] for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+            if not xs or not ys:
+                return None
+            left = float(min(xs))
+            right = float(max(xs))
+            top = float(min(ys))
+            bottom = float(max(ys))
+            return {
+                "left": left,
+                "right": right,
+                "top": top,
+                "bottom": bottom,
+                "cx": (left + right) / 2.0,
+                "cy": (top + bottom) / 2.0,
+                "h": max(bottom - top, 1.0),
+                "w": max(right - left, 1.0),
+            }
+        except Exception:
+            return None
+
+    label_idxs = [i for i, ln in enumerate(lines) if is_label(ln.get("text", ""))]
+    if len(label_idxs) < 4:
+        return lines
+
+    boxes = [box_of(ln) for ln in lines]
+    heights = sorted([b["h"] for b in boxes if b])
+    if not heights:
+        return lines
+    median_h = heights[len(heights) // 2]
+    y_tol = max(8.0, median_h * 0.75)
+    x_tol = max(24.0, median_h * 2.5)
+
+    used_values: set[int] = set()
+    label_to_value: dict[int, int] = {}
+
+    for li in label_idxs:
+        lb = boxes[li]
+        if not lb:
+            continue
+
+        best = None
+        best_dx = None
+        for vi, vb in enumerate(boxes):
+            if vi == li or vi in used_values:
+                continue
+            if is_label(lines[vi].get("text", "")):
+                continue
+            if not vb:
+                continue
+            if abs(vb["cy"] - lb["cy"]) > y_tol:
+                continue
+            dx = vb["left"] - lb["right"]
+            if dx < -5.0:
+                continue
+            if best_dx is None or dx < best_dx:
+                best_dx = dx
+                best = vi
+
+        if best is None:
+            best_dy = None
+            for vi, vb in enumerate(boxes):
+                if vi == li or vi in used_values:
+                    continue
+                if is_label(lines[vi].get("text", "")):
+                    continue
+                if not vb:
+                    continue
+                if vb["top"] < lb["bottom"] - 2.0:
+                    continue
+                if abs(vb["left"] - lb["left"]) > x_tol:
+                    continue
+                dy = vb["top"] - lb["bottom"]
+                if best_dy is None or dy < best_dy:
+                    best_dy = dy
+                    best = vi
+
+        if best is not None:
+            label_to_value[li] = best
+            used_values.add(best)
+
+    if not label_to_value:
+        return lines
+
+    out: list[dict] = []
+    for i, ln in enumerate(lines):
+        if i in used_values:
+            continue
+        t = norm(ln.get("text", ""))
+        if i in label_to_value:
+            v_idx = label_to_value[i]
+            v_text = norm(lines[v_idx].get("text", ""))
+            if v_text:
+                merged = dict(ln)
+                merged["text"] = f"{t}：{v_text}"
+                try:
+                    merged["confidence"] = float(
+                        min(
+                            float(ln.get("confidence") or 0.0),
+                            float(lines[v_idx].get("confidence") or 0.0),
+                        )
+                    )
+                except Exception:
+                    pass
+                out.append(merged)
+                continue
+        out.append(ln)
+    return out
+
+
 def build_variants(pil_img, profile: str, multipass: int, rotate180: bool):
     if pil_img is None or multipass <= 0:
         return []
@@ -351,6 +498,7 @@ def main():
                     lines.append(line)
 
                 ordered = reorder_lines_by_box(lines)
+                ordered = apply_label_value_layout(ordered, args.profile)
                 for ln in ordered:
                     full_text_parts.append(ln.get("text") or "")
 

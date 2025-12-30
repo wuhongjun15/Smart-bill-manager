@@ -1803,6 +1803,57 @@ func (s *OCRService) isBankTransfer(text string) bool {
 
 // parseWeChatPay extracts WeChat Pay information
 func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
+	isWeChatBillDetailLabel := func(v string) bool {
+		v = sanitizePaymentField(v)
+		if v == "" {
+			return true
+		}
+		labels := map[string]struct{}{
+			"交易单号": {}, "商品": {}, "支付方式": {}, "付款方式": {}, "当前状态": {}, "支付时间": {}, "转账时间": {},
+			"商户全称": {}, "收单机构": {}, "商户单号": {}, "服务": {}, "账单服务": {}, "可在支持的商户扫码退款": {},
+			"全部账单": {}, "已支付": {},
+		}
+		_, ok := labels[v]
+		return ok
+	}
+	isLikelyBankInstitution := func(v string) bool {
+		v = sanitizePaymentField(v)
+		if v == "" {
+			return false
+		}
+		return strings.Contains(v, "银行") || strings.Contains(v, "清算") || strings.Contains(v, "收款清算") || strings.Contains(v, "收单机构")
+	}
+	extractBankCardPaymentMethod := func(t string) *string {
+		lines := strings.Split(t, "\n")
+		cardLikeRe := regexp.MustCompile(`(?m)([\p{Han}A-Za-z]{2,}(?:银行)?(?:信用卡|储蓄卡|借记卡|银行卡)\(\d{3,4}\))`)
+		for _, line := range lines {
+			line = sanitizePaymentMethod(strings.TrimSpace(line))
+			if line == "" || isWeChatBillDetailLabel(line) {
+				continue
+			}
+			if m := cardLikeRe.FindStringSubmatch(line); len(m) > 1 {
+				method := sanitizePaymentMethod(m[1])
+				if method != "" && !isWeChatBillDetailLabel(method) {
+					return &method
+				}
+			}
+		}
+		cardParenRe := regexp.MustCompile(`(?m)(?:信用卡|储蓄卡|借记卡|银行卡)\(\d{3,4}\)`)
+		for _, line := range lines {
+			line = sanitizePaymentMethod(strings.TrimSpace(line))
+			if line == "" || isWeChatBillDetailLabel(line) {
+				continue
+			}
+			if cardParenRe.MatchString(line) {
+				method := sanitizePaymentMethod(line)
+				if method != "" && !isWeChatBillDetailLabel(method) {
+					return &method
+				}
+			}
+		}
+		return nil
+	}
+
 	// Extract amount with support for negative numbers and large amounts (4+ digits)
 	// Priority: negative numbers > amounts with ¥ symbol > large amounts (4+ digits)
 	amountRegexes := []*regexp.Regexp{
@@ -1849,12 +1900,18 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 			merchant := strings.TrimSpace(match[1])
 			if merchant != "" {
 				merchant = sanitizePaymentField(merchant)
+				if isWeChatBillDetailLabel(merchant) {
+					continue
+				}
 				if merchant == "备注" {
 					continue
 				}
 				if merchant != "" && merchant != "说明" {
 					switch {
 					case strings.Contains(re.String(), "商户全称"):
+						if isLikelyBankInstitution(merchant) {
+							continue
+						}
 						data.Merchant = &merchant
 						data.MerchantSource = "wechat_fullname_label"
 						data.MerchantConfidence = 0.98
@@ -1876,6 +1933,54 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 				}
 				break
 			}
+		}
+	}
+
+	// PP-OCRv5 may output bill-detail pages with all labels first, then values.
+	// When that happens, regex-based "商户全称" capture may fail. Try a label-guided scan.
+	if data.Merchant == nil {
+		lines := strings.Split(text, "\n")
+		for i, line := range lines {
+			if strings.TrimSpace(line) != "商户全称" {
+				continue
+			}
+			best := ""
+			bestScore := -1
+			for j := i + 1; j < len(lines) && j <= i+40; j++ {
+				cand := sanitizePaymentField(lines[j])
+				if cand == "" || isWeChatBillDetailLabel(cand) {
+					continue
+				}
+				if isLikelyBankInstitution(cand) {
+					continue
+				}
+				if !merchantGenericRegex.MatchString(cand) {
+					continue
+				}
+				score := len([]rune(cand))
+				if strings.Contains(cand, "有限公司") {
+					score += 20
+				}
+				if strings.Contains(cand, "市") || strings.Contains(cand, "区") || strings.Contains(cand, "县") {
+					score += 10
+				}
+				if strings.Contains(cand, "店") || strings.Contains(cand, "超市") || strings.Contains(cand, "餐饮") || strings.Contains(cand, "饭店") {
+					score += 8
+				}
+				if score > bestScore {
+					bestScore = score
+					best = cand
+				}
+			}
+			if best != "" {
+				m := sanitizePaymentField(best)
+				if m != "" && !isWeChatBillDetailLabel(m) {
+					data.Merchant = &m
+					data.MerchantSource = "wechat_fullname_label_scan"
+					data.MerchantConfidence = 0.9
+				}
+			}
+			break
 		}
 	}
 
@@ -1930,12 +2035,19 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 	for _, re := range paymentMethodRegexes {
 		if match := re.FindStringSubmatch(text); len(match) > 1 {
 			method := sanitizePaymentMethod(strings.TrimSpace(match[1]))
-			if method != "" {
+			if method != "" && !isWeChatBillDetailLabel(method) {
 				data.PaymentMethod = &method
 				data.PaymentMethodSource = "wechat_method_label"
 				data.PaymentMethodConfidence = 0.9
 				break
 			}
+		}
+	}
+	if data.PaymentMethod == nil {
+		if m := extractBankCardPaymentMethod(text); m != nil {
+			data.PaymentMethod = m
+			data.PaymentMethodSource = "wechat_method_scan"
+			data.PaymentMethodConfidence = 0.9
 		}
 	}
 	// If no specific payment method found, use default
