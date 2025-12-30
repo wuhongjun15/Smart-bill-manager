@@ -290,23 +290,40 @@ npm run dev
 
 ```
 Smart-bill-manager/
-├── backend-go/              # Go 后端服务
-│   ├── cmd/server/main.go   # 应用入口
-│   ├── internal/            # 配置、模型、接口、服务、仓储、工具等
-│   ├── pkg/database/        # 数据库连接
+├── backend-go/                  # Go 后端
+│   ├── cmd/server/main.go       # 应用入口
+│   ├── internal/
+│   │   ├── config/              # 配置
+│   │   ├── models/              # 数据模型
+│   │   ├── handlers/            # HTTP 接口
+│   │   ├── services/            # 业务逻辑（OCR/支付/发票/行程等）
+│   │   ├── middleware/          # 中间件
+│   │   ├── repository/          # 数据访问
+│   │   └── utils/               # 工具
+│   ├── pkg/database/            # 数据库连接
 │   ├── go.mod / go.sum
 │   └── ...
-├── frontend/                # Vue 前端
-│   ├── src/ (main.ts、router、stores、views、components、api、types)
-│   ├── public/
-│   ├── Dockerfile / nginx.conf
+├── frontend/                    # Vue 前端
+│   ├── src/
+│   │   ├── main.ts / App.vue    # 入口与根组件
+│   │   ├── router/              # 路由
+│   │   ├── stores/              # Pinia
+│   │   ├── views/               # 页面
+│   │   ├── components/          # 复用组件
+│   │   ├── api/                 # API 封装
+│   │   └── types/               # TS 类型
+│   ├── public/                  # 静态资源
+│   ├── Dockerfile / nginx.conf  # 前端独立部署
 │   └── ...
-├── scripts/                 # OCR/PDF 辅助脚本（ocr_cli.py、pdf_text_cli.py 等）
-├── default_models.yaml      # RapidOCR 默认模型列表与校验（供自动下载/校验使用）
-├── Dockerfile               # 前后端统一镜像
-├── docker-compose.yml       # Compose 部署
-├── nginx.conf               # 统一 Nginx 配置
-├── supervisord.conf         # 进程管理配置
+├── scripts/                     # 辅助脚本
+│   ├── ocr_cli.py               # 调用 RapidOCR（含模型自动下载/校验）
+│   ├── pdf_text_cli.py          # PDF 文本提取调试
+│   └── install_ocr.sh           # OCR 依赖安装脚本
+├── default_models.yaml          # RapidOCR 默认模型列表（含哈希校验）
+├── Dockerfile                   # 前后端统一镜像
+├── docker-compose.yml           # Compose 部署
+├── nginx.conf                   # 统一 Nginx 配置
+├── supervisord.conf             # 进程管理配置
 └── README.md
 ```
 
