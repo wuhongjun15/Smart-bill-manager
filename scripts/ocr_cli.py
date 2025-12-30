@@ -21,9 +21,6 @@ import sys
 import tempfile
 from importlib import metadata
 from pathlib import Path
-import hashlib
-from urllib import error as urlerror
-from urllib import request as urlrequest
 
 
 @contextlib.contextmanager
@@ -55,17 +52,6 @@ def truthy(v: str | None) -> bool:
     if v is None:
         return False
     return str(v).strip().lower() in ("1", "true", "yes", "y", "on")
-
-
-def verify_sha256(path: Path, expected: str) -> bool:
-    try:
-        h = hashlib.sha256()
-        with path.open("rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                h.update(chunk)
-        return h.hexdigest().lower() == expected.lower()
-    except Exception:
-        return False
 
 
 def safe_int(v: str | None, default: int) -> int:
@@ -149,101 +135,8 @@ def build_variants(pil_img, profile: str, multipass: int, rotate180: bool):
 
 
 def resolve_model_paths():
-    """
-    Resolve model paths for RapidOCR with PP-OCRv5 defaults.
-    - Base directory: SBM_RAPIDOCR_MODEL_DIR (default: /opt/rapidocr-models)
-    - Explicit overrides (highest优先级):
-        SBM_RAPIDOCR_DET_MODEL / SBM_RAPIDOCR_REC_MODEL / SBM_RAPIDOCR_CLS_MODEL
-    - Otherwise：自动检测并若缺失则下载 PP-OCRv5 onnx 模型到 base_dir
-    - 如果下载失败，会回退到 RapidOCR 内置默认模型（RapidOCR 自行下载）
-    """
-
-    base_dir = os.getenv("SBM_RAPIDOCR_MODEL_DIR", "/opt/rapidocr-models")
-    Path(base_dir).mkdir(parents=True, exist_ok=True)
-
-    # 参考 RapidOCR default_models.yaml（ONNX，server 版本，v3.5.0）
-    models = {
-        "det": {
-            "env": "SBM_RAPIDOCR_DET_MODEL",
-            "filename": "ch_PP-OCRv5_server_det.onnx",
-            "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.5.0/onnx/PP-OCRv5/det/ch_PP-OCRv5_server_det.onnx",
-            "sha256": "0f8846b1d4bba223a2a2f9d9b44022fbc22cc019051a602b41a7fda9667e4cad",
-        },
-        "rec": {
-            "env": "SBM_RAPIDOCR_REC_MODEL",
-            "filename": "ch_PP-OCRv5_rec_server_infer.onnx",
-            "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.5.0/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_server_infer.onnx",
-            "sha256": "e09385400eaaaef34ceff54aeb7c4f0f1fe014c27fa8b9905d4709b65746562a",
-        },
-        "dict": {
-            "env": "SBM_RAPIDOCR_DICT_PATH",
-            "filename": "ppocrv5_dict.txt",
-            "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.5.0/paddle/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile_infer/ppocrv5_dict.txt",
-            # 字典文件不做校验
-            "sha256": None,
-        },
-        "cls": {
-            "env": "SBM_RAPIDOCR_CLS_MODEL",
-            "filename": "ch_ppocr_mobile_v2.0_cls_infer.onnx",
-            "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.5.0/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_infer.onnx",
-            "sha256": "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c",
-        },
-    }
-
-    params: dict[str, str] = {}
-
-    def ensure_model(key: str):
-        cfg = models[key]
-        env_path = os.getenv(cfg["env"])
-        if env_path and os.path.isfile(env_path):
-            # Even env override must pass hash check (if provided)
-            if cfg.get("sha256"):
-                if verify_sha256(Path(env_path), cfg["sha256"]):
-                    return env_path
-            else:
-                return env_path
-
-        local_path = Path(base_dir) / cfg["filename"]
-        # If file exists, optionally verify hash
-        if local_path.is_file():
-            if cfg.get("sha256"):
-                if verify_sha256(local_path, cfg["sha256"]):
-                    return str(local_path)
-                else:
-                    try:
-                        local_path.unlink()
-                    except OSError:
-                        pass
-            else:
-                return str(local_path)
-
-        # Try download if not present or failed hash
-        try:
-            urlrequest.urlretrieve(cfg["url"], local_path)
-            if cfg.get("sha256") and not verify_sha256(local_path, cfg["sha256"]):
-                try:
-                    local_path.unlink()
-                except OSError:
-                    pass
-                return None
-            return str(local_path)
-        except (urlerror.URLError, OSError):
-            return None
-
-    det = ensure_model("det")
-    rec = ensure_model("rec")
-    rec_dict = ensure_model("dict")
-    cls = ensure_model("cls")
-
-    if det:
-        params["det_model_path"] = det
-    if rec:
-        params["rec_model_path"] = rec
-    if rec_dict:
-        params["rec_char_dict_path"] = rec_dict
-    if cls:
-        params["cls_model_path"] = cls
-    return params
+    # 不使用自定义模型路径，直接交给 RapidOCR 内置下载/加载
+    return {}
 
 
 def main():
@@ -285,7 +178,6 @@ def main():
 
             params: dict = {}
             # Preferred PP-OCRv5 weights if present; falls back to RapidOCR defaults otherwise.
-            params.update(resolve_model_paths())
             if args.profile == "pdf":
                 params.update(
                     {
@@ -306,12 +198,7 @@ def main():
             # "list index out of range" from corrupted/partial models.
             def run_with_fallback(path: str):
                 errors: list[str] = []
-                param_summary = {
-                    "det": params.get("det_model_path"),
-                    "rec": params.get("rec_model_path"),
-                    "dict": params.get("rec_char_dict_path"),
-                    "cls": params.get("cls_model_path"),
-                }
+                param_summary = {}
                 # First try with resolved params (preferred PP-OCRv5 models)
                 try:
                     ocr = RapidOCR(params=params or None)
