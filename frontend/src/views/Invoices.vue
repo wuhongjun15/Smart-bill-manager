@@ -105,35 +105,150 @@
       </template>
     </Card>
 
-    <Dialog v-model:visible="uploadModalVisible" modal :header="'\u4E0A\u4F20\u53D1\u7968'" :style="{ width: '620px', maxWidth: '92vw' }" :closable="!uploading">
-      <div class="upload-box sbm-dropzone" @click="triggerInvoiceChoose" @dragenter.prevent @dragover.prevent @drop.prevent="onInvoiceDrop">
-        <div class="sbm-dropzone-hero">
-          <i class="pi pi-cloud-upload" />
-          <div class="sbm-dropzone-title">&#25299;&#25321; PDF/&#22270;&#29255; &#21040;&#27492;&#22788;&#65292;&#25110;&#28857;&#20987;&#36873;&#25321;</div>
-          <div class="sbm-dropzone-sub">&#25903;&#25345; PDF&#12289;PNG&#12289;JPG&#65288;&#21487;&#25209;&#37327;&#65289;&#65292;&#21333;&#20010;&#25991;&#20214;&#26368;&#22823; 20MB</div>
-          <Button type="button" icon="pi pi-plus" :label="'\u9009\u62E9\u6587\u4EF6'" @click.stop="chooseInvoiceFiles" />
+    <Dialog
+      v-model:visible="uploadModalVisible"
+      modal
+      :header="'\u4E0A\u4F20\u53D1\u7968'"
+      :style="{ width: '720px', maxWidth: '96vw' }"
+      :closable="!uploading && !savingUploadOcr"
+    >
+      <div class="upload-screenshot-layout">
+        <div class="upload-box sbm-dropzone" @click="triggerInvoiceChoose" @dragenter.prevent @dragover.prevent @drop.prevent="onInvoiceDrop">
+          <div class="sbm-dropzone-hero">
+            <i class="pi pi-cloud-upload" />
+            <div class="sbm-dropzone-title">\u62d6\u62fd\u6587\u4ef6\u5230\u6b64\u5904\uff0c\u6216\u8005\u70b9\u51fb\u9009\u62e9</div>
+            <div class="sbm-dropzone-sub">\u652f\u6301 PDF/PNG/JPG\uff0c\u6700\u5927 20MB</div>
+            <Button type="button" icon="pi pi-plus" :label="'\u9009\u62E9\u6587\u4EF6'" :disabled="uploading || savingUploadOcr" @click.stop="chooseInvoiceFiles" />
+          </div>
+
+          <input
+            ref="invoiceInput"
+            class="sbm-file-input-hidden"
+            type="file"
+            accept="application/pdf,image/png,image/jpeg"
+            multiple
+            @change="onInvoiceInputChange"
+          />
+          <div v-if="selectedFiles.length > 0" class="file-list" @click.stop>
+            <div v-for="(f, idx) in selectedFiles" :key="`${f.name}-${f.size}-${idx}`" class="file-row">
+              <span class="file-row-name" :title="f.name">{{ f.name }}</span>
+              <Button
+                class="file-row-remove p-button-text"
+                severity="secondary"
+                icon="pi pi-times"
+                aria-label="Remove"
+                :disabled="uploading || savingUploadOcr"
+                @click="removeSelectedFile(idx)"
+              />
+            </div>
+            <div class="file-hint">\u5df2\u9009\u62e9 {{ selectedFiles.length }} \u4e2a\u6587\u4ef6</div>
+          </div>
         </div>
 
-        <input
-          ref="invoiceInput"
-          class="sbm-file-input-hidden"
-          type="file"
-          accept="application/pdf,image/png,image/jpeg"
-          multiple
-          @change="onInvoiceInputChange"
-        />
-        <div v-if="selectedFiles.length > 0" class="file-list" @click.stop>
-          <div v-for="(f, idx) in selectedFiles" :key="`${f.name}-${f.size}-${idx}`" class="file-row">
-            <span class="file-row-name" :title="f.name">{{ f.name }}</span>
-            <Button class="file-row-remove p-button-text" severity="secondary" icon="pi pi-times" aria-label="Remove" @click="removeSelectedFile(idx)" />
+        <Message v-if="!uploadOcrResult" severity="info" :closable="false">
+          \u8bf7\u9009\u62e9\u6587\u4ef6\uff0c\u70b9\u51fb\u201c\u4e0a\u4f20\u201d\u89e3\u6790\u540e\u53ef\u5728\u4e0b\u65b9\u4fee\u6539\u8bc6\u522b\u7ed3\u679c\u3002
+        </Message>
+
+        <form v-else class="p-fluid ocr-form" @submit.prevent="handleSaveUploadedInvoice">
+          <div class="grid">
+            <div class="col-12 md:col-6 field">
+              <label for="inv_num">\u53d1\u7968\u53f7\u7801</label>
+              <InputText id="inv_num" v-model.trim="uploadOcrForm.invoice_number" />
+              <small
+                v-if="uploadOcrResult?.invoice_number_source || uploadOcrResult?.invoice_number_confidence"
+                class="ocr-hint"
+                :class="confidenceClass(uploadOcrResult?.invoice_number_confidence)"
+              >
+                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.invoice_number_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.invoice_number_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.invoice_number_confidence) }}\uff09</span>
+              </small>
+            </div>
+            <div class="col-12 md:col-6 field">
+              <label for="inv_date">\u5f00\u7968\u65e5\u671f</label>
+              <InputText id="inv_date" v-model.trim="uploadOcrForm.invoice_date" placeholder="YYYY\u5e74MM\u6708DD\u65e5 \u6216 YYYY-MM-DD" />
+              <small
+                v-if="uploadOcrResult?.invoice_date_source || uploadOcrResult?.invoice_date_confidence"
+                class="ocr-hint"
+                :class="confidenceClass(uploadOcrResult?.invoice_date_confidence)"
+              >
+                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.invoice_date_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.invoice_date_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.invoice_date_confidence) }}\uff09</span>
+              </small>
+            </div>
+
+            <div class="col-12 md:col-6 field">
+              <label for="inv_amount">\u4ef7\u7a0e\u5408\u8ba1</label>
+              <InputNumber id="inv_amount" v-model="uploadOcrForm.amount" :minFractionDigits="2" :maxFractionDigits="2" :min="0" :useGrouping="false" />
+              <small
+                v-if="uploadOcrResult?.amount_source || uploadOcrResult?.amount_confidence"
+                class="ocr-hint"
+                :class="confidenceClass(uploadOcrResult?.amount_confidence)"
+              >
+                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.amount_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.amount_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.amount_confidence) }}\uff09</span>
+              </small>
+            </div>
+            <div class="col-12 md:col-6 field">
+              <label for="inv_tax">\u7a0e\u989d</label>
+              <InputNumber id="inv_tax" v-model="uploadOcrForm.tax_amount" :minFractionDigits="2" :maxFractionDigits="2" :min="0" :useGrouping="false" />
+              <small
+                v-if="uploadOcrResult?.tax_amount_source || uploadOcrResult?.tax_amount_confidence"
+                class="ocr-hint"
+                :class="confidenceClass(uploadOcrResult?.tax_amount_confidence)"
+              >
+                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.tax_amount_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.tax_amount_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.tax_amount_confidence) }}\uff09</span>
+              </small>
+            </div>
+
+            <div class="col-12 md:col-6 field">
+              <label for="inv_seller">\u9500\u552e\u65b9</label>
+              <InputText id="inv_seller" v-model.trim="uploadOcrForm.seller_name" />
+              <small
+                v-if="uploadOcrResult?.seller_name_source || uploadOcrResult?.seller_name_confidence"
+                class="ocr-hint"
+                :class="confidenceClass(uploadOcrResult?.seller_name_confidence)"
+              >
+                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.seller_name_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.seller_name_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.seller_name_confidence) }}\uff09</span>
+              </small>
+            </div>
+            <div class="col-12 md:col-6 field">
+              <label for="inv_buyer">\u8d2d\u4e70\u65b9</label>
+              <InputText id="inv_buyer" v-model.trim="uploadOcrForm.buyer_name" />
+              <small
+                v-if="uploadOcrResult?.buyer_name_source || uploadOcrResult?.buyer_name_confidence"
+                class="ocr-hint"
+                :class="confidenceClass(uploadOcrResult?.buyer_name_confidence)"
+              >
+                \u6765\u6e90\uff1a{{ formatSourceLabel(uploadOcrResult?.buyer_name_source) || '\u672a\u8bc6\u522b' }}
+                <span v-if="uploadOcrResult?.buyer_name_confidence">\uff08\u7f6e\u4fe1\u5ea6\uff1a{{ confidenceLabel(uploadOcrResult?.buyer_name_confidence) }}\uff09</span>
+              </small>
+            </div>
           </div>
-          <div class="file-hint">&#24050;&#36873;&#25321; {{ selectedFiles.length }} &#20010;&#25991;&#20214;</div>
-        </div>
+        </form>
       </div>
+
       <template #footer>
         <div class="dialog-footer-center">
-          <Button type="button" class="p-button-outlined" severity="secondary" :label="'\u53D6\u6D88'" :disabled="uploading" @click="uploadModalVisible = false" />
-          <Button type="button" :label="'\u4E0A\u4F20'" icon="pi pi-check" :loading="uploading" @click="handleUpload" />
+          <Button
+            type="button"
+            class="p-button-outlined"
+            severity="secondary"
+            :label="'\u53D6\u6D88'"
+            :disabled="uploading || savingUploadOcr"
+            @click="uploadModalVisible = false"
+          />
+          <Button
+            v-if="!uploadOcrResult"
+            type="button"
+            :label="'\u4E0A\u4F20'"
+            icon="pi pi-check"
+            :loading="uploading"
+            :disabled="uploading || selectedFiles.length === 0"
+            @click="handleUpload"
+          />
+          <Button v-else type="button" :label="'\u4FDD\u5B58'" icon="pi pi-check" :loading="savingUploadOcr" @click="handleSaveUploadedInvoice" />
         </div>
       </template>
     </Dialog>
@@ -280,105 +395,106 @@
 
         <Divider />
 
-        <div v-if="getInvoiceExtracted(previewInvoice)" class="ocr-fields">
-          <div class="section-title">OCR 摘要</div>
-          <div class="field-row">
-            <span>发票号码</span>
-            <span>
-              {{ getInvoiceExtracted(previewInvoice)?.invoice_number || '-' }}
-              <small
-                v-if="getInvoiceExtracted(previewInvoice)?.invoice_number_source || getInvoiceExtracted(previewInvoice)?.invoice_number_confidence"
-                class="ocr-hint"
-                :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.invoice_number_confidence)"
-              >
-                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.invoice_number_source) || '未识别' }}
-                <span v-if="getInvoiceExtracted(previewInvoice)?.invoice_number_confidence">
-                  （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.invoice_number_confidence) }}）
-                </span>
-              </small>
-            </span>
-          </div>
-          <div class="field-row">
-            <span>开票日期</span>
-            <span>
-              {{ getInvoiceExtracted(previewInvoice)?.invoice_date || '-' }}
-              <small
-                v-if="getInvoiceExtracted(previewInvoice)?.invoice_date_source || getInvoiceExtracted(previewInvoice)?.invoice_date_confidence"
-                class="ocr-hint"
-                :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.invoice_date_confidence)"
-              >
-                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.invoice_date_source) || '未识别' }}
-                <span v-if="getInvoiceExtracted(previewInvoice)?.invoice_date_confidence">
-                  （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.invoice_date_confidence) }}）
-                </span>
-              </small>
-            </span>
-          </div>
-          <div class="field-row">
-            <span>价税合计</span>
-            <span>
-              {{ getInvoiceExtracted(previewInvoice)?.amount ?? '-' }}
-              <small
-                v-if="getInvoiceExtracted(previewInvoice)?.amount_source || getInvoiceExtracted(previewInvoice)?.amount_confidence"
-                class="ocr-hint"
-                :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.amount_confidence)"
-              >
-                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.amount_source) || '未识别' }}
-                <span v-if="getInvoiceExtracted(previewInvoice)?.amount_confidence">
-                  （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.amount_confidence) }}）
-                </span>
-              </small>
-            </span>
-          </div>
-          <div class="field-row">
-            <span>税额</span>
-            <span>
-              {{ getInvoiceExtracted(previewInvoice)?.tax_amount ?? '-' }}
-              <small
-                v-if="getInvoiceExtracted(previewInvoice)?.tax_amount_source || getInvoiceExtracted(previewInvoice)?.tax_amount_confidence"
-                class="ocr-hint"
-                :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.tax_amount_confidence)"
-              >
-                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.tax_amount_source) || '未识别' }}
-                <span v-if="getInvoiceExtracted(previewInvoice)?.tax_amount_confidence">
-                  （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.tax_amount_confidence) }}）
-                </span>
-              </small>
-            </span>
-          </div>
-          <div class="field-row">
-            <span>销售方</span>
-            <span>
-              {{ getInvoiceExtracted(previewInvoice)?.seller_name || '-' }}
-              <small
-                v-if="getInvoiceExtracted(previewInvoice)?.seller_name_source || getInvoiceExtracted(previewInvoice)?.seller_name_confidence"
-                class="ocr-hint"
-                :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.seller_name_confidence)"
-              >
-                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.seller_name_source) || '未识别' }}
-                <span v-if="getInvoiceExtracted(previewInvoice)?.seller_name_confidence">
-                  （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.seller_name_confidence) }}）
-                </span>
-              </small>
-            </span>
-          </div>
-          <div class="field-row">
-            <span>购买方</span>
-            <span>
-              {{ getInvoiceExtracted(previewInvoice)?.buyer_name || '-' }}
-              <small
-                v-if="getInvoiceExtracted(previewInvoice)?.buyer_name_source || getInvoiceExtracted(previewInvoice)?.buyer_name_confidence"
-                class="ocr-hint"
-                :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.buyer_name_confidence)"
-              >
-                来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.buyer_name_source) || '未识别' }}
-                <span v-if="getInvoiceExtracted(previewInvoice)?.buyer_name_confidence">
-                  （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.buyer_name_confidence) }}）
-                </span>
-              </small>
-            </span>
-          </div>
-        </div>
+        <Accordion v-if="getInvoiceExtracted(previewInvoice)" class="ocr-fields">
+          <AccordionTab header="OCR 摘要">
+            <div class="field-row">
+              <span>发票号码</span>
+              <span>
+                {{ getInvoiceExtracted(previewInvoice)?.invoice_number || '-' }}
+                <small
+                  v-if="getInvoiceExtracted(previewInvoice)?.invoice_number_source || getInvoiceExtracted(previewInvoice)?.invoice_number_confidence"
+                  class="ocr-hint"
+                  :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.invoice_number_confidence)"
+                >
+                  来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.invoice_number_source) || '未识别' }}
+                  <span v-if="getInvoiceExtracted(previewInvoice)?.invoice_number_confidence">
+                    （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.invoice_number_confidence) }}）
+                  </span>
+                </small>
+              </span>
+            </div>
+            <div class="field-row">
+              <span>开票日期</span>
+              <span>
+                {{ getInvoiceExtracted(previewInvoice)?.invoice_date || '-' }}
+                <small
+                  v-if="getInvoiceExtracted(previewInvoice)?.invoice_date_source || getInvoiceExtracted(previewInvoice)?.invoice_date_confidence"
+                  class="ocr-hint"
+                  :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.invoice_date_confidence)"
+                >
+                  来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.invoice_date_source) || '未识别' }}
+                  <span v-if="getInvoiceExtracted(previewInvoice)?.invoice_date_confidence">
+                    （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.invoice_date_confidence) }}）
+                  </span>
+                </small>
+              </span>
+            </div>
+            <div class="field-row">
+              <span>价税合计</span>
+              <span>
+                {{ getInvoiceExtracted(previewInvoice)?.amount ?? '-' }}
+                <small
+                  v-if="getInvoiceExtracted(previewInvoice)?.amount_source || getInvoiceExtracted(previewInvoice)?.amount_confidence"
+                  class="ocr-hint"
+                  :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.amount_confidence)"
+                >
+                  来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.amount_source) || '未识别' }}
+                  <span v-if="getInvoiceExtracted(previewInvoice)?.amount_confidence">
+                    （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.amount_confidence) }}）
+                  </span>
+                </small>
+              </span>
+            </div>
+            <div class="field-row">
+              <span>税额</span>
+              <span>
+                {{ getInvoiceExtracted(previewInvoice)?.tax_amount ?? '-' }}
+                <small
+                  v-if="getInvoiceExtracted(previewInvoice)?.tax_amount_source || getInvoiceExtracted(previewInvoice)?.tax_amount_confidence"
+                  class="ocr-hint"
+                  :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.tax_amount_confidence)"
+                >
+                  来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.tax_amount_source) || '未识别' }}
+                  <span v-if="getInvoiceExtracted(previewInvoice)?.tax_amount_confidence">
+                    （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.tax_amount_confidence) }}）
+                  </span>
+                </small>
+              </span>
+            </div>
+            <div class="field-row">
+              <span>销售方</span>
+              <span>
+                {{ getInvoiceExtracted(previewInvoice)?.seller_name || '-' }}
+                <small
+                  v-if="getInvoiceExtracted(previewInvoice)?.seller_name_source || getInvoiceExtracted(previewInvoice)?.seller_name_confidence"
+                  class="ocr-hint"
+                  :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.seller_name_confidence)"
+                >
+                  来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.seller_name_source) || '未识别' }}
+                  <span v-if="getInvoiceExtracted(previewInvoice)?.seller_name_confidence">
+                    （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.seller_name_confidence) }}）
+                  </span>
+                </small>
+              </span>
+            </div>
+            <div class="field-row">
+              <span>购买方</span>
+              <span>
+                {{ getInvoiceExtracted(previewInvoice)?.buyer_name || '-' }}
+                <small
+                  v-if="getInvoiceExtracted(previewInvoice)?.buyer_name_source || getInvoiceExtracted(previewInvoice)?.buyer_name_confidence"
+                  class="ocr-hint"
+                  :class="confidenceClass(getInvoiceExtracted(previewInvoice)?.buyer_name_confidence)"
+                >
+                  来源：{{ formatSourceLabel(getInvoiceExtracted(previewInvoice)?.buyer_name_source) || '未识别' }}
+                  <span v-if="getInvoiceExtracted(previewInvoice)?.buyer_name_confidence">
+                    （置信度：{{ confidenceLabel(getInvoiceExtracted(previewInvoice)?.buyer_name_confidence) }}）
+                  </span>
+                </small>
+              </span>
+            </div>
+          </AccordionTab>
+        </Accordion>
 
         <div v-if="getInvoiceRawText(previewInvoice) || getInvoicePrettyText(previewInvoice)" class="raw-section">
           <div class="raw-title">OCR &#25991;&#26412;</div>
@@ -401,7 +517,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import dayjs from 'dayjs'
 import Accordion from 'primevue/accordion'
 import AccordionTab from 'primevue/accordiontab'
@@ -491,8 +607,19 @@ const stats = ref<{ totalCount: number; totalAmount: number; bySource: Record<st
 
 const uploadModalVisible = ref(false)
 const uploading = ref(false)
+const savingUploadOcr = ref(false)
 const selectedFiles = ref<File[]>([])
 const invoiceInput = ref<HTMLInputElement | null>(null)
+const uploadedInvoiceId = ref<string | null>(null)
+const uploadOcrResult = ref<InvoiceExtractedData | null>(null)
+const uploadOcrForm = reactive({
+  invoice_number: '',
+  invoice_date: '',
+  amount: null as number | null,
+  tax_amount: null as number | null,
+  seller_name: '',
+  buyer_name: '',
+})
 
 const triggerInvoiceChoose = (event: MouseEvent) => {
   const target = event.target as HTMLElement | null
@@ -548,6 +675,14 @@ const loadStats = async () => {
 const openUploadModal = () => {
   selectedFiles.value = []
   if (invoiceInput.value) invoiceInput.value.value = ''
+  uploadedInvoiceId.value = null
+  uploadOcrResult.value = null
+  uploadOcrForm.invoice_number = ''
+  uploadOcrForm.invoice_date = ''
+  uploadOcrForm.amount = null
+  uploadOcrForm.tax_amount = null
+  uploadOcrForm.seller_name = ''
+  uploadOcrForm.buyer_name = ''
   uploadModalVisible.value = true
 }
 
@@ -607,21 +742,55 @@ const handleUpload = async () => {
       const createdList = res.data?.data || []
       createdInvoice = createdList.length > 0 ? createdList[0] : null
     }
-    toast.add({ severity: 'success', summary: '\u4E0A\u4F20\u6210\u529F', life: 2000 })
+    if (createdInvoice) {
+      uploadedInvoiceId.value = createdInvoice.id
+      const extracted = getInvoiceExtracted(createdInvoice)
+      uploadOcrResult.value = extracted
+      uploadOcrForm.invoice_number = extracted?.invoice_number || ''
+      uploadOcrForm.invoice_date = extracted?.invoice_date || ''
+      uploadOcrForm.amount = extracted?.amount ?? null
+      uploadOcrForm.tax_amount = extracted?.tax_amount ?? null
+      uploadOcrForm.seller_name = extracted?.seller_name || ''
+      uploadOcrForm.buyer_name = extracted?.buyer_name || ''
+    }
+    toast.add({ severity: 'success', summary: '\u4E0A\u4F20\u6210\u529F\uFF0C\u8BF7\u786E\u8BA4\u8BC6\u522B\u7ED3\u679C', life: 2200 })
     notifications.add({
       severity: 'success',
       title: '\u53D1\u7968\u4E0A\u4F20\u6210\u529F',
       detail: selectedFiles.value.length === 1 ? selectedFiles.value[0]?.name : `\u5171 ${selectedFiles.value.length} \u4E2A\u6587\u4EF6`,
     })
-    uploadModalVisible.value = false
-    selectedFiles.value = []
-    await loadInvoices()
-    await loadStats()
-    if (createdInvoice) openPreview(createdInvoice)
+    // 不立即关闭，等待用户确认并保存
   } catch {
     toast.add({ severity: 'error', summary: '\u4E0A\u4F20\u5931\u8D25', life: 3000 })
   } finally {
     uploading.value = false
+  }
+}
+
+const handleSaveUploadedInvoice = async () => {
+  if (!uploadedInvoiceId.value) {
+    uploadModalVisible.value = false
+    return
+  }
+  savingUploadOcr.value = true
+  try {
+    const payload: Partial<Invoice> = {
+      invoice_number: uploadOcrForm.invoice_number || undefined,
+      invoice_date: uploadOcrForm.invoice_date || undefined,
+      amount: uploadOcrForm.amount === null ? undefined : Number(uploadOcrForm.amount),
+      tax_amount: uploadOcrForm.tax_amount === null ? undefined : Number(uploadOcrForm.tax_amount),
+      seller_name: uploadOcrForm.seller_name || undefined,
+      buyer_name: uploadOcrForm.buyer_name || undefined,
+    }
+    await invoiceApi.update(uploadedInvoiceId.value, payload)
+    toast.add({ severity: 'success', summary: '\u53D1\u7968\u4FE1\u606F\u5DF2\u66F4\u65B0', life: 2000 })
+    uploadModalVisible.value = false
+    await loadInvoices()
+    await loadStats()
+  } catch {
+    toast.add({ severity: 'error', summary: '\u4FDD\u5B58\u5931\u8D25', life: 3000 })
+  } finally {
+    savingUploadOcr.value = false
   }
 }
 
@@ -988,6 +1157,12 @@ onMounted(() => {
   border: 1px dashed color-mix(in srgb, var(--p-primary-400, #60a5fa), transparent 25%);
   background: rgba(59, 130, 246, 0.03);
   background: color-mix(in srgb, var(--p-primary-50, #eff6ff), transparent 55%);
+}
+
+.upload-screenshot-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .sbm-dropzone {

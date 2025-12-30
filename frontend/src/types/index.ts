@@ -91,6 +91,7 @@ export interface Invoice {
   invoice_number?: string;
   invoice_date?: string;
   amount?: number;
+   tax_amount?: number;
   bad_debt?: boolean;
   seller_name?: string;
   buyer_name?: string;
