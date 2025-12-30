@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import traceback
 import os
 import sys
 import tempfile
@@ -301,10 +302,28 @@ def main():
             if args.text_score is not None:
                 params["Global.text_score"] = float(args.text_score)
 
-            ocr = RapidOCR(params=params or None)
+            # Helper: run rapidocr with optional fallback to default params to avoid crashes such as
+            # "list index out of range" from corrupted/partial models.
+            def run_with_fallback(path: str):
+                errors: list[str] = []
+                # First try with resolved params (preferred PP-OCRv5 models)
+                try:
+                    ocr = RapidOCR(params=params or None)
+                    out = ocr(path)
+                    return out, "custom"
+                except Exception as e:
+                    errors.append(f"custom_params_failed: {e}")
+                    # Fallback to RapidOCR defaults (letting RapidOCR auto-manage models)
+                    try:
+                        ocr = RapidOCR()
+                        out = ocr(path)
+                        return out, "fallback_default"
+                    except Exception as e2:
+                        errors.append(f"default_failed: {e2}")
+                        raise RuntimeError("; ".join(errors))
 
             def run_one(path: str):
-                out = ocr(path)
+                out, backend = run_with_fallback(path)
                 txts = getattr(out, "txts", None) or ()
                 scores = getattr(out, "scores", None) or ()
                 boxes = getattr(out, "boxes", None)
@@ -330,6 +349,7 @@ def main():
                     "lines": lines,
                     "line_count": len(lines),
                     "score": score_lines(lines),
+                    "backend": backend,
                 }
 
             multipass = safe_int(os.getenv("SBM_RAPIDOCR_MULTIPASS"), 1 if args.profile == "pdf" else 0)
@@ -373,6 +393,7 @@ def main():
             "engine": f"rapidocr-{rapidocr_version}",
             "profile": args.profile,
             "variant": best_variant,
+            "backend": best.get("backend", ""),
         }
         if debug:
             payload["variants"] = variants_debug
@@ -392,7 +413,8 @@ def main():
         )
         sys.exit(1)
     except Exception as e:
-        print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
+        tb = traceback.format_exc()
+        print(json.dumps({"success": False, "error": str(e), "traceback": tb}, ensure_ascii=False))
         sys.exit(1)
 
 
