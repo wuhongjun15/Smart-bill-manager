@@ -1915,6 +1915,13 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 			data.PaymentMethodConfidence = 0.5
 		}
 	}
+	// If推断出支付方式但文本明确包含“支付方式”标签，则视为标签匹配提升置信度
+	if data.PaymentMethod != nil && data.PaymentMethodSource == "wechat_infer" && strings.Contains(text, "支付方式") {
+		data.PaymentMethodSource = "wechat_method_label"
+		if data.PaymentMethodConfidence < 0.8 {
+			data.PaymentMethodConfidence = 0.9
+		}
+	}
 
 	// Default confidences if not set but values present
 	if data.Merchant != nil && data.MerchantConfidence == 0 {
@@ -2058,6 +2065,12 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 			data.PaymentMethodConfidence = 0.5
 		}
 	}
+	if data.PaymentMethod != nil && data.PaymentMethodSource == "alipay_infer" && strings.Contains(text, "支付方式") {
+		data.PaymentMethodSource = "alipay_method_label"
+		if data.PaymentMethodConfidence < 0.8 {
+			data.PaymentMethodConfidence = 0.9
+		}
+	}
 
 	// Default confidences if missing
 	if data.Merchant != nil && data.MerchantConfidence == 0 {
@@ -2164,6 +2177,12 @@ func (s *OCRService) parseBankTransfer(text string, data *PaymentExtractedData) 
 		if data.PaymentMethod != nil && data.PaymentMethodSource == "" {
 			data.PaymentMethodSource = "bank_infer"
 			data.PaymentMethodConfidence = 0.5
+		}
+	}
+	if data.PaymentMethod != nil && data.PaymentMethodSource == "bank_infer" && strings.Contains(text, "支付方式") {
+		data.PaymentMethodSource = "bank_method_label"
+		if data.PaymentMethodConfidence < 0.7 {
+			data.PaymentMethodConfidence = 0.9
 		}
 	}
 
