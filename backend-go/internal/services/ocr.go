@@ -1884,7 +1884,8 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		// Explicit full-name label
 		regexp.MustCompile(`商户全称[：:]?[\s]*([^\n\r]+)`),
 		// WeChat QR transfer style: "扫二维码付款-给XXXX"
-		regexp.MustCompile(`扫(?:码|二维码)付款[-—－]?给([^\n\r]+)`),
+		// OCR may misread "二维码" as "维码/二 维 码" etc, so match loosely.
+		regexp.MustCompile(`扫.{0,4}码付款[-—－]?\s*给([^\n\r]+)`),
 		// 收款方/收款人
 		regexp.MustCompile(`收款方[：:]?[\s]*([^\s¥￥\n]+)`),
 		regexp.MustCompile(`收款人[：:]?[\s]*([^\s¥￥\n]+)`),
@@ -1915,6 +1916,19 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 						data.Merchant = &merchant
 						data.MerchantSource = "wechat_fullname_label"
 						data.MerchantConfidence = 0.98
+					case strings.Contains(re.String(), "码付款"):
+						// "扫二维码付款-给XXX" usually refers to the payee (often a person). OCR might only
+						// catch 1 char; keep it but mark low confidence so UI can highlight.
+						if isLikelyBankInstitution(merchant) {
+							continue
+						}
+						data.Merchant = &merchant
+						data.MerchantSource = "wechat_qr_payee"
+						if len([]rune(merchant)) <= 1 {
+							data.MerchantConfidence = 0.3
+						} else {
+							data.MerchantConfidence = 0.85
+						}
 					case strings.Contains(re.String(), "收款方") || strings.Contains(re.String(), "收款人") || strings.Contains(re.String(), "转账给"):
 						data.Merchant = &merchant
 						data.MerchantSource = "wechat_label"
@@ -1933,6 +1947,59 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 				}
 				break
 			}
+		}
+	}
+	// If we still don't have merchant, try a line-based fallback for QR-pay title lines.
+	if data.Merchant == nil {
+		lines := strings.Split(text, "\n")
+		titleRe := regexp.MustCompile(`扫.{0,6}码付款.*?给\s*([^\s¥￥\n\r]{1,20})`)
+		titleOnlyRe := regexp.MustCompile(`扫.{0,6}码付款.*?给\s*$`)
+		cjkNameRe := regexp.MustCompile(`^[\p{Han}]{2,10}$`)
+
+		for i := 0; i < len(lines); i++ {
+			line := strings.TrimSpace(lines[i])
+			if line == "" {
+				continue
+			}
+			if !strings.Contains(line, "扫") || !strings.Contains(line, "付款") || !strings.Contains(line, "给") {
+				continue
+			}
+
+			var merchant string
+			if m := titleRe.FindStringSubmatch(line); len(m) > 1 {
+				merchant = sanitizePaymentField(m[1])
+			} else if titleOnlyRe.MatchString(line) && i+1 < len(lines) {
+				merchant = sanitizePaymentField(lines[i+1])
+			}
+
+			if merchant == "" || isWeChatBillDetailLabel(merchant) || isLikelyBankInstitution(merchant) {
+				continue
+			}
+
+			// Some OCR outputs split the payee name into multiple short lines. If we only captured 1 rune,
+			// try to look at the next 1-2 lines and prefer the longer plausible CJK name.
+			if len([]rune(merchant)) <= 1 {
+				for j := i + 1; j < len(lines) && j <= i+2; j++ {
+					cand := sanitizePaymentField(lines[j])
+					if cand == "" || isWeChatBillDetailLabel(cand) || isLikelyBankInstitution(cand) {
+						continue
+					}
+					if cjkNameRe.MatchString(cand) && len([]rune(cand)) > len([]rune(merchant)) {
+						merchant = cand
+					} else if len([]rune(cand)) == 1 && cjkNameRe.MatchString(merchant+cand) {
+						merchant = merchant + cand
+					}
+				}
+			}
+
+			data.Merchant = &merchant
+			data.MerchantSource = "wechat_qr_payee_line"
+			if len([]rune(merchant)) <= 1 {
+				data.MerchantConfidence = 0.3
+			} else {
+				data.MerchantConfidence = 0.8
+			}
+			break
 		}
 	}
 

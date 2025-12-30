@@ -398,11 +398,11 @@ def main():
                 {
                     "Det.engine_type": EngineType.ONNXRUNTIME,
                     "Det.lang_type": LangDet.CH,
-                    "Det.model_type": ModelType.MOBILE,
+                    "Det.model_type": ModelType.SERVER,
                     "Det.ocr_version": OCRVersion.PPOCRV5,
                     "Rec.engine_type": EngineType.ONNXRUNTIME,
                     "Rec.lang_type": LangRec.CH,
-                    "Rec.model_type": ModelType.MOBILE,
+                    "Rec.model_type": ModelType.SERVER,
                     "Rec.ocr_version": OCRVersion.PPOCRV5,
                 }
             )
@@ -448,8 +448,8 @@ def main():
                 param_summary = {
                     "rapidocr": rapidocr_version,
                     "ocr_version": "PP-OCRv5",
-                    "det": "onnxruntime:PP-OCRv5:ch:mobile",
-                    "rec": "onnxruntime:PP-OCRv5:ch:mobile",
+                    "det": "onnxruntime:PP-OCRv5:ch:server",
+                    "rec": "onnxruntime:PP-OCRv5:ch:server",
                     "cls": "default",
                     "dict": "auto",
                     "model_dir": str(InferSession.DEFAULT_MODEL_PATH) if model_data_dir else "",
@@ -473,11 +473,10 @@ def main():
                         fb_summary["dict"] = "default"
                         return out, "fallback_default", errors, fb_summary
                     except Exception as e2:
-                        errors.append(f"default_failed: {e2}")
-                        raise RuntimeError("; ".join(errors))
+                         errors.append(f"default_failed: {e2}")
+                         raise RuntimeError("; ".join(errors))
 
-            def run_one(path: str):
-                out, backend, backend_errors, param_summary = run_with_fallback(path)
+            def build_result(out, backend: str, backend_errors: list[str], param_summary: dict):
                 txts = getattr(out, "txts", None) or ()
                 scores = getattr(out, "scores", None) or ()
                 boxes = getattr(out, "boxes", None)
@@ -508,9 +507,13 @@ def main():
                     "line_count": len(ordered),
                     "score": score_lines(ordered),
                     "backend": backend,
-                    "backend_errors": backend_errors,
-                    "params": param_summary,
-                }
+                     "backend_errors": backend_errors,
+                     "params": param_summary,
+                 }
+
+            def run_one(path: str):
+                out, backend, backend_errors, param_summary = run_with_fallback(path)
+                return build_result(out, backend, backend_errors, param_summary)
 
             multipass = safe_int(os.getenv("SBM_RAPIDOCR_MULTIPASS"), 1 if args.profile == "pdf" else 0)
             rotate180 = truthy(os.getenv("SBM_RAPIDOCR_ROTATE180")) or (args.profile == "pdf")

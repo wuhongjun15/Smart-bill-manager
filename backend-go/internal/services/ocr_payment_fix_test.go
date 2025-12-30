@@ -91,6 +91,45 @@ A
 	}
 }
 
+func TestParsePaymentScreenshot_WeChatQrPay_PayeeTitleLine(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `微信支付
+扫二维码付款-给黄凯文
+-4500.00
+转账时间 2025年12月2日10:07:30
+转账单号 10001073012025120200787809648`
+
+	data, err := service.ParsePaymentScreenshot(sampleText)
+	if err != nil {
+		t.Fatalf("ParsePaymentScreenshot returned error: %v", err)
+	}
+	if data.Merchant == nil || *data.Merchant != "黄凯文" {
+		t.Fatalf("expected Merchant=黄凯文, got %#v", data.Merchant)
+	}
+	if data.MerchantConfidence <= 0.0 {
+		t.Fatalf("expected MerchantConfidence to be set, got %v", data.MerchantConfidence)
+	}
+}
+
+func TestParsePaymentScreenshot_WeChatQrPay_PayeeSplitLines(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `微信支付
+扫二维码付款-给
+黄凯文
+-4500.00
+转账时间 2025年12月2日10:07:30`
+
+	data, err := service.ParsePaymentScreenshot(sampleText)
+	if err != nil {
+		t.Fatalf("ParsePaymentScreenshot returned error: %v", err)
+	}
+	if data.Merchant == nil || *data.Merchant != "黄凯文" {
+		t.Fatalf("expected Merchant=黄凯文, got %#v", data.Merchant)
+	}
+}
+
 // TestRemoveChineseSpaces_PreserveTimeSpace tests the fix for preserving space after 日
 func TestRemoveChineseSpaces_PreserveTimeSpace(t *testing.T) {
 	tests := []struct {
