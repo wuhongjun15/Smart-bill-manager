@@ -210,7 +210,6 @@ def apply_label_value_layout(lines: list[dict], profile: str) -> list[dict]:
         "当前状态",
         # Other UI blocks
         "商品",
-        "服务",
         "商品说明",
     }
 

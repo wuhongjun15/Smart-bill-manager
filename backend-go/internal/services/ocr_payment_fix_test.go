@@ -195,6 +195,42 @@ func TestParsePaymentScreenshot_WeChatBillDetail_LabelListThenValues(t *testing.
 	}
 }
 
+func TestParsePaymentScreenshot_WeChatBillDetail_PaymentMethodShouldNotBeBarcode(t *testing.T) {
+	service := NewOCRService()
+
+	// A real-world pattern: due to layout-aware postprocess, OCR may output:
+	// - "服务：招商银行信用卡(2506)" (card got paired to a wrong label)
+	// - "支付方式：10016..." (barcode / merchant id got paired to "支付方式")
+	// We should still extract the actual payment method (the card), not the long digits.
+	sampleText := `微信支付
+全部账单
+已支付
+闽辉超市
+-400.00
+当前状态：支付成功
+支付时间：2025年11月15日23:02:47
+商品：闽辉超市
+商户全称：上海市徐汇区闽辉杂货店
+收单机构：中国工商银行股份有限公司牡丹卡中心
+服务：招商银行信用卡(2506)
+由中国银联股份有限公司提供收款清算
+支付方式：100160000351000012511150504679
+交易单号：4200002843202511153335484390
+商户单号：可在支持的商户扫码退款
+`
+
+	data, err := service.ParsePaymentScreenshot(sampleText)
+	if err != nil {
+		t.Fatalf("ParsePaymentScreenshot returned error: %v", err)
+	}
+	if data.PaymentMethod == nil {
+		t.Fatalf("expected PaymentMethod, got nil")
+	}
+	if *data.PaymentMethod != "招商银行信用卡(2506)" {
+		t.Fatalf("expected PaymentMethod=招商银行信用卡(2506), got %q", *data.PaymentMethod)
+	}
+}
+
 func TestParsePaymentScreenshot_Alipay_BillDetail_BasicFields(t *testing.T) {
 	service := NewOCRService()
 

@@ -2300,7 +2300,23 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 	// Prefer label-based extraction first to avoid "支付方式\n当前状态" etc.
 	methodIsBad := func(v string) bool {
 		v = sanitizePaymentMethod(v)
-		return v == "" || isWeChatBillDetailLabel(v)
+		if v == "" || isWeChatBillDetailLabel(v) {
+			return true
+		}
+		// Payment method should not be a long numeric id (barcode / transaction id).
+		digits := 0
+		nonDigits := 0
+		for _, r := range v {
+			if unicode.IsDigit(r) {
+				digits++
+			} else if !unicode.IsSpace(r) {
+				nonDigits++
+			}
+		}
+		if nonDigits == 0 && digits >= 12 {
+			return true
+		}
+		return false
 	}
 	if data.PaymentMethod == nil {
 		for _, label := range []string{"支付方式", "付款方式"} {
@@ -2337,6 +2353,17 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 			data.PaymentMethod = m
 			data.PaymentMethodSource = "wechat_method_scan"
 			data.PaymentMethodConfidence = 0.9
+		}
+	}
+	// If we got a suspicious method via label binding, prefer card-like scan result.
+	if data.PaymentMethod != nil {
+		cur := sanitizePaymentMethod(*data.PaymentMethod)
+		if methodIsBad(cur) || (!strings.Contains(cur, "卡") && !strings.Contains(cur, "银行")) {
+			if m := extractBankCardPaymentMethod(text); m != nil {
+				data.PaymentMethod = m
+				data.PaymentMethodSource = "wechat_method_scan"
+				data.PaymentMethodConfidence = 0.9
+			}
 		}
 	}
 	// If no specific payment method found, use default
