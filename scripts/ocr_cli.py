@@ -398,11 +398,11 @@ def main():
                 {
                     "Det.engine_type": EngineType.ONNXRUNTIME,
                     "Det.lang_type": LangDet.CH,
-                    "Det.model_type": ModelType.SERVER,
+                    "Det.model_type": ModelType.MOBILE,
                     "Det.ocr_version": OCRVersion.PPOCRV5,
                     "Rec.engine_type": EngineType.ONNXRUNTIME,
                     "Rec.lang_type": LangRec.CH,
-                    "Rec.model_type": ModelType.MOBILE,
+                    "Rec.model_type": ModelType.SERVER,
                     "Rec.ocr_version": OCRVersion.PPOCRV5,
                 }
             )
@@ -448,8 +448,8 @@ def main():
                 param_summary = {
                     "rapidocr": rapidocr_version,
                     "ocr_version": "PP-OCRv5",
-                    "det": "onnxruntime:PP-OCRv5:ch:server",
-                    "rec": "onnxruntime:PP-OCRv5:ch:mobile",
+                    "det": "onnxruntime:PP-OCRv5:ch:mobile",
+                    "rec": "onnxruntime:PP-OCRv5:ch:server",
                     "cls": "default",
                     "dict": "auto",
                     "model_dir": str(InferSession.DEFAULT_MODEL_PATH) if model_data_dir else "",
