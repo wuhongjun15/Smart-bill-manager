@@ -15,6 +15,9 @@ services:
       # OCR engine selection:
       # - SBM_OCR_ENGINE=rapidocr   # default (onnxruntime CPU)
       # - SBM_PDF_TEXT_EXTRACTOR=pymupdf  # default; fallback to OCR if extraction fails
+      # Optional: Persist RapidOCR auto-downloaded models into a mounted directory
+      # (models will be stored under: $SBM_OCR_DATA_DIR/rapidocr-models)
+      - SBM_OCR_DATA_DIR=/app/backend/data
     volumes:
       - app-data:/app/backend/data
       - app-uploads:/app/backend/uploads

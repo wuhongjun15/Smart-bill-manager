@@ -161,6 +161,9 @@ docker-compose down
 数据库和上传文件存储在 Docker 卷中：
 - `app-data`: 数据库文件
 - `app-uploads`: 上传的文件
+  
+RapidOCR 的模型缓存也建议持久化（否则每次重建/重启可能需要重新下载模型）：
+- 已在 `docker-compose.yml` 默认设置 `SBM_OCR_DATA_DIR=/app/backend/data`，模型将保存到 `app-data` 卷内的 `/app/backend/data/rapidocr-models/`
 
 #### OCR（RapidOCR v3，CPU）
 
@@ -172,7 +175,7 @@ docker-compose down
 
 可用环境变量：
 - `SBM_OCR_ENGINE=rapidocr`（默认）
-- `SBM_OCR_DATA_DIR=/data`（可选；用于把 RapidOCR 自动下载的模型缓存到可持久化目录，便于容器重启后复用；建议配合 volume 映射）
+- `SBM_OCR_DATA_DIR=/app/backend/data`（推荐；用于把 RapidOCR 自动下载的模型缓存到可持久化目录，便于容器重启后复用；模型会写入 `$SBM_OCR_DATA_DIR/rapidocr-models/`。使用 `docker-compose.yml` 时无需额外映射，已复用 `app-data` 卷）
 - `SBM_PDF_TEXT_EXTRACTOR=pymupdf|off`（默认 `pymupdf`：优先用 PyMuPDF 提取 PDF 内嵌文本；失败再走 OCR）
 - `SBM_PDF_OCR_DPI=220`（可选，范围建议 `120-450`；更高更清晰但更慢）
 - `SBM_RAPIDOCR_MULTIPASS=1`（可选；对 `profile=pdf` 默认启用，用多种增强版本选最优结果）
