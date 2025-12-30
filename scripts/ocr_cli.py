@@ -161,19 +161,19 @@ def resolve_model_paths():
     base_dir = os.getenv("SBM_RAPIDOCR_MODEL_DIR", "/opt/rapidocr-models")
     Path(base_dir).mkdir(parents=True, exist_ok=True)
 
-    # 参考 RapidOCR default_models.yaml（ONNX，mobile 版本，v3.5.0）
+    # 参考 RapidOCR default_models.yaml（ONNX，server 版本，v3.5.0）
     models = {
         "det": {
             "env": "SBM_RAPIDOCR_DET_MODEL",
-            "filename": "ch_PP-OCRv5_mobile_det.onnx",
-            "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.5.0/onnx/PP-OCRv5/det/ch_PP-OCRv5_mobile_det.onnx",
-            "sha256": "4d97c44a20d30a81aad087d6a396b08f786c4635742afc391f6621f5c6ae78ae",
+            "filename": "ch_PP-OCRv5_server_det.onnx",
+            "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.5.0/onnx/PP-OCRv5/det/ch_PP-OCRv5_server_det.onnx",
+            "sha256": "0f8846b1d4bba223a2a2f9d9b44022fbc22cc019051a602b41a7fda9667e4cad",
         },
         "rec": {
             "env": "SBM_RAPIDOCR_REC_MODEL",
-            "filename": "ch_PP-OCRv5_rec_mobile_infer.onnx",
-            "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.5.0/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile_infer.onnx",
-            "sha256": "5825fc7ebf84ae7a412be049820b4d86d77620f204a041697b0494669b1742c5",
+            "filename": "ch_PP-OCRv5_rec_server_infer.onnx",
+            "url": "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.5.0/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_server_infer.onnx",
+            "sha256": "e09385400eaaaef34ceff54aeb7c4f0f1fe014c27fa8b9905d4709b65746562a",
         },
         "dict": {
             "env": "SBM_RAPIDOCR_DICT_PATH",
