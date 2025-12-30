@@ -445,36 +445,39 @@ def main():
             # "list index out of range" from corrupted/partial models.
             def run_with_fallback(path: str):
                 errors: list[str] = []
+                # For payment screenshots (profile=default), angle classification (cls) is usually unnecessary
+                # and costs noticeable latency. Disable it by default to speed up OCR.
+                use_cls = None if args.profile != "default" else False
                 param_summary = {
                     "rapidocr": rapidocr_version,
                     "ocr_version": "PP-OCRv5",
                     "det": "onnxruntime:PP-OCRv5:ch:mobile",
                     "rec": "onnxruntime:PP-OCRv5:ch:server",
-                    "cls": "default",
+                    "cls": "disabled" if use_cls is False else "default",
                     "dict": "auto",
                     "model_dir": str(InferSession.DEFAULT_MODEL_PATH) if model_data_dir else "",
                 }
                 # First try with forced PP-OCRv5 params
                 try:
                     ocr = RapidOCR(params=params or None)
-                    out = ocr(path)
+                    out = ocr(path, use_cls=use_cls)
                     return out, "custom", errors, param_summary
                 except Exception as e:
                     errors.append(f"custom_params_failed: {e}; params={param_summary}")
                     # Fallback to RapidOCR defaults (letting RapidOCR auto-manage models)
                     try:
                         ocr = RapidOCR()
-                        out = ocr(path)
+                        out = ocr(path, use_cls=use_cls)
                         fb_summary = dict(param_summary)
                         fb_summary["ocr_version"] = "default"
                         fb_summary["det"] = "default"
                         fb_summary["rec"] = "default"
-                        fb_summary["cls"] = "default"
+                        fb_summary["cls"] = "disabled" if use_cls is False else "default"
                         fb_summary["dict"] = "default"
                         return out, "fallback_default", errors, fb_summary
                     except Exception as e2:
-                         errors.append(f"default_failed: {e2}")
-                         raise RuntimeError("; ".join(errors))
+                        errors.append(f"default_failed: {e2}")
+                        raise RuntimeError("; ".join(errors))
 
             def build_result(out, backend: str, backend_errors: list[str], param_summary: dict):
                 txts = getattr(out, "txts", None) or ()
@@ -507,9 +510,9 @@ def main():
                     "line_count": len(ordered),
                     "score": score_lines(ordered),
                     "backend": backend,
-                     "backend_errors": backend_errors,
-                     "params": param_summary,
-                 }
+                    "backend_errors": backend_errors,
+                    "params": param_summary,
+                }
 
             def run_one(path: str):
                 out, backend, backend_errors, param_summary = run_with_fallback(path)
