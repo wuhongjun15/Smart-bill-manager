@@ -299,6 +299,11 @@ func (s *OCRService) recognizeWithRapidOCRArgs(imagePath string, extraArgs []str
 	}
 	if len(result.Params) > 0 {
 		fmt.Printf("[OCR] backend params: det=%v, rec=%v, dict=%v, cls=%v\n", result.Params["det"], result.Params["rec"], result.Params["dict"], result.Params["cls"])
+		if v, ok := result.Params["model_dir"]; ok {
+			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+				fmt.Printf("[OCR] model cache dir: %s\n", strings.TrimSpace(s))
+			}
+		}
 	}
 	if result.Variant != "" {
 		fmt.Printf("[OCR] OCR extracted %d lines, %d characters (engine=%s profile=%s variant=%s backend=%s)\n", result.LineCount, len(result.Text), engine, profile, result.Variant, be)

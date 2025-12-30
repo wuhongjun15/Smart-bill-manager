@@ -175,7 +175,7 @@ RapidOCR 的模型缓存也建议持久化（否则每次重建/重启可能需�
 
 可用环境变量：
 - `SBM_OCR_ENGINE=rapidocr`（默认）
-- `SBM_OCR_DATA_DIR=/app/backend/data`（推荐；用于把 RapidOCR 自动下载的模型缓存到可持久化目录，便于容器重启后复用；模型会写入 `$SBM_OCR_DATA_DIR/rapidocr-models/`。使用 `docker-compose.yml` 时无需额外映射，已复用 `app-data` 卷）
+- `SBM_OCR_DATA_DIR=/app/backend/data`（推荐；用于把 RapidOCR 自动下载的模型缓存到可持久化目录，便于容器重启后复用；默认模型会写入 `$SBM_OCR_DATA_DIR/rapidocr-models/`。如果你把该变量直接设为 `/opt/rapidocr-models` 这种“模型目录本身”，也会直接使用该目录）
 - `SBM_PDF_TEXT_EXTRACTOR=pymupdf|off`（默认 `pymupdf`：优先用 PyMuPDF 提取 PDF 内嵌文本；失败再走 OCR）
 - `SBM_PDF_OCR_DPI=220`（可选，范围建议 `120-450`；更高更清晰但更慢）
 - `SBM_RAPIDOCR_MULTIPASS=1`（可选；对 `profile=pdf` 默认启用，用多种增强版本选最优结果）

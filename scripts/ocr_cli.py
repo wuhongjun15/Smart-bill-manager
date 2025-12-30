@@ -265,7 +265,12 @@ def main():
             model_data_dir = (os.getenv("SBM_OCR_DATA_DIR") or os.getenv("SBM_DATA_DIR") or "").strip()
             if model_data_dir:
                 try:
-                    base = Path(model_data_dir).expanduser() / "rapidocr-models"
+                    base = Path(model_data_dir).expanduser()
+                    # Keep backward/UX-friendly behavior:
+                    # - If user points SBM_OCR_DATA_DIR to a parent dir, we create/use <dir>/rapidocr-models
+                    # - If user already points to .../rapidocr-models, use it directly (avoid double nesting)
+                    if base.name != "rapidocr-models":
+                        base = base / "rapidocr-models"
                     if not base.is_absolute():
                         base = (Path.cwd() / base).resolve()
                     base.mkdir(parents=True, exist_ok=True)
