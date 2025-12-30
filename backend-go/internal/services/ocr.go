@@ -182,28 +182,28 @@ type InvoiceExtractedData struct {
 
 // OCRCLIResponse represents the response from the Python OCR CLI script.
 type OCRCLIResponse struct {
-	Success   bool            `json:"success"`
-	Text      string          `json:"text"`
-	Lines     []OCRCLILine    `json:"lines"`
-	LineCount int             `json:"line_count"`
-	Engine    string          `json:"engine,omitempty"`
-	Profile   string          `json:"profile,omitempty"`
-	Variant   string          `json:"variant,omitempty"`
-	Backend   string          `json:"backend,omitempty"`
-	BackendErrors []string    `json:"backend_errors,omitempty"`
-	Params    map[string]any  `json:"params,omitempty"`
-	Variants  []OCRCLIVariant `json:"variants,omitempty"`
-	Error     string          `json:"error,omitempty"`
+	Success       bool            `json:"success"`
+	Text          string          `json:"text"`
+	Lines         []OCRCLILine    `json:"lines"`
+	LineCount     int             `json:"line_count"`
+	Engine        string          `json:"engine,omitempty"`
+	Profile       string          `json:"profile,omitempty"`
+	Variant       string          `json:"variant,omitempty"`
+	Backend       string          `json:"backend,omitempty"`
+	BackendErrors []string        `json:"backend_errors,omitempty"`
+	Params        map[string]any  `json:"params,omitempty"`
+	Variants      []OCRCLIVariant `json:"variants,omitempty"`
+	Error         string          `json:"error,omitempty"`
 }
 
 type OCRCLIVariant struct {
-	Variant string  `json:"variant"`
-	Score   float64 `json:"score"`
-	Lines   int     `json:"lines"`
-	Chars   int     `json:"chars"`
-	Backend string  `json:"backend,omitempty"`
-	BackendErrors []string `json:"backend_errors,omitempty"`
-	Params  map[string]any `json:"params,omitempty"`
+	Variant       string         `json:"variant"`
+	Score         float64        `json:"score"`
+	Lines         int            `json:"lines"`
+	Chars         int            `json:"chars"`
+	Backend       string         `json:"backend,omitempty"`
+	BackendErrors []string       `json:"backend_errors,omitempty"`
+	Params        map[string]any `json:"params,omitempty"`
 }
 
 // OCRCLILine represents a single line of OCR result
@@ -2908,6 +2908,7 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	numOnlyRe := regexp.MustCompile(`^\d+(?:\.\d+)?$`)
 	moneyLikeRe := regexp.MustCompile(`^\d+\.\d{2}$`)
 	decimalLikeRe := regexp.MustCompile(`^\d+\.\d+$`)
+	dimensionLikeRe := regexp.MustCompile(`(?i)^\d+(?:\.\d+)?\s*[x\x{00d7}]\s*\d+(?:\.\d+)?(?:\s*[x\x{00d7}]\s*\d+(?:\.\d+)?)?\s*(?:mm|cm|m|g|kg|ml|l)?$`)
 	integerOnlyRe := regexp.MustCompile(`^\d+$`)
 	taxRateRe := regexp.MustCompile(`^\d{1,2}%$`)
 	quantityLabelRe := regexp.MustCompile(`数量\s*[:：]?\s*(\d+(?:\.\d+)?)`)
@@ -2938,6 +2939,7 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		s = latinHanBoundaryRe.ReplaceAllString(s, "$1 $2")
 		s = hanLatinBoundaryRe.ReplaceAllString(s, "$1 $2")
 		s = strings.Join(strings.Fields(s), " ")
+		s = removeChineseInlineSpaces(s)
 		return strings.TrimSpace(s)
 	}
 
@@ -2964,7 +2966,7 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		if isUnitToken(s) {
 			return false
 		}
-		if specTokenRe.MatchString(s) {
+		if specTokenRe.MatchString(strings.ReplaceAll(s, "*", "\u00d7")) || dimensionLikeRe.MatchString(strings.ReplaceAll(s, "*", "\u00d7")) {
 			return false
 		}
 		if strings.Contains(s, "价税合计") || strings.Contains(s, "合计") {
@@ -3158,6 +3160,8 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		if low < 0 {
 			low = 0
 		}
+		starStart := -1
+		nameStart := -1
 		for j := firstTaxRate; j >= low; j-- {
 			cand := strings.TrimSpace(block[j])
 			if cand == "" || isHeaderLine(cand) || isStopLine(cand) {
@@ -3165,13 +3169,17 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 			}
 			// Prefer category-prefixed rows as they are the most stable OCR signal.
 			if strings.HasPrefix(cand, "*") {
-				start = j
+				starStart = j
 				break
 			}
-			if isLikelyItemNameLine(cand) {
-				start = j
-				break
+			if nameStart == -1 && isLikelyItemNameLine(cand) {
+				nameStart = j
 			}
+		}
+		if starStart >= 0 {
+			start = starStart
+		} else if nameStart >= 0 {
+			start = nameStart
 		}
 		// Override window-based start when we managed to anchor to a likely name line.
 		if start >= 0 && start < len(block) {
@@ -3186,11 +3194,12 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	}
 
 	var (
-		items       []InvoiceLineItem
-		currentName string
-		currentSpec string
-		currentUnit string
-		currentQty  *float64
+		items           []InvoiceLineItem
+		currentName     string
+		currentSpec     string
+		currentUnit     string
+		currentQty      *float64
+		currentSawMoney bool
 	)
 	flush := func() {
 		name := normalizeName(currentName)
@@ -3199,18 +3208,25 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 			currentSpec = ""
 			currentUnit = ""
 			currentQty = nil
+			currentSawMoney = false
 			return
+		}
+		qty := currentQty
+		if qty == nil && currentSawMoney {
+			one := 1.0
+			qty = &one
 		}
 		items = append(items, InvoiceLineItem{
 			Name:     name,
 			Spec:     strings.TrimSpace(currentSpec),
 			Unit:     strings.TrimSpace(currentUnit),
-			Quantity: currentQty,
+			Quantity: qty,
 		})
 		currentName = ""
 		currentSpec = ""
 		currentUnit = ""
 		currentQty = nil
+		currentSawMoney = false
 	}
 
 	isTableExitLine := func(s string) bool {
@@ -3257,12 +3273,40 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 			break
 		}
 
-		// Specs/models often appear on their own line (e.g. "3X410g"); don't create a new item.
-		if currentName != "" && currentQty == nil && specTokenRe.MatchString(s) {
-			continue
+		// Within an active row, absorb spec/unit/qty tokens as we see them (PDF text often wraps names).
+		if currentName != "" && currentQty == nil {
+			tn := strings.TrimSpace(strings.ReplaceAll(s, "*", "\u00d7"))
+			if currentSpec == "" && (specTokenRe.MatchString(tn) || dimensionLikeRe.MatchString(tn)) {
+				currentSpec = strings.TrimSpace(s)
+				continue
+			}
+			if currentUnit == "" && isUnitToken(s) {
+				currentUnit = s
+				continue
+			}
+			if q := parseQuantityWithUnit(s, currentUnit); q != nil {
+				currentQty = q
+				continue
+			}
+			if moneyLikeRe.MatchString(s) || strings.ContainsRune(s, '\uFFE5') {
+				currentSawMoney = true
+				continue
+			}
+			if taxRateRe.MatchString(s) {
+				continue
+			}
 		}
 
 		if isLikelyItemNameLine(s) {
+			// Treat subsequent likely-name lines as continuation for wrapped rows (e.g. "*分类*长名称" 下一行续写).
+			if currentName != "" && currentQty == nil && currentSpec == "" && currentUnit == "" {
+				openASCII := strings.Count(currentName, "(") > strings.Count(currentName, ")")
+				openFull := strings.Count(currentName, "\uFF08") > strings.Count(currentName, "\uFF09")
+				if (strings.HasPrefix(currentName, "*") && !strings.HasPrefix(s, "*")) || ((openASCII || openFull) && !strings.HasPrefix(s, "*")) {
+					currentName = strings.TrimSpace(currentName + " " + s)
+					continue
+				}
+			}
 			if currentName != "" {
 				flush()
 			}
@@ -3270,57 +3314,14 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 			currentSpec = ""
 			currentUnit = ""
 			currentQty = nil
-
-			// Look ahead for a quantity token near the name line.
-			hasMoney := false
-			unitToken := ""
-			for j := idx + 1; j < len(block) && j <= idx+12; j++ {
-				t := strings.TrimSpace(block[j])
-				if t == "" || isHeaderLine(t) {
-					continue
-				}
-				if isLikelyItemNameLine(t) {
-					break
-				}
-				tn := strings.TrimSpace(strings.ReplaceAll(t, "*", "×"))
-				if specTokenRe.MatchString(tn) {
-					if currentSpec == "" {
-						currentSpec = tn
-					}
-					continue
-				}
-				if isUnitToken(t) {
-					if unitToken == "" {
-						unitToken = t
-					}
-					if currentUnit == "" {
-						currentUnit = t
-					}
-					continue
-				}
-				if taxRateRe.MatchString(t) {
-					continue
-				}
-				if moneyLikeRe.MatchString(t) {
-					hasMoney = true
-					continue
-				}
-				if q := parseQuantityWithUnit(t, unitToken); q != nil {
-					currentQty = q
-					break
-				}
-			}
-			// Many invoices omit the "数量" column for single-quantity lines; default to 1 when we saw money values.
-			if currentQty == nil && hasMoney {
-				one := 1.0
-				currentQty = &one
-			}
+			currentSawMoney = false
 			continue
 		}
 
 		// Merge continuation lines for long item names (before quantity is found).
 		if currentName != "" && currentQty == nil {
-			if isUnitToken(s) || taxRateRe.MatchString(s) || numOnlyRe.MatchString(s) || moneyLikeRe.MatchString(s) || specTokenRe.MatchString(s) {
+			tn := strings.TrimSpace(strings.ReplaceAll(s, "*", "\u00d7"))
+			if isUnitToken(s) || taxRateRe.MatchString(s) || numOnlyRe.MatchString(s) || moneyLikeRe.MatchString(s) || specTokenRe.MatchString(tn) || dimensionLikeRe.MatchString(tn) {
 				continue
 			}
 			if len([]rune(s)) >= 2 && len([]rune(s)) <= 80 {
