@@ -235,7 +235,8 @@ def main():
     # RapidOCR v3 (rapidocr + onnxruntime)
     try:
         with suppress_child_output():
-            from rapidocr import RapidOCR
+            from rapidocr import EngineType, LangDet, LangRec, ModelType, OCRVersion, RapidOCR
+            from rapidocr.inference_engine.base import InferSession
 
             rapidocr_version = "unknown"
             try:
@@ -244,7 +245,34 @@ def main():
                 pass
 
             params: dict = {}
-            # Preferred PP-OCRv5 weights if present; falls back to RapidOCR defaults otherwise.
+            # Force PP-OCRv5 by default (per RapidOCR官方文档).
+            # If this fails (e.g. first-time model download issues), we fall back to RapidOCR defaults.
+            params.update(
+                {
+                    "Det.engine_type": EngineType.ONNXRUNTIME,
+                    "Det.lang_type": LangDet.CH,
+                    "Det.model_type": ModelType.MOBILE,
+                    "Det.ocr_version": OCRVersion.PPOCRV5,
+                    "Rec.engine_type": EngineType.ONNXRUNTIME,
+                    "Rec.lang_type": LangRec.CH,
+                    "Rec.model_type": ModelType.MOBILE,
+                    "Rec.ocr_version": OCRVersion.PPOCRV5,
+                }
+            )
+
+            # Optional: override RapidOCR's default model cache directory with a single mounted dir.
+            # By default RapidOCR stores models under the Python package directory (rapidocr/models).
+            model_data_dir = (os.getenv("SBM_OCR_DATA_DIR") or os.getenv("SBM_DATA_DIR") or "").strip()
+            if model_data_dir:
+                try:
+                    base = Path(model_data_dir).expanduser() / "rapidocr-models"
+                    if not base.is_absolute():
+                        base = (Path.cwd() / base).resolve()
+                    base.mkdir(parents=True, exist_ok=True)
+                    InferSession.DEFAULT_MODEL_PATH = base
+                except Exception:
+                    model_data_dir = ""
+
             if args.profile == "pdf":
                 params.update(
                     {
@@ -265,8 +293,16 @@ def main():
             # "list index out of range" from corrupted/partial models.
             def run_with_fallback(path: str):
                 errors: list[str] = []
-                param_summary = {}
-                # First try with resolved params (preferred PP-OCRv5 models)
+                param_summary = {
+                    "rapidocr": rapidocr_version,
+                    "ocr_version": "PP-OCRv5",
+                    "det": "onnxruntime:PP-OCRv5:ch:mobile",
+                    "rec": "onnxruntime:PP-OCRv5:ch:mobile",
+                    "cls": "default",
+                    "dict": "auto",
+                    "model_dir": str(InferSession.DEFAULT_MODEL_PATH) if model_data_dir else "",
+                }
+                # First try with forced PP-OCRv5 params
                 try:
                     ocr = RapidOCR(params=params or None)
                     out = ocr(path)
@@ -277,7 +313,13 @@ def main():
                     try:
                         ocr = RapidOCR()
                         out = ocr(path)
-                        return out, "fallback_default", errors, param_summary
+                        fb_summary = dict(param_summary)
+                        fb_summary["ocr_version"] = "default"
+                        fb_summary["det"] = "default"
+                        fb_summary["rec"] = "default"
+                        fb_summary["cls"] = "default"
+                        fb_summary["dict"] = "default"
+                        return out, "fallback_default", errors, fb_summary
                     except Exception as e2:
                         errors.append(f"default_failed: {e2}")
                         raise RuntimeError("; ".join(errors))

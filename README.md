@@ -164,7 +164,7 @@ docker-compose down
 
 #### OCR（RapidOCR v3，CPU）
 
-默认使用 `RapidOCR v3 + onnxruntime` 在 CPU 上进行识别（最稳定、最少依赖）。
+默认使用 `RapidOCR v3 + onnxruntime` 在 CPU 上进行识别，并默认强制使用 **PP-OCRv5（mobile）** 权重（更好的识别效果；如首次下载模型失败会自动回退到 RapidOCR 默认配置）。
 
 发票识别支持 **PDF/图片**：
 - PDF：优先使用 PyMuPDF 提取内嵌文本（失败再走 RapidOCR）
@@ -172,6 +172,7 @@ docker-compose down
 
 可用环境变量：
 - `SBM_OCR_ENGINE=rapidocr`（默认）
+- `SBM_OCR_DATA_DIR=/data`（可选；用于把 RapidOCR 自动下载的模型缓存到可持久化目录，便于容器重启后复用；建议配合 volume 映射）
 - `SBM_PDF_TEXT_EXTRACTOR=pymupdf|off`（默认 `pymupdf`：优先用 PyMuPDF 提取 PDF 内嵌文本；失败再走 OCR）
 - `SBM_PDF_OCR_DPI=220`（可选，范围建议 `120-450`；更高更清晰但更慢）
 - `SBM_RAPIDOCR_MULTIPASS=1`（可选；对 `profile=pdf` 默认启用，用多种增强版本选最优结果）
