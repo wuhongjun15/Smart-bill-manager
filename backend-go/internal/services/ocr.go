@@ -189,6 +189,7 @@ type OCRCLIResponse struct {
 	Engine    string          `json:"engine,omitempty"`
 	Profile   string          `json:"profile,omitempty"`
 	Variant   string          `json:"variant,omitempty"`
+	Backend   string          `json:"backend,omitempty"`
 	Variants  []OCRCLIVariant `json:"variants,omitempty"`
 	Error     string          `json:"error,omitempty"`
 }
@@ -285,9 +286,9 @@ func (s *OCRService) recognizeWithRapidOCRArgs(imagePath string, extraArgs []str
 		profile = "default"
 	}
 	if result.Variant != "" {
-		fmt.Printf("[OCR] OCR extracted %d lines, %d characters (engine=%s profile=%s variant=%s)\n", result.LineCount, len(result.Text), engine, profile, result.Variant)
+		fmt.Printf("[OCR] OCR extracted %d lines, %d characters (engine=%s profile=%s variant=%s backend=%s)\n", result.LineCount, len(result.Text), engine, profile, result.Variant, strings.TrimSpace(result.Backend))
 	} else {
-		fmt.Printf("[OCR] OCR extracted %d lines, %d characters (engine=%s profile=%s)\n", result.LineCount, len(result.Text), engine, profile)
+		fmt.Printf("[OCR] OCR extracted %d lines, %d characters (engine=%s profile=%s backend=%s)\n", result.LineCount, len(result.Text), engine, profile, strings.TrimSpace(result.Backend))
 	}
 	return result.Text, nil
 }
