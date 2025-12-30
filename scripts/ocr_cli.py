@@ -306,24 +306,30 @@ def main():
             # "list index out of range" from corrupted/partial models.
             def run_with_fallback(path: str):
                 errors: list[str] = []
+                param_summary = {
+                    "det": params.get("det_model_path"),
+                    "rec": params.get("rec_model_path"),
+                    "dict": params.get("rec_char_dict_path"),
+                    "cls": params.get("cls_model_path"),
+                }
                 # First try with resolved params (preferred PP-OCRv5 models)
                 try:
                     ocr = RapidOCR(params=params or None)
                     out = ocr(path)
-                    return out, "custom", errors
+                    return out, "custom", errors, param_summary
                 except Exception as e:
-                    errors.append(f"custom_params_failed: {e}")
+                    errors.append(f"custom_params_failed: {e}; params={param_summary}")
                     # Fallback to RapidOCR defaults (letting RapidOCR auto-manage models)
                     try:
                         ocr = RapidOCR()
                         out = ocr(path)
-                        return out, "fallback_default", errors
+                        return out, "fallback_default", errors, param_summary
                     except Exception as e2:
                         errors.append(f"default_failed: {e2}")
                         raise RuntimeError("; ".join(errors))
 
             def run_one(path: str):
-                out, backend, backend_errors = run_with_fallback(path)
+                out, backend, backend_errors, param_summary = run_with_fallback(path)
                 txts = getattr(out, "txts", None) or ()
                 scores = getattr(out, "scores", None) or ()
                 boxes = getattr(out, "boxes", None)
@@ -351,6 +357,7 @@ def main():
                     "score": score_lines(lines),
                     "backend": backend,
                     "backend_errors": backend_errors,
+                    "params": param_summary,
                 }
 
             multipass = safe_int(os.getenv("SBM_RAPIDOCR_MULTIPASS"), 1 if args.profile == "pdf" else 0)
@@ -393,19 +400,20 @@ def main():
                             best = r
                             best_variant = name
 
-        payload = {
-            "success": True,
-            "text": best["text"],
-            "lines": best["lines"],
-            "line_count": best["line_count"],
-            "engine": f"rapidocr-{rapidocr_version}",
-            "profile": args.profile,
-            "variant": best_variant,
-            "backend": best.get("backend", ""),
-            "backend_errors": best.get("backend_errors", []),
-        }
-        if debug:
-            payload["variants"] = variants_debug
+            payload = {
+                "success": True,
+                "text": best["text"],
+                "lines": best["lines"],
+                "line_count": best["line_count"],
+                "engine": f"rapidocr-{rapidocr_version}",
+                "profile": args.profile,
+                "variant": best_variant,
+                "backend": best.get("backend", ""),
+                "backend_errors": best.get("backend_errors", []),
+                "params": best.get("params", {}),
+            }
+            if debug:
+                payload["variants"] = variants_debug
 
         print(json.dumps(payload, ensure_ascii=False))
         return
