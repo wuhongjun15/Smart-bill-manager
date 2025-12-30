@@ -402,7 +402,7 @@ def main():
                     "Det.ocr_version": OCRVersion.PPOCRV5,
                     "Rec.engine_type": EngineType.ONNXRUNTIME,
                     "Rec.lang_type": LangRec.CH,
-                    "Rec.model_type": ModelType.SERVER,
+                    "Rec.model_type": ModelType.MOBILE,
                     "Rec.ocr_version": OCRVersion.PPOCRV5,
                 }
             )
@@ -445,34 +445,31 @@ def main():
             # "list index out of range" from corrupted/partial models.
             def run_with_fallback(path: str):
                 errors: list[str] = []
-                # For payment screenshots (profile=default), angle classification (cls) is usually unnecessary
-                # and costs noticeable latency. Disable it by default to speed up OCR.
-                use_cls = None if args.profile != "default" else False
                 param_summary = {
                     "rapidocr": rapidocr_version,
                     "ocr_version": "PP-OCRv5",
                     "det": "onnxruntime:PP-OCRv5:ch:mobile",
-                    "rec": "onnxruntime:PP-OCRv5:ch:server",
-                    "cls": "disabled" if use_cls is False else "default",
+                    "rec": "onnxruntime:PP-OCRv5:ch:mobile",
+                    "cls": "default",
                     "dict": "auto",
                     "model_dir": str(InferSession.DEFAULT_MODEL_PATH) if model_data_dir else "",
                 }
                 # First try with forced PP-OCRv5 params
                 try:
                     ocr = RapidOCR(params=params or None)
-                    out = ocr(path, use_cls=use_cls)
+                    out = ocr(path)
                     return out, "custom", errors, param_summary
                 except Exception as e:
                     errors.append(f"custom_params_failed: {e}; params={param_summary}")
                     # Fallback to RapidOCR defaults (letting RapidOCR auto-manage models)
                     try:
                         ocr = RapidOCR()
-                        out = ocr(path, use_cls=use_cls)
+                        out = ocr(path)
                         fb_summary = dict(param_summary)
                         fb_summary["ocr_version"] = "default"
                         fb_summary["det"] = "default"
                         fb_summary["rec"] = "default"
-                        fb_summary["cls"] = "disabled" if use_cls is False else "default"
+                        fb_summary["cls"] = "default"
                         fb_summary["dict"] = "default"
                         return out, "fallback_default", errors, fb_summary
                     except Exception as e2:
