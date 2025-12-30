@@ -1948,6 +1948,11 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 		if v == "" || v == "备注" || v == "说明" {
 			return true
 		}
+		// Generic/non-merchant phrases often appearing as "商品" values in WeChat bill detail.
+		switch v {
+		case "商户收款", "二维码收款", "商户消费", "收款", "付款", "转账", "转账收款":
+			return true
+		}
 		if isWeChatBillDetailLabel(v) {
 			return true
 		}
@@ -1963,6 +1968,75 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 			}
 		}
 		return false
+	}
+
+	extractWeChatTitleMerchant := func(lines []string) (string, bool) {
+		// Heuristic for WeChat bill detail:
+		// merchant/store name is usually the last non-empty line before the main amount line (e.g. "-3420.00").
+		amountLineRe := regexp.MustCompile(`^\s*[-−]\s*[¥￥]?\s*[\d,]+(?:\.\d{1,2})?\s*$`)
+		timeOnlyRe := regexp.MustCompile(`^\d{1,2}:\d{2}$`)
+		isBadTitle := func(v string) bool {
+			v = sanitizePaymentField(v)
+			if merchantIsBad(v) {
+				return true
+			}
+			if timeOnlyRe.MatchString(v) {
+				return true
+			}
+			// Avoid picking obvious UI headers.
+			switch v {
+			case "全部账单", "已支付", "微信支付":
+				return true
+			}
+			// Avoid picking a pure amount line or a pure numeric id.
+			if amountLineRe.MatchString(v) {
+				return true
+			}
+			digits := 0
+			nonDigits := 0
+			for _, r := range v {
+				if unicode.IsDigit(r) {
+					digits++
+				} else if !unicode.IsSpace(r) {
+					nonDigits++
+				}
+			}
+			if nonDigits == 0 && digits >= 8 {
+				return true
+			}
+			return false
+		}
+
+		amountIdx := -1
+		for i, raw := range lines {
+			line := sanitizePaymentField(raw)
+			if amountLineRe.MatchString(line) {
+				amountIdx = i
+				break
+			}
+		}
+		if amountIdx <= 0 {
+			return "", false
+		}
+
+		for j := amountIdx - 1; j >= 0 && j >= amountIdx-6; j-- {
+			cand := sanitizePaymentField(lines[j])
+			if cand == "" {
+				continue
+			}
+			if isBadTitle(cand) {
+				continue
+			}
+			// Prefer names that look like a shop/store.
+			if merchantGenericRegex.MatchString(cand) || strings.Contains(cand, "店") || strings.Contains(cand, "超市") || strings.Contains(cand, "酒行") {
+				return cand, true
+			}
+			// Otherwise still accept short CJK merchant-like strings.
+			if len([]rune(cand)) >= 2 && len([]rune(cand)) <= 30 && !containsDigit(cand) {
+				return cand, true
+			}
+		}
+		return "", false
 	}
 
 	// WeChat QR transfer style: "扫二维码付款-给XXXX"
@@ -1991,6 +2065,18 @@ func (s *OCRService) parseWeChatPay(text string, data *PaymentExtractedData) {
 					data.MerchantConfidence = 0.9
 					break
 				}
+			}
+		}
+	}
+
+	// Title/store name near the amount line (WeChat bill detail).
+	if data.Merchant == nil {
+		if m, ok := extractWeChatTitleMerchant(lines); ok {
+			merchant := sanitizePaymentField(m)
+			if !merchantIsBad(merchant) {
+				data.Merchant = &merchant
+				data.MerchantSource = "wechat_title"
+				data.MerchantConfidence = 0.92
 			}
 		}
 	}

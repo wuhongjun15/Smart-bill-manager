@@ -169,8 +169,9 @@ func TestParsePaymentScreenshot_WeChatBillDetail_LabelListThenValues(t *testing.
 	if data.Merchant == nil {
 		t.Fatalf("expected Merchant, got nil")
 	}
-	if *data.Merchant != "上海市徐汇区闽辉杂货店" {
-		t.Fatalf("expected Merchant=上海市徐汇区闽辉杂货店, got %q", *data.Merchant)
+	// Prefer the user-facing store title ("闽辉超市") over the legal full name.
+	if *data.Merchant != "闽辉超市" {
+		t.Fatalf("expected Merchant=闽辉超市, got %q", *data.Merchant)
 	}
 
 	if data.PaymentMethod == nil {
@@ -228,6 +229,37 @@ func TestParsePaymentScreenshot_WeChatBillDetail_PaymentMethodShouldNotBeBarcode
 	}
 	if *data.PaymentMethod != "招商银行信用卡(2506)" {
 		t.Fatalf("expected PaymentMethod=招商银行信用卡(2506), got %q", *data.PaymentMethod)
+	}
+}
+
+func TestParsePaymentScreenshot_WeChatBillDetail_MerchantShouldPreferTitleOverGenericItem(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `微信支付
+11:26
+全部账单
+泰隆银行
+华致酒行东苑新天地广场店
+-3420.00
+当前状态：支付成功
+支付时间：2025年12月13日11:26:26
+商品：商户收款
+商户全称：上海鑫之河商贸有限公司
+收单机构：浙江泰隆商业银行股份有限公司
+支付方式：招商银行信用卡(2506)
+交易单号：4200002975202512132611185393
+商户单号：30220618110444881657953514298117
+`
+
+	data, err := service.ParsePaymentScreenshot(sampleText)
+	if err != nil {
+		t.Fatalf("ParsePaymentScreenshot returned error: %v", err)
+	}
+	if data.Merchant == nil {
+		t.Fatalf("expected Merchant, got nil")
+	}
+	if *data.Merchant != "华致酒行东苑新天地广场店" {
+		t.Fatalf("expected Merchant=华致酒行东苑新天地广场店, got %q", *data.Merchant)
 	}
 }
 
