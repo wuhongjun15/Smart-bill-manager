@@ -1162,6 +1162,35 @@ onMounted(() => {
   gap: 10px;
 }
 
+.field {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.field label {
+  display: block;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  padding-left: 4px;
+  overflow: visible;
+}
+
+.field :deep(.p-inputtext),
+.field :deep(.p-inputnumber),
+.field :deep(.p-datepicker),
+.field :deep(.p-textarea),
+.field :deep(.p-inputtextarea) {
+  width: 100%;
+}
+
+.field :deep(.p-datepicker-input) {
+  width: 100%;
+}
+
 .filecell {
   display: flex;
   align-items: center;
