@@ -1726,12 +1726,12 @@ func (s *OCRService) ParsePaymentScreenshot(text string) (*PaymentExtractedData,
 	text = strings.TrimSpace(text)
 
 	// Try to detect payment platform and extract accordingly
-	if s.isWeChatPay(text) {
-		s.parseWeChatPay(text, data)
-	} else if s.isJDBillDetail(text) {
+	if s.isJDBillDetail(text) {
 		s.parseJDBillDetail(text, data)
 	} else if s.isUnionPayBillDetail(text) {
 		s.parseUnionPayBillDetail(text, data)
+	} else if s.isWeChatPay(text) {
+		s.parseWeChatPay(text, data)
 	} else if s.isAlipay(text) {
 		s.parseAlipay(text, data)
 	} else if s.isBankTransfer(text) {
@@ -1829,7 +1829,8 @@ func (s *OCRService) isJDBillDetail(text string) bool {
 	if strings.Contains(text, "京东") || strings.Contains(text, "JD") {
 		return true
 	}
-	if strings.Contains(text, "总订单编号") || strings.Contains(text, "商户单号") {
+	// WeChat bill detail also has "商户单号" - do NOT use that as a JD signal.
+	if strings.Contains(text, "总订单编号") {
 		return true
 	}
 	return false

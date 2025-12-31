@@ -342,6 +342,48 @@ func TestParsePaymentScreenshot_JDPay_BillDetail_ShouldExtractTimeAndOrder(t *te
 	}
 }
 
+func TestParsePaymentScreenshot_JDPay_BillDetail_WithWeChatPayMethod_ShouldStillExtractTime(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `8:22
+账单详情
+京东平台商户
+-622.00
+交易成功
+支付方式
+微信支付
+创建时间
+2025-12-22 17:23:17
+总订单编号
+3355417015939170
+商户单号
+6183642512221723110001239971
+`
+
+	data, err := service.ParsePaymentScreenshot(sampleText)
+	if err != nil {
+		t.Fatalf("ParsePaymentScreenshot returned error: %v", err)
+	}
+	if data.Amount == nil || *data.Amount != 622.00 {
+		t.Fatalf("expected Amount=622.00, got %#v", data.Amount)
+	}
+	if data.PaymentMethod == nil || *data.PaymentMethod != "微信支付" {
+		t.Fatalf("expected PaymentMethod=微信支付, got %#v", data.PaymentMethod)
+	}
+	if data.PaymentMethodSource != "jd_method" {
+		t.Fatalf("expected PaymentMethodSource=jd_method, got %q", data.PaymentMethodSource)
+	}
+	if data.TransactionTime == nil || *data.TransactionTime != "2025-12-22 17:23:17" {
+		t.Fatalf("expected TransactionTime=2025-12-22 17:23:17, got %#v", data.TransactionTime)
+	}
+	if data.TransactionTimeSource != "jd_time" {
+		t.Fatalf("expected TransactionTimeSource=jd_time, got %q", data.TransactionTimeSource)
+	}
+	if data.OrderNumber == nil || *data.OrderNumber != "6183642512221723110001239971" {
+		t.Fatalf("expected OrderNumber=6183642512221723110001239971, got %#v", data.OrderNumber)
+	}
+}
+
 func TestParsePaymentScreenshot_UnionPay_BillDetail_ShouldUseUnionPaySources(t *testing.T) {
 	service := NewOCRService()
 
