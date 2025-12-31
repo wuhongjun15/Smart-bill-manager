@@ -226,19 +226,6 @@
             </div>
 
             <div class="col-12 field">
-              <label for="ocr_order">&#20132;&#26131;&#21333;&#21495; (&#21487;&#36873;)</label>
-              <InputText id="ocr_order" v-model.trim="ocrForm.order_number" />
-              <small
-                v-if="ocrResult?.order_number_source || ocrResult?.order_number_confidence"
-                class="sbm-ocr-hint"
-                :class="confidenceClass(ocrResult?.order_number_confidence)"
-              >
-                &#26469;&#28304;&#65306;{{ formatSourceLabel(ocrResult?.order_number_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="ocrResult?.order_number_confidence">（置信度：{{ confidenceLabel(ocrResult?.order_number_confidence) }}）</span>
-              </small>
-            </div>
-
-            <div class="col-12 field">
               <label for="ocr_desc">&#22791;&#27880;</label>
               <Textarea id="ocr_desc" v-model="ocrForm.description" autoResize rows="3" />
             </div>
@@ -555,7 +542,6 @@ interface OcrExtractedData {
   merchant?: string
   transaction_time?: string
   payment_method?: string
-  order_number?: string
   amount_source?: string
   amount_confidence?: number
   merchant_source?: string
@@ -564,8 +550,6 @@ interface OcrExtractedData {
   transaction_time_confidence?: number
   payment_method_source?: string
   payment_method_confidence?: number
-  order_number_source?: string
-  order_number_confidence?: number
   raw_text?: string
   pretty_text?: string
 }
@@ -672,7 +656,6 @@ const ocrForm = reactive({
   payment_method: '',
   description: '',
   transaction_time: null as Date | null,
-  order_number: '',
 })
 const ocrErrors = reactive({ amount: '', transaction_time: '' })
 
@@ -804,7 +787,6 @@ const handleScreenshotUpload = async () => {
       ocrForm.amount = extracted.amount || 0
       ocrForm.merchant = extracted.merchant || ''
       ocrForm.payment_method = normalizePaymentMethodText(extracted.payment_method || '')
-      ocrForm.order_number = extracted.order_number || ''
       if (extracted.transaction_time) {
         const t = dayjs(extracted.transaction_time)
         ocrForm.transaction_time = t.isValid() ? t.toDate() : null
@@ -905,7 +887,6 @@ const resetScreenshotUploadState = () => {
   ocrForm.payment_method = ''
   ocrForm.description = ''
   ocrForm.transaction_time = null
-  ocrForm.order_number = ''
   uploadScreenshotModalVisible.value = false
 }
 
