@@ -1050,7 +1050,7 @@ const formatInvoiceDate = (date?: string) => {
   if (!date) return '-'
   const parsed = dayjs(date)
   if (parsed.isValid()) return parsed.format('YYYY-MM-DD')
-  const m = String(date).match(/(\\d{4})\\D+(\\d{1,2})\\D+(\\d{1,2})/)
+  const m = String(date).match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/)
   if (m) {
     const y = m[1]
     const mm = m[2].padStart(2, '0')
@@ -1065,7 +1065,7 @@ const parseInvoiceDateToDayjs = (date?: string | null) => {
   if (!raw) return null
   const direct = dayjs(raw)
   if (direct.isValid()) return direct
-  const m = raw.match(/(\\d{4})\\D+(\\d{1,2})\\D+(\\d{1,2})/)
+  const m = raw.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/)
   if (!m) return null
   const y = m[1]
   const mm = m[2].padStart(2, '0')
