@@ -1,5 +1,10 @@
 import api from './auth'
-import type { Invoice, Payment, ApiResponse } from '@/types'
+import type { Invoice, Payment, ApiResponse, DedupHint } from '@/types'
+
+type UploadInvoiceResult = {
+  invoice: Invoice
+  dedup?: DedupHint | null
+}
 
 export const invoiceApi = {
   getAll: (params?: { limit?: number; offset?: number }) =>
@@ -15,7 +20,7 @@ export const invoiceApi = {
     const formData = new FormData()
     formData.append('file', file)
     if (paymentId) formData.append('payment_id', paymentId)
-    return api.post<ApiResponse<Invoice>>('/invoices/upload', formData, {
+    return api.post<ApiResponse<UploadInvoiceResult>>('/invoices/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
@@ -29,7 +34,7 @@ export const invoiceApi = {
     })
   },
   
-  update: (id: string, invoice: (Partial<Invoice> & { confirm?: boolean })) =>
+  update: (id: string, invoice: (Partial<Invoice> & { confirm?: boolean; force_duplicate_save?: boolean })) =>
     api.put<ApiResponse<void>>(`/invoices/${id}`, invoice),
   
   delete: (id: string) =>

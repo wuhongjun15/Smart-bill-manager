@@ -77,6 +77,7 @@ func (s *PaymentService) Create(input CreatePaymentInput) (*models.Payment, erro
 		TransactionTimeTs: unixMilli(t),
 		ScreenshotPath:    screenshotPath,
 		ExtractedData:     extractedData,
+		DedupStatus:       DedupStatusOK,
 		TripAssignSrc:     assignSrcAuto,
 		TripAssignState:   assignStateNoMatch,
 	}
@@ -124,13 +125,13 @@ func (s *PaymentService) GetAll(filter PaymentFilterInput) ([]models.Payment, er
 	}
 
 	return s.repo.FindAll(repository.PaymentFilter{
-		Limit:     filter.Limit,
-		Offset:    filter.Offset,
-		StartDate: filter.StartDate,
-		EndDate:   filter.EndDate,
-		StartTs:   startTs,
-		EndTs:     endTs,
-		Category:  filter.Category,
+		Limit:        filter.Limit,
+		Offset:       filter.Offset,
+		StartDate:    filter.StartDate,
+		EndDate:      filter.EndDate,
+		StartTs:      startTs,
+		EndTs:        endTs,
+		Category:     filter.Category,
 		IncludeDraft: filter.IncludeDraft,
 	})
 }
@@ -186,16 +187,17 @@ func (s *PaymentService) GetByID(id string) (*models.Payment, error) {
 }
 
 type UpdatePaymentInput struct {
-	Amount          *float64 `json:"amount"`
-	Merchant        *string  `json:"merchant"`
-	Category        *string  `json:"category"`
-	PaymentMethod   *string  `json:"payment_method"`
-	Description     *string  `json:"description"`
-	TransactionTime *string  `json:"transaction_time"`
-	TripID          *string  `json:"trip_id"`
-	TripAssignSrc   *string  `json:"trip_assignment_source"`
-	BadDebt         *bool    `json:"bad_debt"`
-	Confirm         *bool    `json:"confirm"`
+	Amount             *float64 `json:"amount"`
+	Merchant           *string  `json:"merchant"`
+	Category           *string  `json:"category"`
+	PaymentMethod      *string  `json:"payment_method"`
+	Description        *string  `json:"description"`
+	TransactionTime    *string  `json:"transaction_time"`
+	TripID             *string  `json:"trip_id"`
+	TripAssignSrc      *string  `json:"trip_assignment_source"`
+	BadDebt            *bool    `json:"bad_debt"`
+	Confirm            *bool    `json:"confirm"`
+	ForceDuplicateSave *bool    `json:"force_duplicate_save"`
 }
 
 func (s *PaymentService) Update(id string, input UpdatePaymentInput) error {
@@ -211,6 +213,55 @@ func (s *PaymentService) Update(id string, input UpdatePaymentInput) error {
 			return err
 		}
 		before = p
+	}
+
+	// On confirm, enforce dedup rules:
+	// - hash duplicate: hard block (no override)
+	// - amount+time duplicate: allow only with force_duplicate_save
+	if confirming && before != nil {
+		force := input.ForceDuplicateSave != nil && *input.ForceDuplicateSave
+
+		hash := ""
+		if before.FileSHA256 != nil {
+			hash = strings.TrimSpace(*before.FileSHA256)
+		}
+		if hash != "" {
+			if existing, err := FindPaymentByFileSHA256(hash, id); err != nil {
+				return err
+			} else if existing != nil {
+				return &DuplicateError{
+					Kind:            "hash_duplicate",
+					Reason:          "file_sha256",
+					Entity:          "payment",
+					ExistingID:      existing.ID,
+					ExistingIsDraft: existing.IsDraft,
+				}
+			}
+		}
+
+		nextAmount := before.Amount
+		if input.Amount != nil {
+			nextAmount = *input.Amount
+		}
+		nextTs := before.TransactionTimeTs
+		if input.TransactionTime != nil {
+			if t, err := parseRFC3339ToUTC(*input.TransactionTime); err == nil {
+				nextTs = unixMilli(t)
+			}
+		}
+
+		cands, err := FindPaymentCandidatesByAmountTime(nextAmount, nextTs, id, 5*time.Minute, 5)
+		if err != nil {
+			return err
+		}
+		if len(cands) > 0 && !force {
+			return &DuplicateError{
+				Kind:       "suspected_duplicate",
+				Reason:     "amount_time",
+				Entity:     "payment",
+				Candidates: cands,
+			}
+		}
 	}
 
 	data := make(map[string]interface{})
@@ -287,6 +338,37 @@ func (s *PaymentService) Update(id string, input UpdatePaymentInput) error {
 	}
 	if input.Confirm != nil && *input.Confirm {
 		data["is_draft"] = false
+	}
+
+	// Persist dedup status changes on confirm.
+	if confirming && before != nil {
+		force := input.ForceDuplicateSave != nil && *input.ForceDuplicateSave
+
+		nextAmount := before.Amount
+		if input.Amount != nil {
+			nextAmount = *input.Amount
+		}
+		nextTs := before.TransactionTimeTs
+		if input.TransactionTime != nil {
+			if t, err := parseRFC3339ToUTC(*input.TransactionTime); err == nil {
+				nextTs = unixMilli(t)
+			}
+		}
+
+		cands, err := FindPaymentCandidatesByAmountTime(nextAmount, nextTs, id, 5*time.Minute, 5)
+		if err == nil && len(cands) > 0 {
+			if force {
+				data["dedup_status"] = DedupStatusForced
+				data["dedup_ref_id"] = cands[0].ID
+			} else {
+				// Should have been blocked above, but keep safe default.
+				data["dedup_status"] = DedupStatusSuspected
+				data["dedup_ref_id"] = cands[0].ID
+			}
+		} else {
+			data["dedup_status"] = DedupStatusOK
+			data["dedup_ref_id"] = nil
+		}
 	}
 
 	if len(data) == 0 {
@@ -372,6 +454,7 @@ func (s *PaymentService) GetStats(startDate, endDate string) (*models.PaymentSta
 // CreateFromScreenshot creates a payment from a screenshot with OCR
 type CreateFromScreenshotInput struct {
 	ScreenshotPath string
+	FileSHA256     *string
 }
 
 // CreateFromScreenshot creates a payment from a screenshot with OCR.
@@ -431,9 +514,11 @@ func (s *PaymentService) CreateFromScreenshot(input CreateFromScreenshotInput) (
 		TransactionTime:   utcTimeStr,
 		TransactionTimeTs: unixMilli(payTime),
 		ScreenshotPath:    &input.ScreenshotPath,
+		FileSHA256:        input.FileSHA256,
 		ExtractedData:     extractedDataJSON,
 		TripAssignSrc:     assignSrcAuto,
 		TripAssignState:   assignStateNoMatch,
+		DedupStatus:       DedupStatusOK,
 	}
 
 	// Set amount if extracted
@@ -450,6 +535,19 @@ func (s *PaymentService) CreateFromScreenshot(input CreateFromScreenshotInput) (
 	db := database.GetDB()
 	if err := db.Create(payment).Error; err != nil {
 		return nil, nil, err
+	}
+
+	// Mark suspected duplicates for UI (amount+time) if we have a meaningful timestamp.
+	if payment.Amount > 0 && payment.TransactionTimeTs > 0 {
+		if cands, err := FindPaymentCandidatesByAmountTime(payment.Amount, payment.TransactionTimeTs, payment.ID, 5*time.Minute, 5); err == nil && len(cands) > 0 {
+			payment.DedupStatus = DedupStatusSuspected
+			ref := cands[0].ID
+			payment.DedupRefID = &ref
+			_ = db.Model(&models.Payment{}).Where("id = ?", payment.ID).Updates(map[string]interface{}{
+				"dedup_status": DedupStatusSuspected,
+				"dedup_ref_id": ref,
+			}).Error
+		}
 	}
 
 	if warn != nil {

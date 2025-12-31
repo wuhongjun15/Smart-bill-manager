@@ -1,11 +1,16 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"smart-bill-manager/internal/services"
@@ -107,6 +112,10 @@ func (h *PaymentHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.paymentService.Update(id, input); err != nil {
+		if de, ok := services.AsDuplicateError(err); ok {
+			utils.ErrorData(c, 409, "检测到重复，请确认是否仍要保存", de, err)
+			return
+		}
 		utils.Error(c, 404, "支付记录不存在或更新失败", err)
 		return
 	}
@@ -119,7 +128,7 @@ func (h *PaymentHandler) Delete(c *gin.Context) {
 
 	payment, err := h.paymentService.GetByID(id)
 	if err != nil {
-		utils.Error(c, 404, "æ”¯ä»˜è®°å½•ä¸å­˜åœ?", nil)
+		utils.Error(c, 404, "支付记录不存在", nil)
 		return
 	}
 
@@ -127,7 +136,7 @@ func (h *PaymentHandler) Delete(c *gin.Context) {
 	if payment.ScreenshotPath != nil && *payment.ScreenshotPath != "" {
 		if absPath, err := resolveUploadsFilePath(h.uploadsDir, *payment.ScreenshotPath); err == nil {
 			if rmErr := os.Remove(absPath); rmErr != nil && !os.IsNotExist(rmErr) {
-				utils.Error(c, 500, "åˆ é™¤æ”¯ä»˜æˆªå›¾æ–‡ä»¶å¤±è´¥", rmErr)
+				utils.Error(c, 500, "删除支付截图文件失败", rmErr)
 				return
 			}
 		}
@@ -148,20 +157,16 @@ func (h *PaymentHandler) UploadScreenshot(c *gin.Context) {
 		return
 	}
 
-	// Check file type (jpg, jpeg, png)
-	ext := filepath.Ext(file.Filename)
+	ext := strings.ToLower(filepath.Ext(file.Filename))
 	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
 		utils.Error(c, 400, "只支持 JPG、JPEG、PNG 格式的图片", nil)
 		return
 	}
-
-	// Check file size (10MB)
 	if file.Size > 10*1024*1024 {
 		utils.Error(c, 400, "文件大小不能超过10MB", nil)
 		return
 	}
 
-	// Ensure uploads directory exists
 	uploadsDir := h.uploadsDir
 	if uploadsDir == "" {
 		uploadsDir = "uploads"
@@ -170,34 +175,73 @@ func (h *PaymentHandler) UploadScreenshot(c *gin.Context) {
 		wd, _ := os.Getwd()
 		uploadsDir = filepath.Join(wd, uploadsDir)
 	}
-
 	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
 		utils.Error(c, 500, "创建上传目录失败", err)
 		return
 	}
 
-	// Generate unique filename
 	filename := utils.GenerateUUID() + ext
 	filePath := filepath.Join(uploadsDir, filename)
 
-	// Save file
-	if err := c.SaveUploadedFile(file, filePath); err != nil {
+	src, err := file.Open()
+	if err != nil {
+		utils.Error(c, 500, "打开上传文件失败", err)
+		return
+	}
+	defer src.Close()
+
+	dst, err := os.Create(filePath)
+	if err != nil {
 		utils.Error(c, 500, "保存文件失败", err)
 		return
 	}
+	defer dst.Close()
 
-	// Create relative path for database storage
-	// Always use forward slashes and "uploads/" prefix for consistency
+	hasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(dst, hasher), src); err != nil {
+		_ = os.Remove(filePath)
+		utils.Error(c, 500, "保存文件失败", err)
+		return
+	}
+	fileSHA := hex.EncodeToString(hasher.Sum(nil))
+
+	if existing, err := services.FindPaymentByFileSHA256(fileSHA, ""); err != nil {
+		_ = os.Remove(filePath)
+		utils.Error(c, 500, "重复检查失败", err)
+		return
+	} else if existing != nil {
+		_ = os.Remove(filePath)
+		utils.ErrorData(c, 409, "文件内容重复，已存在记录", gin.H{
+			"kind":              "hash_duplicate",
+			"entity":            "payment",
+			"existing_id":       existing.ID,
+			"existing_is_draft": existing.IsDraft,
+		}, nil)
+		return
+	}
+
 	relPath := "uploads/" + filename
 
-	// Process screenshot with OCR (requires valid transaction time)
-	payment, extracted, err := h.paymentService.CreateFromScreenshot(services.CreateFromScreenshotInput{
+	payment, extracted, ocrErr := h.paymentService.CreateFromScreenshot(services.CreateFromScreenshotInput{
 		ScreenshotPath: relPath,
+		FileSHA256:     &fileSHA,
 	})
-	if err != nil {
+
+	dedup := interface{}(nil)
+	if payment != nil && payment.DedupStatus == services.DedupStatusSuspected {
+		if cands, derr := services.FindPaymentCandidatesByAmountTime(payment.Amount, payment.TransactionTimeTs, payment.ID, 5*time.Minute, 5); derr == nil && len(cands) > 0 {
+			dedup = gin.H{
+				"kind":       "suspected_duplicate",
+				"reason":     "amount_time",
+				"candidates": cands,
+			}
+		}
+	}
+
+	if ocrErr != nil {
 		// Allow continuing the normal OCR flow even if transaction time is missing/unparseable.
 		// Keep the uploaded screenshot so the user can manually correct fields in the UI.
-		if errors.Is(err, services.ErrMissingTransactionTime) {
+		if errors.Is(ocrErr, services.ErrMissingTransactionTime) {
 			if extracted == nil {
 				extracted = &services.PaymentExtractedData{RawText: "", PrettyText: ""}
 			}
@@ -206,24 +250,21 @@ func (h *PaymentHandler) UploadScreenshot(c *gin.Context) {
 				"extracted":       extracted,
 				"screenshot_path": relPath,
 				"ocr_error":       "missing transaction time",
+				"dedup":           dedup,
 			})
 			return
 		}
 
-		// Clean up the uploaded file on error
 		_ = os.Remove(filePath)
-		if errors.Is(err, services.ErrMissingTransactionTime) {
-			utils.Error(c, 400, "无法识别支付时间，请重新截图或手动录入支付记录", err)
-			return
-		}
-		utils.Error(c, 500, "识别支付截图失败", err)
+		utils.Error(c, 500, "识别支付截图失败", ocrErr)
 		return
 	}
 
 	utils.Success(c, 201, "支付截图上传成功", gin.H{
-		"payment":   payment,
-		"extracted": extracted,
+		"payment":         payment,
+		"extracted":       extracted,
 		"screenshot_path": relPath,
+		"dedup":           dedup,
 	})
 }
 
@@ -275,7 +316,7 @@ func (h *PaymentHandler) SuggestInvoices(c *gin.Context) {
 
 	invoices, err := h.paymentService.SuggestInvoices(id, limit, debug)
 	if err != nil {
-		utils.Error(c, 500, "èŽ·å–å»ºè®®å‘ç¥¨å¤±è´¥", err)
+		utils.Error(c, 500, "获取建议发票失败", err)
 		return
 	}
 
@@ -283,7 +324,6 @@ func (h *PaymentHandler) SuggestInvoices(c *gin.Context) {
 	utils.SuccessData(c, invoices)
 }
 
-// ReparseScreenshot re-parses the payment screenshot with OCR
 func (h *PaymentHandler) ReparseScreenshot(c *gin.Context) {
 	id := c.Param("id")
 
@@ -292,13 +332,11 @@ func (h *PaymentHandler) ReparseScreenshot(c *gin.Context) {
 		utils.Error(c, 404, "支付记录不存在", nil)
 		return
 	}
-
 	if payment.ScreenshotPath == nil || *payment.ScreenshotPath == "" {
 		utils.Error(c, 400, "该支付记录没有截图", nil)
 		return
 	}
 
-	// Re-parse the screenshot
 	extracted, err := h.paymentService.ReparseScreenshot(id)
 	if err != nil {
 		utils.Error(c, 500, "重新解析失败", err)

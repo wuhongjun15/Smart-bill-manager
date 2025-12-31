@@ -20,7 +20,10 @@ type Payment struct {
 	TransactionTime   string    `json:"transaction_time" gorm:"not null"`
 	TransactionTimeTs int64     `json:"transaction_time_ts" gorm:"not null;default:0;index"`
 	ScreenshotPath    *string   `json:"screenshot_path"`
+	FileSHA256        *string   `json:"file_sha256" gorm:"index"`
 	ExtractedData     *string   `json:"extracted_data"`
+	DedupStatus       string    `json:"dedup_status" gorm:"not null;default:ok;index"`
+	DedupRefID        *string   `json:"dedup_ref_id" gorm:"index"`
 	CreatedAt         time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
 

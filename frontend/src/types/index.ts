@@ -14,7 +14,10 @@ export interface Payment {
   transaction_time_ts?: number;
   invoiceCount?: number;
   screenshot_path?: string;
+  file_sha256?: string;
   extracted_data?: string;
+  dedup_status?: string;
+  dedup_ref_id?: string;
   created_at?: string;
 }
 
@@ -90,6 +93,7 @@ export interface Invoice {
   original_name: string;
   file_path: string;
   file_size?: number;
+  file_sha256?: string;
   invoice_number?: string;
   invoice_date?: string;
   amount?: number;
@@ -102,7 +106,30 @@ export interface Invoice {
   parse_error?: string;
   raw_text?: string;
   source?: string;
+  dedup_status?: string;
+  dedup_ref_id?: string;
   created_at?: string;
+}
+
+export interface DedupCandidate {
+  id: string;
+  is_draft: boolean;
+  amount?: number;
+  transaction_time?: string;
+  merchant?: string;
+  invoice_number?: string;
+  invoice_date?: string;
+  seller_name?: string;
+  created_at?: string;
+}
+
+export interface DedupHint {
+  kind: 'hash_duplicate' | 'suspected_duplicate' | string;
+  reason?: string;
+  entity?: 'payment' | 'invoice' | string;
+  existing_id?: string;
+  existing_is_draft?: boolean;
+  candidates?: DedupCandidate[];
 }
 
 export interface EmailConfig {

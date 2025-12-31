@@ -13,6 +13,7 @@ type Invoice struct {
 	OriginalName  string    `json:"original_name" gorm:"not null"`
 	FilePath      string    `json:"file_path" gorm:"not null"`
 	FileSize      *int64    `json:"file_size"`
+	FileSHA256    *string   `json:"file_sha256" gorm:"index"`
 	InvoiceNumber *string   `json:"invoice_number"`
 	InvoiceDate   *string   `json:"invoice_date"`
 	Amount        *float64  `json:"amount"`
@@ -25,6 +26,8 @@ type Invoice struct {
 	ParseError    *string   `json:"parse_error"`
 	RawText       *string   `json:"raw_text"` // OCR extracted raw text for frontend display
 	Source        string    `json:"source" gorm:"default:upload"`
+	DedupStatus   string    `json:"dedup_status" gorm:"not null;default:ok;index"`
+	DedupRefID    *string   `json:"dedup_ref_id" gorm:"index"`
 	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
 

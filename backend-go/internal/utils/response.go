@@ -33,6 +33,19 @@ func Error(c *gin.Context, statusCode int, message string, err error) {
 	c.JSON(statusCode, resp)
 }
 
+// ErrorData sends an error response with structured data payload (useful for 409 duplicate, etc.)
+func ErrorData(c *gin.Context, statusCode int, message string, data interface{}, err error) {
+	resp := Response{
+		Success: false,
+		Message: message,
+		Data:    data,
+	}
+	if err != nil {
+		resp.Error = err.Error()
+	}
+	c.JSON(statusCode, resp)
+}
+
 // SuccessData sends a success response with only data
 func SuccessData(c *gin.Context, data interface{}) {
 	c.JSON(200, Response{

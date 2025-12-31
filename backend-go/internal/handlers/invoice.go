@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -142,36 +145,62 @@ func (h *InvoiceHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	// Check file type
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 	if !isAllowedInvoiceExt(ext) {
-		utils.Error(c, 400, "只支持PDF或图片格式(PNG/JPG)", nil)
+		utils.Error(c, 400, "只支持 PDF 或图片格式（PNG/JPG）", nil)
 		return
 	}
 
-	// Check file size (20MB)
 	if file.Size > 20*1024*1024 {
 		utils.Error(c, 400, "文件大小不能超过20MB", nil)
 		return
 	}
 
-	// Generate unique filename
-	filename := utils.GenerateUUID() + ext
-	filePath := filepath.Join(h.uploadsDir, filename)
-
-	// Ensure uploads directory exists
 	if err := os.MkdirAll(h.uploadsDir, 0755); err != nil {
 		utils.Error(c, 500, "创建上传目录失败", err)
 		return
 	}
 
-	// Save file
-	if err := c.SaveUploadedFile(file, filePath); err != nil {
+	filename := utils.GenerateUUID() + ext
+	filePath := filepath.Join(h.uploadsDir, filename)
+
+	src, err := file.Open()
+	if err != nil {
+		utils.Error(c, 500, "打开上传文件失败", err)
+		return
+	}
+	defer src.Close()
+
+	dst, err := os.Create(filePath)
+	if err != nil {
 		utils.Error(c, 500, "保存文件失败", err)
 		return
 	}
+	defer dst.Close()
 
-	// Create invoice record
+	hasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(dst, hasher), src); err != nil {
+		_ = os.Remove(filePath)
+		utils.Error(c, 500, "保存文件失败", err)
+		return
+	}
+	fileSHA := hex.EncodeToString(hasher.Sum(nil))
+
+	if existing, err := services.FindInvoiceByFileSHA256(fileSHA, ""); err != nil {
+		_ = os.Remove(filePath)
+		utils.Error(c, 500, "重复检查失败", err)
+		return
+	} else if existing != nil {
+		_ = os.Remove(filePath)
+		utils.ErrorData(c, 409, "文件内容重复，已存在记录", gin.H{
+			"kind":              "hash_duplicate",
+			"entity":            "invoice",
+			"existing_id":       existing.ID,
+			"existing_is_draft": existing.IsDraft,
+		}, nil)
+		return
+	}
+
 	var paymentID *string
 	if pid := c.PostForm("payment_id"); pid != "" {
 		paymentID = &pid
@@ -183,15 +212,34 @@ func (h *InvoiceHandler) Upload(c *gin.Context) {
 		OriginalName: file.Filename,
 		FilePath:     "uploads/" + filename,
 		FileSize:     file.Size,
+		FileSHA256:   &fileSHA,
 		Source:       "upload",
 		IsDraft:      true,
 	})
 	if err != nil {
+		_ = os.Remove(filePath)
 		utils.Error(c, 500, "上传发票失败", err)
 		return
 	}
 
-	utils.Success(c, 201, "发票上传成功", invoice)
+	dedup := interface{}(nil)
+	if invoice != nil && invoice.DedupStatus == services.DedupStatusSuspected && invoice.InvoiceNumber != nil {
+		no := strings.TrimSpace(*invoice.InvoiceNumber)
+		if no != "" {
+			if cands, derr := services.FindInvoiceCandidatesByInvoiceNumber(no, invoice.ID, 5); derr == nil && len(cands) > 0 {
+				dedup = gin.H{
+					"kind":       "suspected_duplicate",
+					"reason":     "invoice_number",
+					"candidates": cands,
+				}
+			}
+		}
+	}
+
+	utils.Success(c, 201, "发票上传成功", gin.H{
+		"invoice": invoice,
+		"dedup":   dedup,
+	})
 }
 
 func (h *InvoiceHandler) UploadMultiple(c *gin.Context) {
@@ -206,13 +254,11 @@ func (h *InvoiceHandler) UploadMultiple(c *gin.Context) {
 		utils.Error(c, 400, "请上传文件", nil)
 		return
 	}
-
 	if len(files) > 10 {
-		utils.Error(c, 400, "最多同时上传10个文件", nil)
+		utils.Error(c, 400, "最多同时上传 10 个文件", nil)
 		return
 	}
 
-	// Ensure uploads directory exists
 	if err := os.MkdirAll(h.uploadsDir, 0755); err != nil {
 		utils.Error(c, 500, "创建上传目录失败", err)
 		return
@@ -223,46 +269,74 @@ func (h *InvoiceHandler) UploadMultiple(c *gin.Context) {
 		paymentID = &pid
 	}
 
-	var invoices []interface{}
+	invoices := make([]interface{}, 0, len(files))
+	skippedDuplicates := 0
+
 	for _, file := range files {
-		// Check file type
 		ext := strings.ToLower(filepath.Ext(file.Filename))
 		if !isAllowedInvoiceExt(ext) {
 			continue
 		}
-
-		// Check file size (20MB)
 		if file.Size > 20*1024*1024 {
 			continue
 		}
 
-		// Generate unique filename
 		filename := utils.GenerateUUID() + ext
 		filePath := filepath.Join(h.uploadsDir, filename)
 
-		// Save file
-		if err := c.SaveUploadedFile(file, filePath); err != nil {
-			continue
-		}
-
-		// Create invoice record
-		invoice, err := h.invoiceService.Create(services.CreateInvoiceInput{
-			PaymentID:    paymentID,
-			Filename:     filename,
-			OriginalName: file.Filename,
-			FilePath:     "uploads/" + filename,
-			FileSize:     file.Size,
-			Source:       "upload",
-			IsDraft:      true,
-		})
+		src, err := file.Open()
 		if err != nil {
 			continue
 		}
+		func() {
+			defer src.Close()
 
-		invoices = append(invoices, invoice)
+			dst, err := os.Create(filePath)
+			if err != nil {
+				return
+			}
+			defer dst.Close()
+
+			hasher := sha256.New()
+			if _, err := io.Copy(io.MultiWriter(dst, hasher), src); err != nil {
+				_ = os.Remove(filePath)
+				return
+			}
+			fileSHA := hex.EncodeToString(hasher.Sum(nil))
+
+			if existing, err := services.FindInvoiceByFileSHA256(fileSHA, ""); err != nil {
+				_ = os.Remove(filePath)
+				return
+			} else if existing != nil {
+				skippedDuplicates++
+				_ = os.Remove(filePath)
+				return
+			}
+
+			invoice, err := h.invoiceService.Create(services.CreateInvoiceInput{
+				PaymentID:    paymentID,
+				Filename:     filename,
+				OriginalName: file.Filename,
+				FilePath:     "uploads/" + filename,
+				FileSize:     file.Size,
+				FileSHA256:   &fileSHA,
+				Source:       "upload",
+				IsDraft:      true,
+			})
+			if err != nil {
+				_ = os.Remove(filePath)
+				return
+			}
+
+			invoices = append(invoices, invoice)
+		}()
 	}
 
-	utils.Success(c, 201, fmt.Sprintf("成功上传 %d 个发票", len(invoices)), invoices)
+	msg := fmt.Sprintf("成功上传 %d 个发票", len(invoices))
+	if skippedDuplicates > 0 {
+		msg = fmt.Sprintf("%s，跳过 %d 个重复文件", msg, skippedDuplicates)
+	}
+	utils.Success(c, 201, msg, invoices)
 }
 
 func (h *InvoiceHandler) Update(c *gin.Context) {
@@ -274,6 +348,10 @@ func (h *InvoiceHandler) Update(c *gin.Context) {
 	}
 
 	if err := h.invoiceService.Update(id, input); err != nil {
+		if de, ok := services.AsDuplicateError(err); ok {
+			utils.ErrorData(c, 409, "检测到重复，请确认是否仍要保存", de, err)
+			return
+		}
 		utils.Error(c, 404, "发票不存在或更新失败", err)
 		return
 	}

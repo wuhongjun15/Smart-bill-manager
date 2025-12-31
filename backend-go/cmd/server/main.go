@@ -82,13 +82,18 @@ func main() {
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_bad_debt ON payments(bad_debt)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_trip_assign_src ON payments(trip_assignment_source)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_trip_assign_state ON payments(trip_assignment_state)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_file_sha256 ON payments(file_sha256)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_dedup_status ON payments(dedup_status)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_trips_time ON trips(start_time, end_time)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_trips_time_ts ON trips(start_time_ts, end_time_ts)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_trips_timezone ON trips(timezone)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_trips_reimburse_status ON trips(reimburse_status)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_trips_bad_debt_locked ON trips(bad_debt_locked)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(invoice_date)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_invoice_number ON invoices(invoice_number)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_bad_debt ON invoices(bad_debt)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_file_sha256 ON invoices(file_sha256)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_dedup_status ON invoices(dedup_status)")
 
 	// Enforce invoice<->payment 1:1 by making each side unique in link table.
 	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_payment_links_invoice_id ON invoice_payment_links(invoice_id)")

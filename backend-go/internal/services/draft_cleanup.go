@@ -145,9 +145,7 @@ func resolveUploadsPathAbs(uploadsDir, storedPath string) string {
 	// Normalize separators for prefix handling.
 	p := strings.ReplaceAll(storedPath, "\\", "/")
 	p = strings.TrimPrefix(p, "/")
-	if strings.HasPrefix(p, "uploads/") {
-		p = strings.TrimPrefix(p, "uploads/")
-	}
+	p = strings.TrimPrefix(p, "uploads/")
 
 	cleanRel := filepath.Clean(p)
 	if cleanRel == "." || cleanRel == ".." || strings.HasPrefix(cleanRel, ".."+string(os.PathSeparator)) {

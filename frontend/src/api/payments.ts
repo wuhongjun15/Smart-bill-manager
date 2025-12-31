@@ -1,11 +1,12 @@
 import api from './auth'
-import type { Payment, Invoice, ApiResponse } from '@/types'
+import type { Payment, Invoice, ApiResponse, DedupHint } from '@/types'
 
 type UploadScreenshotResult = {
   payment: Payment | null
   extracted: any
   screenshot_path: string
   ocr_error?: string
+  dedup?: DedupHint | null
 }
 
 export const paymentApi = {
@@ -21,7 +22,7 @@ export const paymentApi = {
   create: (payment: Omit<Payment, 'id' | 'created_at'>) =>
     api.post<ApiResponse<Payment>>('/payments', payment),
   
-  update: (id: string, payment: (Partial<Payment> & { confirm?: boolean })) =>
+  update: (id: string, payment: (Partial<Payment> & { confirm?: boolean; force_duplicate_save?: boolean })) =>
     api.put<ApiResponse<void>>(`/payments/${id}`, payment),
   
   delete: (id: string) =>

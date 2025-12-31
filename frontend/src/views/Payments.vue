@@ -168,7 +168,10 @@
         </Message>
 
                 <form v-else class="p-fluid" @submit.prevent="handleSaveOcrResult">
-          <div class="grid">
+            <Message v-if="uploadDedup?.kind === 'suspected_duplicate'" severity="warn" :closable="false">
+              检测到疑似重复支付记录（金额 + 时间接近）。如果确认需要保留，可点击保存后选择“仍然保存”。
+            </Message>
+	          <div class="grid">
             <div class="col-12 md:col-6 field">
               <label for="ocr_amount">&#37329;&#39069;</label>
               <InputNumber
@@ -540,7 +543,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { invoiceApi, paymentApi, FILE_BASE_URL } from '@/api'
 import { useNotificationStore } from '@/stores/notifications'
-import type { Invoice, Payment } from '@/types'
+import type { Invoice, Payment, DedupHint } from '@/types'
 
 interface OcrExtractedData {
   amount?: number
@@ -565,6 +568,19 @@ const confirm = useConfirm()
 const route = useRoute()
 const router = useRouter()
 
+const confirmForceSave = (message: string) =>
+  new Promise<boolean>(resolve => {
+    confirm.require({
+      header: '\u7591\u4f3c\u91cd\u590d',
+      message,
+      icon: 'pi pi-exclamation-triangle',
+      acceptLabel: '\u4ecd\u7136\u4fdd\u5b58',
+      rejectLabel: '\u53d6\u6d88',
+      accept: () => resolve(true),
+      reject: () => resolve(false),
+    })
+  })
+
 const loading = ref(false)
 const payments = ref<Payment[]>([])
 const pageSize = ref(10)
@@ -585,6 +601,7 @@ const selectedScreenshotFile = ref<File | null>(null)
 const selectedScreenshotName = ref('')
 const screenshotError = ref('')
 const ocrResult = ref<OcrExtractedData | null>(null)
+const uploadDedup = ref<DedupHint | null>(null)
 const uploadedPaymentId = ref<string | null>(null)
 const uploadedScreenshotPath = ref<string | null>(null)
 const screenshotInput = ref<HTMLInputElement | null>(null)
@@ -827,10 +844,11 @@ const handleScreenshotUpload = async () => {
   try {
     const res = await paymentApi.uploadScreenshot(selectedScreenshotFile.value)
     if (res.data.success && res.data.data) {
-      const { payment, extracted, ocr_error, screenshot_path } = res.data.data as any
+      const { payment, extracted, ocr_error, screenshot_path, dedup } = res.data.data as any
       uploadedPaymentId.value = payment?.id || null
       uploadedScreenshotPath.value = screenshot_path || null
       ocrResult.value = extracted
+      uploadDedup.value = (dedup as DedupHint) || null
       rememberPendingPaymentDraft({ paymentId: uploadedPaymentId.value, screenshotPath: uploadedScreenshotPath.value })
 
       ocrForm.amount = extracted.amount || 0
@@ -874,9 +892,16 @@ const handleScreenshotUpload = async () => {
       }
     }
   } catch (error: unknown) {
-    const err = error as { response?: { data?: { message?: string; error?: string } } }
-    const message = err.response?.data?.message || '\u622A\u56FE\u8BC6\u522B\u5931\u8D25'
-    const detail = err.response?.data?.error
+    const err = error as any
+    const resp = err?.response
+    const data = resp?.data
+    const dup = data?.data as DedupHint | undefined
+    if (resp?.status === 409 && dup?.kind === 'hash_duplicate') {
+      toast.add({ severity: 'warn', summary: '\u6587\u4EF6\u5185\u5BB9\u91CD\u590D\uFF0C\u5DF2\u5B58\u5728\u8BB0\u5F55', life: 4500 })
+      return
+    }
+    const message = data?.message || '\u622A\u56FE\u8BC6\u522B\u5931\u8D25'
+    const detail = data?.error
     toast.add({ severity: 'error', summary: detail ? `${message}\uFF1A${detail}` : message, life: 5000 })
   } finally {
     uploadingScreenshot.value = false
@@ -896,7 +921,27 @@ const handleSaveOcrResult = async () => {
     }
 
     if (uploadedPaymentId.value) {
-      await paymentApi.update(uploadedPaymentId.value, { ...payload, confirm: true })
+      const saveCurrent = async (force: boolean) => {
+        await paymentApi.update(uploadedPaymentId.value as string, {
+          ...payload,
+          confirm: true,
+          force_duplicate_save: force ? true : undefined,
+        })
+      }
+      try {
+        await saveCurrent(false)
+      } catch (error: unknown) {
+        const err = error as any
+        const resp = err?.response
+        const dup = resp?.data?.data as DedupHint | undefined
+        if (resp?.status === 409 && dup?.kind === 'suspected_duplicate') {
+          const ok = await confirmForceSave('检测到疑似重复支付记录（金额 + 时间接近），是否仍然保存？')
+          if (!ok) return
+          await saveCurrent(true)
+        } else {
+          throw error
+        }
+      }
       toast.add({ severity: 'success', summary: '\u652F\u4ED8\u8BB0\u5F55\u66F4\u65B0\u6210\u529F', life: 2000 })
       notifications.add({
         severity: 'success',
@@ -933,6 +978,7 @@ const resetScreenshotUploadState = () => {
   selectedScreenshotName.value = ''
   screenshotError.value = ''
   ocrResult.value = null
+  uploadDedup.value = null
   ocrForm.amount = 0
   ocrForm.merchant = ''
   ocrForm.payment_method = ''

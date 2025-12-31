@@ -163,6 +163,10 @@
         <Message v-else-if="uploadedInvoiceId && !uploadOcrResult" severity="warn" :closable="false">
           已上传，但未解析出可用的 OCR 摘要（可能仍在解析中或解析失败）。你仍可手动填写后保存，也可以稍后在发票详情里点击“重新解析”。
         </Message>
+        
+        <Message v-if="uploadDedup?.kind === 'suspected_duplicate'" severity="warn" :closable="false">
+          检测到疑似重复发票（发票号码重复）。如果确认需要保留，可点击保存后选择“仍然保存”。
+        </Message>
 
         <form v-if="uploadedInvoiceId" class="p-fluid ocr-form" @submit.prevent="handleSaveUploadedInvoice">
           <div class="grid">
@@ -604,7 +608,7 @@ import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { invoiceApi, FILE_BASE_URL } from '@/api'
 import { useNotificationStore } from '@/stores/notifications'
-import type { Invoice, Payment } from '@/types'
+import type { Invoice, Payment, DedupHint } from '@/types'
 
 interface InvoiceExtractedData {
   invoice_number?: string
@@ -666,6 +670,19 @@ const toast = useToast()
 const notifications = useNotificationStore()
 const confirm = useConfirm()
 
+const confirmForceSave = (message: string) =>
+  new Promise<boolean>(resolve => {
+    confirm.require({
+      header: '\u7591\u4f3c\u91cd\u590d',
+      message,
+      icon: 'pi pi-exclamation-triangle',
+      acceptLabel: '\u4ecd\u7136\u4fdd\u5b58',
+      rejectLabel: '\u53d6\u6d88',
+      accept: () => resolve(true),
+      reject: () => resolve(false),
+    })
+  })
+
 const loading = ref(false)
 const invoices = ref<Invoice[]>([])
 const pageSize = ref(10)
@@ -682,6 +699,7 @@ const uploadedInvoiceIds = ref<string[]>([])
 const uploadedInvoiceId = ref<string | null>(null)
 const uploadedInvoice = ref<Invoice | null>(null)
 const uploadOcrResult = ref<InvoiceExtractedData | null>(null)
+const uploadDedup = ref<DedupHint | null>(null)
 const uploadConfirmed = ref(false)
 const uploadOcrForm = reactive({
   invoice_number: '',
@@ -831,6 +849,7 @@ const openUploadModal = () => {
   uploadedInvoiceId.value = null
   uploadedInvoice.value = null
   uploadOcrResult.value = null
+  uploadDedup.value = null
   uploadConfirmed.value = false
   uploadOcrForm.invoice_number = ''
   uploadOcrForm.invoice_date = null
@@ -924,13 +943,16 @@ const handleUpload = async () => {
     let createdInvoice: Invoice | null = null
     if (selectedFiles.value.length === 1) {
       const res = await invoiceApi.upload(selectedFiles.value[0])
-      createdInvoice = res.data?.data || null
+      const payload = (res.data?.data || null) as any
+      createdInvoice = payload?.invoice || null
+      uploadDedup.value = (payload?.dedup as any) || null
       uploadedInvoiceIds.value = createdInvoice ? [createdInvoice.id] : []
     } else {
       const res = await invoiceApi.uploadMultiple(selectedFiles.value)
       const createdList = res.data?.data || []
       createdInvoice = createdList.length > 0 ? createdList[0] : null
       uploadedInvoiceIds.value = createdList.map(it => it.id)
+      uploadDedup.value = null
     }
     if (createdInvoice) {
       uploadedInvoiceId.value = createdInvoice.id
@@ -951,8 +973,16 @@ const handleUpload = async () => {
       detail: selectedFiles.value.length === 1 ? selectedFiles.value[0]?.name : `\u5171 ${selectedFiles.value.length} \u4E2A\u6587\u4EF6`,
     })
     // 不立即关闭，等待用户确认并保存
-  } catch {
-    toast.add({ severity: 'error', summary: '\u4E0A\u4F20\u5931\u8D25', life: 3000 })
+  } catch (error: unknown) {
+    const err = error as any
+    const resp = err?.response
+    const data = resp?.data
+    const dup = data?.data as DedupHint | undefined
+    if (resp?.status === 409 && dup?.kind === 'hash_duplicate') {
+      toast.add({ severity: 'warn', summary: '\u6587\u4EF6\u5185\u5BB9\u91CD\u590D\uFF0C\u5DF2\u5B58\u5728\u8BB0\u5F55', life: 4500 })
+    } else {
+      toast.add({ severity: 'error', summary: '\u4E0A\u4F20\u5931\u8D25', life: 3000 })
+    }
   } finally {
     uploading.value = false
   }
@@ -972,7 +1002,27 @@ const handleSaveUploadedInvoice = async () => {
       seller_name: uploadOcrForm.seller_name || undefined,
       buyer_name: uploadOcrForm.buyer_name || undefined,
     }
-    await invoiceApi.update(uploadedInvoiceId.value, { ...payload, confirm: true })
+    const saveCurrent = async (force: boolean) => {
+      await invoiceApi.update(uploadedInvoiceId.value as string, {
+        ...payload,
+        confirm: true,
+        force_duplicate_save: force ? true : undefined,
+      })
+    }
+    try {
+      await saveCurrent(false)
+    } catch (error: unknown) {
+      const err = error as any
+      const resp = err?.response
+      const dup = resp?.data?.data as DedupHint | undefined
+      if (resp?.status === 409 && dup?.kind === 'suspected_duplicate') {
+        const ok = await confirmForceSave('检测到疑似重复发票（发票号码重复），是否仍然保存？')
+        if (!ok) return
+        await saveCurrent(true)
+      } else {
+        throw error
+      }
+    }
 
     const restIds = uploadedInvoiceIds.value.filter(id => id && id !== uploadedInvoiceId.value)
     if (restIds.length > 0) {

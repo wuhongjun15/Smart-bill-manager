@@ -25,7 +25,9 @@
 - **🆕 支付截图上传和自动识别** ✨
   - 上传微信支付、支付宝、银行转账截图
   - 自动识别金额、商家、交易时间、支付方式
-  - 若无法识别交易时间，上传会失败并提示（避免错误归属/统计）
+  - 若无法识别交易时间：上传仍会成功，但需要你手动选择交易时间后再保存（避免错误归属/统计）
+  - 上传后进入“可编辑确认页”，点击保存才会变成正式记录（草稿不会出现在列表/统计中）
+  - 支持查看 OCR 原始文本/整理文本，便于你校对与修正
   - OCR技术支持中英文识别
 
 ### 🗓️ 行程 / 差旅日历
@@ -43,6 +45,8 @@
   - 自动解析发票号码、金额、税额、销售方、购买方
   - 支持增值税电子普通发票、增值税电子专用发票
   - 使用专业PDF解析库和OCR技术
+- 上传后进入“可编辑确认页”，点击保存才会变成正式记录（草稿不会出现在列表/统计中）
+- 支持查看 OCR 原始文本（用于排查“内容识别对但抽取错”等问题）
 - 发票预览和下载
 - 来源追踪（手动上传/邮件下载）
 - **🆕 发票与支付记录关联** ✨
@@ -164,6 +168,24 @@ docker-compose down
   
 RapidOCR 的模型缓存也建议持久化（否则每次重建/重启可能需要重新下载模型）：
 - 已在 `docker-compose.yml` 默认设置 `SBM_OCR_DATA_DIR=/app/backend/data`，模型将保存到 `app-data` 卷内的 `/app/backend/data/rapidocr-models/`
+
+#### 上传文件生命周期（草稿）
+
+- 上传支付截图/发票会先创建 `is_draft=true` 的草稿记录：不会进入列表/统计，也不会影响行程归属与匹配。
+- 点击保存（`confirm=true`）后才变成正式记录：文件路径不变，不会移动/改名。
+- 点击取消/关闭弹窗会删除草稿记录并删除上传文件；刷新/崩溃导致的残留草稿会在前端/后端自动清理。
+- 可用环境变量（后端）：
+  - `UPLOADS_DIR=./uploads`（上传目录，容器内默认 `/app/backend/uploads`）
+  - `SBM_DRAFT_TTL_HOURS=6`（草稿超时自动清理阈值）
+  - `SBM_DRAFT_CLEANUP_INTERVAL_MINUTES=15`（草稿清理任务的轮询间隔）
+
+#### 重复文件处理（去重）
+
+- 强拒绝：上传时对文件计算 `SHA-256`；若哈希已存在（草稿或已保存），接口返回 `409` 并给出已有记录 `id`。
+- 疑似重复（可强制保存）：
+  - 发票：以 `invoice_number`（发票号码）为主键做疑似重复判断；保存时会提示，确认“仍然保存”才会落库为正式记录。
+  - 支付截图：以“金额 + 交易时间（邻近窗口）”做疑似重复判断；保存时会提示，确认“仍然保存”才会落库为正式记录。
+- API：`PUT /api/invoices/:id` / `PUT /api/payments/:id` 在 `confirm=true` 时可传 `force_duplicate_save=true` 进行强制保存（仅对“疑似重复”生效；哈希重复不允许强制）。
 
 #### OCR（RapidOCR v3，CPU）
 
@@ -333,19 +355,22 @@ Smart-bill-manager/
 - `GET /api/payments/:id` - 获取支付记录详情
 - `GET /api/payments/:id/invoices` - **🆕 获取关联的发票列表** ✨
 - `POST /api/payments` - 创建支付记录
-- `POST /api/payments/upload-screenshot` - **🆕 上传支付截图并OCR识别** ✨
-- `PUT /api/payments/:id` - 更新支付记录
+- `POST /api/payments/upload-screenshot` - **🆕 上传支付截图并OCR识别** ✨（返回草稿 `payment` + `extracted` + `dedup`）
+- `POST /api/payments/upload-screenshot/cancel` - 取消上传（删除草稿文件）
+- `PUT /api/payments/:id` - 更新支付记录（`confirm=true` 确认保存；`force_duplicate_save=true` 强制保存疑似重复）
 - `DELETE /api/payments/:id` - 删除支付记录
 
 ### 发票管理
 - `GET /api/invoices` - 获取发票列表
 - `GET /api/invoices/:id` - 获取发票详情
+- `GET /api/invoices/:id/download` - 下载原文件
 - `GET /api/invoices/:id/linked-payments` - **🆕 获取关联的支付记录** ✨
 - `GET /api/invoices/:id/suggest-payments` - **🆕 智能匹配支付记录建议** ✨
-- `POST /api/invoices/upload` - 上传发票（自动OCR识别）
+- `POST /api/invoices/upload` - 上传发票（自动OCR识别，返回草稿 `invoice` + `dedup`）
 - `POST /api/invoices/upload-multiple` - 批量上传
 - `POST /api/invoices/:id/link-payment` - **🆕 关联发票到支付记录** ✨
-- `PUT /api/invoices/:id` - 更新发票
+- `POST /api/invoices/:id/parse` - 重新解析 OCR/PDF
+- `PUT /api/invoices/:id` - 更新发票（`confirm=true` 确认保存；`force_duplicate_save=true` 强制保存疑似重复）
 - `DELETE /api/invoices/:id` - 删除发票
 - `DELETE /api/invoices/:id/unlink-payment` - **🆕 取消关联** ✨
 

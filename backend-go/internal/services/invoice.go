@@ -36,6 +36,7 @@ type CreateInvoiceInput struct {
 	OriginalName string  `json:"original_name"`
 	FilePath     string  `json:"file_path"`
 	FileSize     int64   `json:"file_size"`
+	FileSHA256   *string `json:"file_sha256"`
 	Source       string  `json:"source"`
 	IsDraft      bool    `json:"is_draft"`
 }
@@ -77,6 +78,7 @@ func (s *InvoiceService) Create(input CreateInvoiceInput) (*models.Invoice, erro
 		OriginalName:  input.OriginalName,
 		FilePath:      input.FilePath,
 		FileSize:      &input.FileSize,
+		FileSHA256:    input.FileSHA256,
 		InvoiceNumber: invoiceNumber,
 		InvoiceDate:   invoiceDate,
 		Amount:        amount,
@@ -88,6 +90,7 @@ func (s *InvoiceService) Create(input CreateInvoiceInput) (*models.Invoice, erro
 		ParseError:    parseError,
 		RawText:       rawText,
 		Source:        source,
+		DedupStatus:   DedupStatusOK,
 	}
 
 	// Create invoice (and optional 1:1 payment link) atomically.
@@ -110,6 +113,22 @@ func (s *InvoiceService) Create(input CreateInvoiceInput) (*models.Invoice, erro
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+
+	// Mark suspected duplicates for UI/confirm step (invoice_number).
+	if invoice.InvoiceNumber != nil {
+		n := strings.TrimSpace(*invoice.InvoiceNumber)
+		if n != "" {
+			if cands, err := FindInvoiceCandidatesByInvoiceNumber(n, invoice.ID, 5); err == nil && len(cands) > 0 {
+				invoice.DedupStatus = DedupStatusSuspected
+				ref := cands[0].ID
+				invoice.DedupRefID = &ref
+				_ = db.Model(&models.Invoice{}).Where("id = ?", invoice.ID).Updates(map[string]interface{}{
+					"dedup_status": DedupStatusSuspected,
+					"dedup_ref_id": ref,
+				}).Error
+			}
+		}
 	}
 
 	return invoice, nil
@@ -138,15 +157,16 @@ func (s *InvoiceService) GetByPaymentID(paymentID string) ([]models.Invoice, err
 }
 
 type UpdateInvoiceInput struct {
-	PaymentID     *string  `json:"payment_id"`
-	InvoiceNumber *string  `json:"invoice_number"`
-	InvoiceDate   *string  `json:"invoice_date"`
-	Amount        *float64 `json:"amount"`
-	TaxAmount     *float64 `json:"tax_amount"`
-	BadDebt       *bool    `json:"bad_debt"`
-	SellerName    *string  `json:"seller_name"`
-	BuyerName     *string  `json:"buyer_name"`
-	Confirm       *bool    `json:"confirm"`
+	PaymentID          *string  `json:"payment_id"`
+	InvoiceNumber      *string  `json:"invoice_number"`
+	InvoiceDate        *string  `json:"invoice_date"`
+	Amount             *float64 `json:"amount"`
+	TaxAmount          *float64 `json:"tax_amount"`
+	BadDebt            *bool    `json:"bad_debt"`
+	SellerName         *string  `json:"seller_name"`
+	BuyerName          *string  `json:"buyer_name"`
+	Confirm            *bool    `json:"confirm"`
+	ForceDuplicateSave *bool    `json:"force_duplicate_save"`
 }
 
 func (s *InvoiceService) Update(id string, input UpdateInvoiceInput) error {
@@ -177,6 +197,59 @@ func (s *InvoiceService) Update(id string, input UpdateInvoiceInput) error {
 	}
 
 	data := make(map[string]interface{})
+
+	// On confirm, enforce dedup rules:
+	// - hash duplicate: hard block (no override)
+	// - invoice_number duplicate: allow only with force_duplicate_save
+	var before *models.Invoice
+	if confirming {
+		inv, err := s.repo.FindByID(id)
+		if err != nil {
+			return err
+		}
+		before = inv
+
+		force := input.ForceDuplicateSave != nil && *input.ForceDuplicateSave
+
+		hash := ""
+		if inv.FileSHA256 != nil {
+			hash = strings.TrimSpace(*inv.FileSHA256)
+		}
+		if hash != "" {
+			if existing, err := FindInvoiceByFileSHA256(hash, id); err != nil {
+				return err
+			} else if existing != nil {
+				return &DuplicateError{
+					Kind:            "hash_duplicate",
+					Reason:          "file_sha256",
+					Entity:          "invoice",
+					ExistingID:      existing.ID,
+					ExistingIsDraft: existing.IsDraft,
+				}
+			}
+		}
+
+		nextNo := ""
+		if input.InvoiceNumber != nil {
+			nextNo = strings.TrimSpace(*input.InvoiceNumber)
+		} else if inv.InvoiceNumber != nil {
+			nextNo = strings.TrimSpace(*inv.InvoiceNumber)
+		}
+		if nextNo != "" {
+			cands, err := FindInvoiceCandidatesByInvoiceNumber(nextNo, id, 5)
+			if err != nil {
+				return err
+			}
+			if len(cands) > 0 && !force {
+				return &DuplicateError{
+					Kind:       "suspected_duplicate",
+					Reason:     "invoice_number",
+					Entity:     "invoice",
+					Candidates: cands,
+				}
+			}
+		}
+	}
 
 	if input.PaymentID != nil {
 		trimmed := strings.TrimSpace(*input.PaymentID)
@@ -214,6 +287,35 @@ func (s *InvoiceService) Update(id string, input UpdateInvoiceInput) error {
 	}
 	if input.Confirm != nil && *input.Confirm {
 		data["is_draft"] = false
+	}
+
+	// Persist dedup status changes on confirm.
+	if confirming && before != nil {
+		force := input.ForceDuplicateSave != nil && *input.ForceDuplicateSave
+
+		nextNo := ""
+		if input.InvoiceNumber != nil {
+			nextNo = strings.TrimSpace(*input.InvoiceNumber)
+		} else if before.InvoiceNumber != nil {
+			nextNo = strings.TrimSpace(*before.InvoiceNumber)
+		}
+		if nextNo != "" {
+			if cands, err := FindInvoiceCandidatesByInvoiceNumber(nextNo, id, 5); err == nil && len(cands) > 0 {
+				if force {
+					data["dedup_status"] = DedupStatusForced
+					data["dedup_ref_id"] = cands[0].ID
+				} else {
+					data["dedup_status"] = DedupStatusSuspected
+					data["dedup_ref_id"] = cands[0].ID
+				}
+			} else {
+				data["dedup_status"] = DedupStatusOK
+				data["dedup_ref_id"] = nil
+			}
+		} else {
+			data["dedup_status"] = DedupStatusOK
+			data["dedup_ref_id"] = nil
+		}
 	}
 
 	if len(data) == 0 {
