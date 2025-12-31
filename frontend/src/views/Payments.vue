@@ -1907,7 +1907,7 @@ watch(
 
 :global(.payment-time-panel .p-datepicker-panel-inline) {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
 }
 
@@ -1927,6 +1927,7 @@ watch(
 @media (max-width: 640px) {
   :global(.payment-time-panel .p-datepicker-panel-inline) {
     flex-direction: column;
+    align-items: stretch;
   }
 
   :global(.payment-time-panel .p-datepicker-time-picker) {
