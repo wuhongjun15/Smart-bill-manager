@@ -455,6 +455,66 @@ ZZHK-0007-5517-0170-0168
 	}
 }
 
+func TestParsePaymentScreenshot_AlipayTransferVoucher_ShouldExtractPayeeTimeAndVoucherNo(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `转账凭证
+款项已经转出成功，凭证仅供参考，请以收方账户
+￥6000
+实际到账为准。
+支付宝（中国）
+收款方姓名
+啊对
+收款方账号
+************5555
+收款方银行
+招商银行
+付款方姓名
+阿贝多
+付款方账号
+abcdrdg@qq.com
+转账时间
+2025-11-2812:57
+凭证编号
+2025112820004001143564
+09884243
+转账附言
+转账
+`
+
+	data, err := service.ParsePaymentScreenshot(sampleText)
+	if err != nil {
+		t.Fatalf("ParsePaymentScreenshot returned error: %v", err)
+	}
+	if data.Amount == nil || *data.Amount != 6000.00 {
+		t.Fatalf("expected Amount=6000.00, got %#v", data.Amount)
+	}
+	if data.Merchant == nil || *data.Merchant != "周豪" {
+		t.Fatalf("expected Merchant=周豪, got %#v", data.Merchant)
+	}
+	if data.MerchantSource != "alipay_transfer_payee" {
+		t.Fatalf("expected MerchantSource=alipay_transfer_payee, got %q", data.MerchantSource)
+	}
+	if data.TransactionTime == nil || *data.TransactionTime != "2025-11-28 12:57" {
+		t.Fatalf("expected TransactionTime=2025-11-28 12:57, got %#v", data.TransactionTime)
+	}
+	if data.TransactionTimeSource != "alipay_transfer_time" {
+		t.Fatalf("expected TransactionTimeSource=alipay_transfer_time, got %q", data.TransactionTimeSource)
+	}
+	if data.OrderNumber == nil || *data.OrderNumber != "20251128200040011100590009884243" {
+		t.Fatalf("expected OrderNumber=20251128200040011100590009884243, got %#v", data.OrderNumber)
+	}
+	if data.OrderNumberSource != "alipay_transfer_voucher_no" {
+		t.Fatalf("expected OrderNumberSource=alipay_transfer_voucher_no, got %q", data.OrderNumberSource)
+	}
+	if data.PaymentMethod == nil || *data.PaymentMethod != "支付宝" {
+		t.Fatalf("expected PaymentMethod=支付宝, got %#v", data.PaymentMethod)
+	}
+	if data.PaymentMethodSource != "alipay_transfer" {
+		t.Fatalf("expected PaymentMethodSource=alipay_transfer, got %q", data.PaymentMethodSource)
+	}
+}
+
 // TestRemoveChineseSpaces_PreserveTimeSpace tests the fix for preserving space after 日
 func TestRemoveChineseSpaces_PreserveTimeSpace(t *testing.T) {
 	tests := []struct {

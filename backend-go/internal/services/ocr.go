@@ -91,6 +91,9 @@ var (
 	// Pattern to insert space between Chinese date and time when 日 is directly followed by digits
 	chineseDateTimePattern = regexp.MustCompile(`日(\d)`)
 
+	// Pattern to insert space between ISO date and time when "YYYY-MM-DD" is directly followed by time.
+	isoDateTimePattern = regexp.MustCompile(`(\d{4}-\d{1,2}-\d{1,2})(\d{1,2}:\d{2}(?::\d{2})?)`)
+
 	// Alipay bill detail often contains an order id like "Alipay251116...".
 	alipayOrderNumberRegex = regexp.MustCompile(`(?i)alipay\d{6,}`)
 
@@ -1681,6 +1684,8 @@ func removeChineseSpaces(text string) string {
 // Example: "2025年10月23日14:59:46" -> "2025-10-23 14:59:46"
 // Example: "2025年10月23日" -> "2025-10-23"
 func convertChineseDateToISO(dateStr string) string {
+	// Fix missing space between ISO date and time: "2025-11-2812:57" -> "2025-11-28 12:57"
+	dateStr = isoDateTimePattern.ReplaceAllString(dateStr, "$1 $2")
 	// If 日 is directly followed by a digit (time), insert a space
 	// This handles cases like "2025年10月23日14:59:46" -> "2025年10月23日 14:59:46"
 	dateStr = chineseDateTimePattern.ReplaceAllString(dateStr, "日 $1")
@@ -2832,6 +2837,12 @@ func (s *OCRService) parseUnionPayBillDetail(text string, data *PaymentExtracted
 func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 	lines := strings.Split(text, "\n")
 
+	// Alipay transfer voucher ("转账凭证") is a distinct layout and should not reuse bill-detail heuristics.
+	if strings.Contains(text, "转账凭证") {
+		s.parseAlipayTransferVoucher(text, data)
+		return
+	}
+
 	// Extract amount with support for negative numbers and large amounts
 	amountRegexes := []*regexp.Regexp{
 		// Negative amount with optional currency symbol
@@ -3070,6 +3081,136 @@ func (s *OCRService) parseAlipay(text string, data *PaymentExtractedData) {
 		if data.PaymentMethodConfidence < 0.8 {
 			data.PaymentMethodConfidence = 0.9
 		}
+	}
+
+	// Default confidences if missing
+	if data.Merchant != nil && data.MerchantConfidence == 0 {
+		data.MerchantConfidence = 0.6
+	}
+	if data.Amount != nil && data.AmountConfidence == 0 {
+		data.AmountConfidence = 0.6
+	}
+	if data.TransactionTime != nil && data.TransactionTimeConfidence == 0 {
+		data.TransactionTimeConfidence = 0.7
+	}
+	if data.OrderNumber != nil && data.OrderNumberConfidence == 0 {
+		data.OrderNumberConfidence = 0.7
+	}
+	if data.PaymentMethod != nil && data.PaymentMethodConfidence == 0 {
+		data.PaymentMethodConfidence = 0.6
+	}
+}
+
+func (s *OCRService) parseAlipayTransferVoucher(text string, data *PaymentExtractedData) {
+	lines := strings.Split(text, "\n")
+
+	isVoucherLabel := func(v string) bool {
+		v = sanitizePaymentField(v)
+		if v == "" {
+			return true
+		}
+		labels := map[string]struct{}{
+			"转账凭证": {}, "转账凭证专用章": {}, "支付宝（中国）": {}, "支付宝(中国)": {}, "支付宝": {},
+			"收款方姓名": {}, "收款方账号": {}, "收款方银行": {},
+			"付款方姓名": {}, "付款方账号": {},
+			"转账时间": {}, "凭证编号": {}, "转账附言": {},
+			"款项已经转出成功，凭证仅供参考，请以收方账户": {}, "实际到账为准。": {},
+		}
+		_, ok := labels[v]
+		return ok
+	}
+
+	// Amount: prefer "￥6000" near the top, fallback to generic patterns later.
+	if data.Amount == nil {
+		amountRegexes := []*regexp.Regexp{
+			regexp.MustCompile(`[¥￥]\s*([\d,]+(?:\.\d{1,2})?)`),
+			regexp.MustCompile(`([\d,]+(?:\.\d{1,2})?)元`),
+		}
+		for _, re := range amountRegexes {
+			if m := re.FindStringSubmatch(text); len(m) > 1 {
+				if amount := parseAmount(m[1]); amount != nil && *amount >= MinValidAmount {
+					data.Amount = amount
+					data.AmountSource = "alipay_amount_label"
+					data.AmountConfidence = 0.9
+					break
+				}
+			}
+		}
+	}
+
+	// Merchant: payee name (收款方姓名)
+	if data.Merchant == nil {
+		bad := func(v string) bool {
+			v = sanitizePaymentField(v)
+			return v == "" || isVoucherLabel(v) || v == "姓名" || v == "账号" || v == "银行"
+		}
+		if v, ok := extractValueByLabel(lines, "收款方姓名", 10, bad); ok {
+			m := sanitizePaymentField(v)
+			if m != "" && !bad(m) {
+				data.Merchant = &m
+				data.MerchantSource = "alipay_transfer_payee"
+				data.MerchantConfidence = 0.9
+			}
+		}
+	}
+
+	// Time: 转账时间 (may miss space between date and time)
+	if data.TransactionTime == nil {
+		timeIsBad := func(v string) bool {
+			v = sanitizePaymentField(v)
+			return v == "" || isVoucherLabel(v)
+		}
+		if v, ok := extractValueByLabel(lines, "转账时间", 20, timeIsBad); ok {
+			t := convertChineseDateToISO(v)
+			data.TransactionTime = &t
+			data.TransactionTimeSource = "alipay_transfer_time"
+			data.TransactionTimeConfidence = 0.9
+		}
+	}
+
+	// Order number: 凭证编号 (can be split into multiple lines)
+	if data.OrderNumber == nil {
+		idx := indexOfExactLine(lines, "凭证编号")
+		if idx >= 0 {
+			parts := make([]string, 0, 3)
+			partRe := regexp.MustCompile(`^[0-9]{6,}$`)
+			for j := idx + 1; j < len(lines) && j <= idx+6; j++ {
+				cand := sanitizePaymentField(lines[j])
+				if cand == "" || isVoucherLabel(cand) {
+					continue
+				}
+				cand = strings.ReplaceAll(cand, " ", "")
+				if partRe.MatchString(cand) {
+					parts = append(parts, cand)
+					continue
+				}
+				// stop if a non-digit line is found after we started collecting
+				if len(parts) > 0 {
+					break
+				}
+			}
+			if len(parts) > 0 {
+				order := strings.Join(parts, "")
+				data.OrderNumber = &order
+				data.OrderNumberSource = "alipay_transfer_voucher_no"
+				data.OrderNumberConfidence = 0.9
+			}
+		}
+	}
+
+	// Payment method: this is an Alipay transfer voucher.
+	if data.PaymentMethod == nil {
+		m := "支付宝"
+		data.PaymentMethod = &m
+		data.PaymentMethodSource = "alipay_transfer"
+		data.PaymentMethodConfidence = 0.8
+	}
+	if data.PaymentMethod != nil && data.PaymentMethodSource == "alipay_infer" {
+		// Upgrade low-confidence inference for vouchers.
+		m := "支付宝"
+		data.PaymentMethod = &m
+		data.PaymentMethodSource = "alipay_transfer"
+		data.PaymentMethodConfidence = 0.8
 	}
 
 	// Default confidences if missing
