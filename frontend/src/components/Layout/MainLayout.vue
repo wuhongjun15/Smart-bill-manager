@@ -1,6 +1,6 @@
 <template>
   <div class="layout">
-    <aside class="sidebar" :class="{ collapsed: isCollapsed }">
+    <aside v-if="!isMobile" class="sidebar" :class="{ collapsed: isCollapsed }">
       <div class="brand" @click="router.push('/dashboard')">
         <div class="brand-logo" aria-hidden="true">
           <i class="pi pi-box" />
@@ -45,9 +45,64 @@
       </div>
     </aside>
 
+    <Drawer
+      v-model:visible="mobileNavVisible"
+      class="mobile-drawer"
+      position="left"
+      :dismissable="true"
+      :showCloseIcon="true"
+      :modal="true"
+      :blockScroll="true"
+    >
+      <template #header>
+        <div class="drawer-header">
+          <div class="brand-logo" aria-hidden="true">
+            <i class="pi pi-box" />
+          </div>
+          <span class="drawer-title">Smart Bill</span>
+        </div>
+      </template>
+
+      <nav class="drawer-nav">
+        <button class="nav-item" :class="{ active: currentRoute === '/dashboard' }" type="button" @click="go('/dashboard')">
+          <i class="pi pi-chart-bar" />
+          <span>仪表盘</span>
+        </button>
+        <button class="nav-item" :class="{ active: currentRoute === '/payments' }" type="button" @click="go('/payments')">
+          <i class="pi pi-wallet" />
+          <span>支付记录</span>
+        </button>
+        <button class="nav-item" :class="{ active: currentRoute === '/invoices' }" type="button" @click="go('/invoices')">
+          <i class="pi pi-file" />
+          <span>发票管理</span>
+        </button>
+        <button class="nav-item" :class="{ active: currentRoute === '/trips' }" type="button" @click="go('/trips')">
+          <i class="pi pi-calendar" />
+          <span>行程日历</span>
+        </button>
+        <button class="nav-item" :class="{ active: currentRoute === '/email' }" type="button" @click="go('/email')">
+          <i class="pi pi-inbox" />
+          <span>邮箱监控</span>
+        </button>
+        <button class="nav-item" :class="{ active: currentRoute === '/logs' }" type="button" @click="go('/logs')">
+          <i class="pi pi-book" />
+          <span>日志</span>
+        </button>
+      </nav>
+    </Drawer>
+
     <div class="content">
       <header class="topbar">
         <div class="topbar-left">
+          <Button
+            v-if="isMobile"
+            class="mobile-menu-btn"
+            severity="secondary"
+            text
+            icon="pi pi-bars"
+            aria-label="菜单"
+            @click="mobileNavVisible = true"
+          />
           <div class="page-kicker">Overview</div>
           <h2 class="page-title">{{ pageTitle }}</h2>
         </div>
@@ -73,10 +128,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Avatar from 'primevue/avatar'
+import Drawer from 'primevue/drawer'
 import Menu from 'primevue/menu'
 import { useToast } from 'primevue/usetoast'
 import ChangePassword from '@/components/ChangePassword.vue'
@@ -91,8 +147,27 @@ const toast = useToast()
 const isCollapsed = ref(true)
 const showChangePasswordDialog = ref(false)
 const userMenu = ref<InstanceType<typeof Menu> | null>(null)
+const mobileNavVisible = ref(false)
+const isMobile = ref(false)
 
 const currentRoute = computed(() => route.path)
+
+const updateIsMobile = () => {
+  if (typeof window === 'undefined') return
+  isMobile.value = window.matchMedia('(max-width: 768px)').matches
+  if (!isMobile.value) mobileNavVisible.value = false
+}
+
+onMounted(() => {
+  updateIsMobile()
+  if (typeof window === 'undefined') return
+  window.addEventListener('resize', updateIsMobile, { passive: true })
+})
+
+onBeforeUnmount(() => {
+  if (typeof window === 'undefined') return
+  window.removeEventListener('resize', updateIsMobile as any)
+})
 
 const pageTitle = computed(() => {
   const titles: Record<string, string> = {
@@ -143,6 +218,11 @@ const userMenuItems = computed(() => [
 
 const toggleUserMenu = (event: MouseEvent) => {
   userMenu.value?.toggle(event)
+}
+
+const go = (path: string) => {
+  mobileNavVisible.value = false
+  router.push(path)
 }
 </script>
 
@@ -310,6 +390,14 @@ const toggleUserMenu = (event: MouseEvent) => {
   min-width: 180px;
 }
 
+.mobile-menu-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px !important;
+  align-self: flex-start;
+  margin-bottom: 6px;
+}
+
 .page-kicker {
   font-size: 13px;
   font-weight: 700;
@@ -379,6 +467,10 @@ const toggleUserMenu = (event: MouseEvent) => {
     gap: 12px;
   }
 
+  .topbar-left {
+    min-width: 0;
+  }
+
   .page-title {
     font-size: 22px;
   }
@@ -386,5 +478,17 @@ const toggleUserMenu = (event: MouseEvent) => {
   .username {
     display: none;
   }
+}
+</style>
+
+<style>
+/* Drawer is teleported to <body>, so styles must be global. */
+.p-drawer.mobile-drawer {
+  width: min(84vw, 360px);
+  border-radius: 0 18px 18px 0;
+}
+
+.p-drawer.mobile-drawer .p-drawer-content {
+  padding: 12px 12px 16px;
 }
 </style>

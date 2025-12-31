@@ -107,6 +107,30 @@ body {
   overflow-x: hidden;
 }
 
+/* Mobile responsiveness helpers */
+@media (max-width: 768px) {
+  /* DataTable: keep columns (no hiding), allow horizontal scroll within the table container */
+  .p-datatable-table-container {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .p-datatable-table {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  /* Dialog: ensure content fits on mobile and remains scrollable */
+  .p-dialog {
+    max-width: 96vw;
+  }
+
+  .p-dialog-content {
+    overflow: auto;
+    max-height: calc(90vh - 140px);
+  }
+}
+
 a {
   color: var(--color-primary);
   text-decoration: none;
