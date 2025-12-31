@@ -65,6 +65,7 @@
       </template>
       <template #content>
         <DataTable
+          class="invoices-table"
           :value="filteredInvoices"
           :loading="loading"
           :paginator="true"
@@ -78,7 +79,7 @@
             <template #body="{ data: row }">
               <div class="filecell">
                 <i class="pi pi-file" />
-                <span>{{ row.original_name }}</span>
+                <span class="filecell-name sbm-ellipsis" :title="row.original_name">{{ row.original_name }}</span>
               </div>
             </template>
           </Column>
@@ -92,7 +93,9 @@
             <template #body="{ data: row }">{{ row.amount ? `\u00A5${row.amount.toFixed(2)}` : '-' }}</template>
           </Column>
           <Column field="seller_name" :header="'\u9500\u552E\u65B9'">
-            <template #body="{ data: row }">{{ row.seller_name || '-' }}</template>
+            <template #body="{ data: row }">
+              <span class="sbm-ellipsis" :title="row.seller_name || ''">{{ row.seller_name || '-' }}</span>
+            </template>
           </Column>
           <Column :header="'\u6765\u6E90'" :style="{ width: '120px' }">
             <template #body="{ data: row }">
@@ -1329,7 +1332,20 @@ onMounted(() => {
 .row-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+  justify-content: flex-start;
+}
+
+.invoices-table :deep(.p-datatable-table) {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.invoices-table :deep(.p-datatable-thead > tr > th),
+.invoices-table :deep(.p-datatable-tbody > tr > td) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .field {
@@ -1367,6 +1383,12 @@ onMounted(() => {
   gap: 8px;
   font-weight: 700;
   color: var(--color-text-primary);
+  min-width: 0;
+}
+
+.filecell-name {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .filecell i {
