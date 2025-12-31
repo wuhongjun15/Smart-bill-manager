@@ -70,17 +70,17 @@
           sortField="transaction_time"
           :sortOrder="-1"
         >
-          <Column field="amount" :header="'\u91D1\u989D'" sortable :style="{ width: '120px' }">
+          <Column field="amount" :header="'\u91D1\u989D'" sortable :style="{ width: '10%' }">
             <template #body="{ data: row }">
               <span class="amount">{{ formatMoney(row.amount) }}</span>
             </template>
           </Column>
-          <Column :header="'\u5546\u5BB6'" :style="{ width: '260px' }">
+          <Column :header="'\u5546\u5BB6'" :style="{ width: '22%' }">
             <template #body="{ data: row }">
               <span class="sbm-ellipsis" :title="normalizeInlineText(row.merchant)">{{ normalizeInlineText(row.merchant) || '-' }}</span>
             </template>
           </Column>
-          <Column :header="'\u652F\u4ED8\u65B9\u5F0F'" :style="{ width: '190px' }">
+          <Column :header="'\u652F\u4ED8\u65B9\u5F0F'" :style="{ width: '16%' }">
             <template #body="{ data: row }">
               <Tag
                 v-if="row.payment_method"
@@ -92,22 +92,22 @@
               <span v-else>-</span>
             </template>
           </Column>
-          <Column :header="'\u5907\u6CE8'" :style="{ width: '240px' }">
+          <Column :header="'\u5907\u6CE8'" :style="{ width: '22%' }">
             <template #body="{ data: row }">
               <span class="sbm-ellipsis" :title="normalizeInlineText(row.description)">{{ normalizeInlineText(row.description) || '-' }}</span>
             </template>
           </Column>
-          <Column field="transaction_time" :header="'\u4EA4\u6613\u65F6\u95F4'" sortable :style="{ width: '170px' }">
+          <Column field="transaction_time" :header="'\u4EA4\u6613\u65F6\u95F4'" sortable :style="{ width: '16%' }">
             <template #body="{ data: row }">
               {{ formatDateTime(row.transaction_time) }}
             </template>
           </Column>
-          <Column :header="'\u5173\u8054\u53D1\u7968'" :style="{ width: '120px' }">
+          <Column :header="'\u5173\u8054\u53D1\u7968'" :style="{ width: '7%' }">
             <template #body="{ data: row }">
               <Button size="small" class="p-button-text" :label="`\u67E5\u770B (${row.invoiceCount || 0})`" @click="viewLinkedInvoices(row)" />
             </template>
           </Column>
-          <Column :header="'\u64CD\u4F5C'" :style="{ width: '110px' }">
+          <Column :header="'\u64CD\u4F5C'" :style="{ width: '7%' }">
             <template #body="{ data: row }">
               <div class="row-actions">
                 <Button class="p-button-text" icon="pi pi-eye" @click="openPaymentDetail(row)" />
@@ -1410,6 +1410,13 @@ watch(
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 768px) {
+  .payments-table :deep(.p-datatable-table) {
+    width: max-content;
+    min-width: 100%;
+  }
 }
 
 .sbm-ellipsis {
