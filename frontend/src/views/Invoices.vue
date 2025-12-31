@@ -75,7 +75,7 @@
           sortField="created_at"
           :sortOrder="-1"
         >
-          <Column field="original_name" :header="'\u6587\u4EF6\u540D'">
+          <Column field="original_name" :header="'\u6587\u4EF6\u540D'" :style="{ width: '17%' }">
             <template #body="{ data: row }">
               <div class="filecell">
                 <i class="pi pi-file" />
@@ -83,29 +83,29 @@
               </div>
             </template>
           </Column>
-          <Column field="invoice_number" :header="'\u53D1\u7968\u53F7'" :style="{ width: '170px' }">
+          <Column field="invoice_number" :header="'\u53D1\u7968\u53F7'" :style="{ width: '17%' }">
             <template #body="{ data: row }">{{ row.invoice_number || '-' }}</template>
           </Column>
-          <Column field="invoice_date" :header="'\u5F00\u7968\u65F6\u95F4'" sortable :style="{ width: '140px' }">
+          <Column field="invoice_date" :header="'\u5F00\u7968\u65F6\u95F4'" sortable :style="{ width: '10%' }">
             <template #body="{ data: row }">{{ formatInvoiceDate(row.invoice_date) }}</template>
           </Column>
-          <Column :header="'\u91D1\u989D'" :style="{ width: '120px' }">
+          <Column :header="'\u91D1\u989D'" :style="{ width: '10%' }">
             <template #body="{ data: row }">{{ row.amount ? `\u00A5${row.amount.toFixed(2)}` : '-' }}</template>
           </Column>
-          <Column field="seller_name" :header="'\u9500\u552E\u65B9'">
+          <Column field="seller_name" :header="'\u9500\u552E\u65B9'" :style="{ width: '20%' }">
             <template #body="{ data: row }">
               <span class="sbm-ellipsis" :title="row.seller_name || ''">{{ row.seller_name || '-' }}</span>
             </template>
           </Column>
-          <Column :header="'\u6765\u6E90'" :style="{ width: '120px' }">
+          <Column :header="'\u6765\u6E90'" :style="{ width: '8%' }">
             <template #body="{ data: row }">
               <Tag :severity="getSourceSeverity(row.source)" :value="getSourceLabel(row.source)" />
             </template>
           </Column>
-          <Column field="created_at" :header="'\u4E0A\u4F20\u65F6\u95F4'" sortable :style="{ width: '170px' }">
+          <Column field="created_at" :header="'\u4E0A\u4F20\u65F6\u95F4'" sortable :style="{ width: '10%' }">
             <template #body="{ data: row }">{{ formatDateTime(row.created_at) }}</template>
           </Column>
-          <Column :header="'\u64CD\u4F5C'" :style="{ width: '120px' }">
+          <Column :header="'\u64CD\u4F5C'" :style="{ width: '8%' }">
             <template #body="{ data: row }">
               <div class="row-actions">
                 <Button class="p-button-text" icon="pi pi-eye" @click="openPreview(row)" />
