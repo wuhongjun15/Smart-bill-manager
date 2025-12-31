@@ -420,6 +420,8 @@
       :style="{ width: '740px', maxWidth: '94vw' }"
       :breakpoints="{ '960px': '94vw', '640px': '96vw' }"
       :contentStyle="{ padding: '14px 16px' }"
+      :closable="!paymentDetailEditing && !savingPaymentDetail"
+      :closeOnEscape="!paymentDetailEditing && !savingPaymentDetail"
     >
       <div v-if="detailPayment" class="detail">
         <div class="header-row">
@@ -429,12 +431,20 @@
           </div>
           <div class="actions">
             <Button
+              v-if="!paymentDetailEditing"
+              class="p-button-outlined"
+              severity="secondary"
+              icon="pi pi-pencil"
+              :label="'\u7F16\u8F91'"
+              @click="enterPaymentEditMode"
+            />
+            <Button
               class="p-button-outlined"
               severity="secondary"
               icon="pi pi-refresh"
               :label="'\u91CD\u65B0\u89E3\u6790'"
               :loading="reparsingOcr"
-              :disabled="!detailPayment.screenshot_path"
+              :disabled="paymentDetailEditing || savingPaymentDetail || !detailPayment.screenshot_path"
               @click="handleReparseOcr(detailPayment.id)"
             />
           </div>
@@ -442,34 +452,65 @@
 
         <div class="grid sbm-grid-tight">
           <div class="col-12 md:col-6">
-            <div class="kv"><div class="k">&#37329;&#39069;</div><div class="v amount">{{ formatMoney(detailPayment.amount || 0) }}</div></div>
+            <div class="kv">
+              <div class="k">&#37329;&#39069;</div>
+              <div class="v" :class="{ amount: !paymentDetailEditing }">
+                <InputNumber
+                  v-if="paymentDetailEditing"
+                  v-model="paymentDetailForm.amount"
+                  :minFractionDigits="2"
+                  :maxFractionDigits="2"
+                  :min="0"
+                  :useGrouping="false"
+                />
+                <template v-else>{{ formatMoney(detailPayment.amount || 0) }}</template>
+              </div>
+            </div>
           </div>
           <div class="col-12 md:col-6">
             <div class="kv">
               <div class="k">&#21830;&#23478;</div>
-              <div class="v" :title="normalizeInlineText(detailPayment.merchant)">{{ normalizeInlineText(detailPayment.merchant) || '-' }}</div>
+              <div class="v" :title="normalizeInlineText(detailPayment.merchant)">
+                <InputText v-if="paymentDetailEditing" v-model.trim="paymentDetailForm.merchant" />
+                <template v-else>{{ normalizeInlineText(detailPayment.merchant) || '-' }}</template>
+              </div>
             </div>
           </div>
           <div class="col-12 md:col-6">
             <div class="kv">
               <div class="k">&#25903;&#20184;&#26041;&#24335;</div>
               <div class="v">
-                <Tag
-                  v-if="detailPayment.payment_method"
-                  class="sbm-tag-ellipsis"
-                  severity="success"
-                  :value="normalizePaymentMethodText(detailPayment.payment_method)"
-                  :title="normalizePaymentMethodText(detailPayment.payment_method)"
-                />
-                <span v-else>-</span>
+                <InputText v-if="paymentDetailEditing" v-model.trim="paymentDetailForm.payment_method" />
+                <template v-else>
+                  <Tag
+                    v-if="detailPayment.payment_method"
+                    class="sbm-tag-ellipsis"
+                    severity="success"
+                    :value="normalizePaymentMethodText(detailPayment.payment_method)"
+                    :title="normalizePaymentMethodText(detailPayment.payment_method)"
+                  />
+                  <span v-else>-</span>
+                </template>
               </div>
             </div>
           </div>
           <div class="col-12">
-            <div class="kv"><div class="k">&#20132;&#26131;&#26102;&#38388;</div><div class="v">{{ formatDateTime(detailPayment.transaction_time) }}</div></div>
+            <div class="kv">
+              <div class="k">&#20132;&#26131;&#26102;&#38388;</div>
+              <div class="v">
+                <DatePicker v-if="paymentDetailEditing" v-model="paymentDetailForm.transaction_time" showTime :manualInput="false" />
+                <template v-else>{{ formatDateTime(detailPayment.transaction_time) }}</template>
+              </div>
+            </div>
           </div>
           <div class="col-12">
-            <div class="kv"><div class="k">&#22791;&#27880;</div><div class="v">{{ detailPayment.description || '-' }}</div></div>
+            <div class="kv">
+              <div class="k">&#22791;&#27880;</div>
+              <div class="v">
+                <Textarea v-if="paymentDetailEditing" v-model="paymentDetailForm.description" autoResize rows="3" />
+                <template v-else>{{ detailPayment.description || '-' }}</template>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -500,7 +541,11 @@
         </div>
       </div>
       <template #footer>
-        <Button type="button" class="p-button-outlined" severity="secondary" :label="'\u5173\u95ED'" @click="paymentDetailVisible = false" />
+        <div v-if="paymentDetailEditing" class="dialog-footer-center">
+          <Button type="button" class="p-button-outlined" severity="secondary" :label="'\u53D6\u6D88'" :disabled="savingPaymentDetail" @click="cancelPaymentEditMode" />
+          <Button type="button" :label="'\u4FDD\u5B58'" icon="pi pi-check" :loading="savingPaymentDetail" @click="savePaymentEditMode" />
+        </div>
+        <Button v-else type="button" class="p-button-outlined" severity="secondary" :label="'\u5173\u95ED'" @click="paymentDetailVisible = false" />
       </template>
     </Dialog>
   </div>
@@ -690,6 +735,15 @@ const invoiceMatchTab = ref<'linked' | 'suggested'>('linked')
 const paymentDetailVisible = ref(false)
 const detailPayment = ref<Payment | null>(null)
 const reparsingOcr = ref(false)
+const paymentDetailEditing = ref(false)
+const savingPaymentDetail = ref(false)
+const paymentDetailForm = reactive({
+  amount: 0,
+  merchant: '',
+  payment_method: '',
+  description: '',
+  transaction_time: null as Date | null,
+})
 
 const validatePaymentForm = () => {
   errors.amount = ''
@@ -1105,7 +1159,75 @@ const handleUnlinkInvoiceFromPayment = async (invoiceId: string) => {
 
 const openPaymentDetail = (payment: Payment) => {
   detailPayment.value = payment
+  paymentDetailEditing.value = false
+  savingPaymentDetail.value = false
+  paymentDetailForm.amount = Number(payment.amount || 0)
+  paymentDetailForm.merchant = payment.merchant || ''
+  paymentDetailForm.payment_method = normalizePaymentMethodText(payment.payment_method || '')
+  paymentDetailForm.description = payment.description || ''
+  paymentDetailForm.transaction_time = payment.transaction_time ? new Date(payment.transaction_time) : new Date()
   paymentDetailVisible.value = true
+}
+
+const enterPaymentEditMode = () => {
+  if (!detailPayment.value) return
+  paymentDetailEditing.value = true
+  paymentDetailForm.amount = Number(detailPayment.value.amount || 0)
+  paymentDetailForm.merchant = detailPayment.value.merchant || ''
+  paymentDetailForm.payment_method = normalizePaymentMethodText(detailPayment.value.payment_method || '')
+  paymentDetailForm.description = detailPayment.value.description || ''
+  paymentDetailForm.transaction_time = detailPayment.value.transaction_time ? new Date(detailPayment.value.transaction_time) : new Date()
+}
+
+const cancelPaymentEditMode = () => {
+  if (!detailPayment.value) {
+    paymentDetailEditing.value = false
+    return
+  }
+  paymentDetailForm.amount = Number(detailPayment.value.amount || 0)
+  paymentDetailForm.merchant = detailPayment.value.merchant || ''
+  paymentDetailForm.payment_method = normalizePaymentMethodText(detailPayment.value.payment_method || '')
+  paymentDetailForm.description = detailPayment.value.description || ''
+  paymentDetailForm.transaction_time = detailPayment.value.transaction_time ? new Date(detailPayment.value.transaction_time) : new Date()
+  paymentDetailEditing.value = false
+}
+
+const savePaymentEditMode = async () => {
+  if (!detailPayment.value) return
+  if (paymentDetailForm.amount === null || Number.isNaN(Number(paymentDetailForm.amount)) || Number(paymentDetailForm.amount) <= 0) {
+    toast.add({ severity: 'warn', summary: '请填写金额', life: 2200 })
+    return
+  }
+  if (!paymentDetailForm.transaction_time) {
+    toast.add({ severity: 'warn', summary: '请选择交易时间', life: 2200 })
+    return
+  }
+
+  savingPaymentDetail.value = true
+  try {
+    const payload = {
+      amount: Number(paymentDetailForm.amount),
+      merchant: paymentDetailForm.merchant,
+      payment_method: normalizePaymentMethodText(paymentDetailForm.payment_method),
+      description: paymentDetailForm.description,
+      transaction_time: dayjs(paymentDetailForm.transaction_time).toISOString(),
+    }
+    await paymentApi.update(detailPayment.value.id, payload)
+    const refreshed = await paymentApi.getById(detailPayment.value.id)
+    if (refreshed.data.success && refreshed.data.data) {
+      detailPayment.value = refreshed.data.data
+    } else {
+      detailPayment.value = { ...detailPayment.value, ...payload } as Payment
+    }
+    toast.add({ severity: 'success', summary: '已保存', life: 2000 })
+    paymentDetailEditing.value = false
+    await loadPayments()
+    await loadStats()
+  } catch {
+    toast.add({ severity: 'error', summary: '保存失败', life: 3000 })
+  } finally {
+    savingPaymentDetail.value = false
+  }
 }
 
 const getExtractedRawText = (extractedData: string | null): string => {
@@ -1474,6 +1596,18 @@ watch(
   background: rgba(0, 0, 0, 0.02);
   border-radius: var(--radius-md);
   padding: 8px 10px;
+}
+
+.kv :deep(.p-inputtext),
+.kv :deep(.p-inputnumber),
+.kv :deep(.p-datepicker),
+.kv :deep(.p-textarea),
+.kv :deep(.p-inputtextarea) {
+  width: 100%;
+}
+
+.kv :deep(.p-datepicker-input) {
+  width: 100%;
 }
 
 .header-row {
