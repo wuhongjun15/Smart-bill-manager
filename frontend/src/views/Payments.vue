@@ -1430,13 +1430,22 @@ watch(
   text-align: center !important;
 }
 
-.payments-table :deep(th.col-center .p-column-header-content) {
+.payments-table :deep(th.col-center .p-datatable-column-header-content) {
+  position: relative;
+  width: 100%;
   justify-content: center;
+  padding-inline-end: 18px;
 }
 
-.payments-table :deep(th.col-center .p-column-header-content),
-.payments-table :deep(th.col-center .p-column-title) {
+.payments-table :deep(th.col-center .p-datatable-column-title) {
+  flex: 1 1 auto;
+  text-align: center;
   width: 100%;
+}
+
+.payments-table :deep(th.col-center .p-datatable-sort-icon) {
+  position: absolute;
+  inset-inline-end: 0;
 }
 
 .sbm-ellipsis {
