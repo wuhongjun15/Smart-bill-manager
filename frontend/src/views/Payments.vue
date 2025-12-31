@@ -1921,7 +1921,10 @@ watch(
 
 :global(.payment-time-panel .p-datepicker-time-picker) {
   padding: 0.55rem 0.65rem;
-  border-left: 1px solid rgba(0, 0, 0, 0.06);
+  /* PrimeVue 默认会给 time picker 加一条上边框；横向布局时会变成你截图里的“黑线” */
+  border-block-start: 0 none !important;
+  border-top: 0 none !important;
+  border-left: 1px solid rgba(0, 0, 0, 0.04);
 }
 
 @media (max-width: 640px) {
