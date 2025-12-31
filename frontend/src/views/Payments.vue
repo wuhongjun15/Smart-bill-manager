@@ -82,14 +82,16 @@
           </Column>
           <Column :header="'\u652F\u4ED8\u65B9\u5F0F'" :style="{ width: '190px' }" headerClass="col-center" bodyClass="col-center">
             <template #body="{ data: row }">
-              <Tag
-                v-if="row.payment_method"
-                class="sbm-tag-ellipsis"
-                severity="success"
-                :value="normalizePaymentMethodText(row.payment_method)"
-                :title="normalizePaymentMethodText(row.payment_method)"
-              />
-              <span v-else>-</span>
+              <div class="cell-center">
+                <Tag
+                  v-if="row.payment_method"
+                  class="sbm-tag-ellipsis"
+                  severity="success"
+                  :value="normalizePaymentMethodText(row.payment_method)"
+                  :title="normalizePaymentMethodText(row.payment_method)"
+                />
+                <span v-else>-</span>
+              </div>
             </template>
           </Column>
           <Column :header="'\u5907\u6CE8'" :style="{ width: '240px' }">
@@ -99,12 +101,14 @@
           </Column>
           <Column field="transaction_time" :header="'\u4EA4\u6613\u65F6\u95F4'" sortable :style="{ width: '170px' }" headerClass="col-center" bodyClass="col-center">
             <template #body="{ data: row }">
-              {{ formatDateTime(row.transaction_time) }}
+              <div class="cell-center">{{ formatDateTime(row.transaction_time) }}</div>
             </template>
           </Column>
           <Column :header="'\u5173\u8054\u53D1\u7968'" :style="{ width: '120px' }" headerClass="col-center" bodyClass="col-center">
             <template #body="{ data: row }">
-              <Button size="small" class="p-button-text" :label="`\u67E5\u770B (${row.invoiceCount || 0})`" @click="viewLinkedInvoices(row)" />
+              <div class="cell-center">
+                <Button size="small" class="p-button-text" :label="`\u67E5\u770B (${row.invoiceCount || 0})`" @click="viewLinkedInvoices(row)" />
+              </div>
             </template>
           </Column>
           <Column :header="'\u64CD\u4F5C'" :style="{ width: '110px' }" headerClass="col-center" bodyClass="col-center">
@@ -1398,6 +1402,16 @@ watch(
   display: flex;
   gap: 6px;
   justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+.cell-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
 }
 
 .payments-table :deep(.p-datatable-table) {
@@ -1413,7 +1427,7 @@ watch(
 }
 
 .payments-table :deep(.col-center) {
-  text-align: center;
+  text-align: center !important;
 }
 
 .sbm-ellipsis {
