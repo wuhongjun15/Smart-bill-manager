@@ -1762,10 +1762,34 @@ watch(
 
 .sbm-time-picker {
   margin-top: 8px;
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
   border: 1px solid rgba(0, 0, 0, 0.06);
   background: rgba(255, 255, 255, 0.98);
   border-radius: var(--radius-md);
-  padding: 10px;
+  padding: 8px;
+}
+
+.sbm-time-picker :deep(.p-datepicker),
+.sbm-time-picker :deep(.p-datepicker-panel) {
+  width: auto !important;
+}
+
+.sbm-time-picker :deep(.p-datepicker-panel) {
+  font-size: 0.92rem;
+}
+
+.sbm-time-picker :deep(.p-datepicker-header) {
+  padding: 0.6rem 0.7rem;
+}
+
+.sbm-time-picker :deep(.p-datepicker-calendar-container) {
+  padding: 0 0.4rem;
+}
+
+.sbm-time-picker :deep(.p-datepicker-time-picker) {
+  padding: 0.6rem 0.7rem;
 }
 
 .sbm-time-picker-footer {
