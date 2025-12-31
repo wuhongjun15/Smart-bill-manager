@@ -22,13 +22,15 @@ type PaymentService struct {
 	repo        *repository.PaymentRepository
 	invoiceRepo *repository.InvoiceRepository
 	ocrService  *OCRService
+	uploadsDir  string
 }
 
-func NewPaymentService() *PaymentService {
+func NewPaymentService(uploadsDir string) *PaymentService {
 	return &PaymentService{
 		repo:        repository.NewPaymentRepository(),
 		invoiceRepo: repository.NewInvoiceRepository(),
 		ocrService:  NewOCRService(),
+		uploadsDir:  uploadsDir,
 	}
 }
 
@@ -197,9 +199,13 @@ type UpdatePaymentInput struct {
 }
 
 func (s *PaymentService) Update(id string, input UpdatePaymentInput) error {
-	var before *models.Payment
 	needsRecalc := input.TripID != nil || input.TripAssignSrc != nil || input.BadDebt != nil
-	if needsRecalc {
+	timeChanged := input.TransactionTime != nil
+	confirming := input.Confirm != nil && *input.Confirm
+	moveScreenshot := false
+
+	var before *models.Payment
+	if needsRecalc || timeChanged || confirming || moveScreenshot {
 		p, err := s.repo.FindByID(id)
 		if err != nil {
 			return err
@@ -287,33 +293,34 @@ func (s *PaymentService) Update(id string, input UpdatePaymentInput) error {
 		return nil
 	}
 
+	// No file move/rename on confirm. The draft flag alone controls visibility/lifecycle.
+
 	if err := s.repo.Update(id, data); err != nil {
 		return err
 	}
 
-	if !needsRecalc {
+	after, _ := s.repo.FindByID(id)
+
+	// If transaction time changed (common during OCR confirm), recompute auto trip assignment.
+	if (timeChanged || confirming) && after != nil && strings.TrimSpace(after.TripAssignSrc) == assignSrcAuto {
+		db := database.GetDB()
+		_ = db.Transaction(func(tx *gorm.DB) error {
+			return autoAssignPaymentTx(tx, after)
+		})
+		after, _ = s.repo.FindByID(id)
+	}
+
+	if !needsRecalc && !(timeChanged || confirming) {
 		return nil
 	}
 
-	affected := make([]string, 0, 2)
-	if before != nil && before.TripID != nil && strings.TrimSpace(*before.TripID) != "" {
+	affected := make([]string, 0, 4)
+	if before != nil && before.BadDebt && before.TripID != nil && strings.TrimSpace(*before.TripID) != "" {
 		affected = append(affected, strings.TrimSpace(*before.TripID))
 	}
-
-	afterTripID := ""
-	if v, ok := data["trip_id"]; ok {
-		if v == nil {
-			afterTripID = ""
-		} else if s, ok := v.(string); ok {
-			afterTripID = strings.TrimSpace(s)
-		}
-	} else if before != nil && before.TripID != nil {
-		afterTripID = strings.TrimSpace(*before.TripID)
+	if after != nil && after.BadDebt && after.TripID != nil && strings.TrimSpace(*after.TripID) != "" {
+		affected = append(affected, strings.TrimSpace(*after.TripID))
 	}
-	if afterTripID != "" {
-		affected = append(affected, afterTripID)
-	}
-
 	return recalcTripBadDebtLockedForTripIDs(affected)
 }
 
@@ -328,7 +335,11 @@ func (s *PaymentService) Delete(id string) error {
 		tripID = strings.TrimSpace(*payment.TripID)
 	}
 
-	if err := s.repo.Delete(id); err != nil {
+	db := database.GetDB()
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		_ = tx.Where("payment_id = ?", id).Delete(&models.InvoicePaymentLink{}).Error
+		return tx.Where("id = ?", id).Delete(&models.Payment{}).Error
+	}); err != nil {
 		return err
 	}
 
@@ -379,17 +390,29 @@ func (s *PaymentService) CreateFromScreenshot(input CreateFromScreenshotInput) (
 		return nil, nil, parseErr
 	}
 
+	warn := error(nil)
+	utcTimeStr := ""
+	payTime := time.Time{}
 	if extracted.TransactionTime == nil || strings.TrimSpace(*extracted.TransactionTime) == "" {
-		return nil, extracted, fmt.Errorf("%w", ErrMissingTransactionTime)
+		warn = fmt.Errorf("%w", ErrMissingTransactionTime)
+	} else {
+		shanghai := loadLocationOrUTC("Asia/Shanghai")
+		t, err := parsePaymentTimeToUTC(*extracted.TransactionTime, shanghai)
+		if err != nil {
+			warn = fmt.Errorf("%w: %v", ErrMissingTransactionTime, err)
+		} else {
+			payTime = t
+			utcTimeStr = payTime.Format(time.RFC3339)
+			extracted.TransactionTime = &utcTimeStr
+		}
 	}
-
-	shanghai := loadLocationOrUTC("Asia/Shanghai")
-	payTime, err := parsePaymentTimeToUTC(*extracted.TransactionTime, shanghai)
-	if err != nil {
-		return nil, extracted, fmt.Errorf("%w: %v", ErrMissingTransactionTime, err)
+	if warn != nil {
+		// Force UI to manually choose transaction time.
+		extracted.TransactionTime = nil
+		now := time.Now().UTC()
+		payTime = now
+		utcTimeStr = now.Format(time.RFC3339)
 	}
-	utcTimeStr := payTime.Format(time.RFC3339)
-	extracted.TransactionTime = &utcTimeStr
 
 	// Store extracted data as JSON
 	extractedDataJSON, err := ExtractedDataToJSON(extracted)
@@ -398,7 +421,7 @@ func (s *PaymentService) CreateFromScreenshot(input CreateFromScreenshotInput) (
 		extractedDataJSON = nil
 	}
 
-	// Create payment record with extracted data
+	// Create draft payment record with extracted data (confirmed on user save).
 	payment := &models.Payment{
 		ID:                utils.GenerateUUID(),
 		IsDraft:           true,
@@ -425,15 +448,13 @@ func (s *PaymentService) CreateFromScreenshot(input CreateFromScreenshotInput) (
 
 	// Set transaction time if extracted
 	db := database.GetDB()
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(payment).Error; err != nil {
-			return err
-		}
-		return autoAssignPaymentTx(tx, payment)
-	}); err != nil {
+	if err := db.Create(payment).Error; err != nil {
 		return nil, nil, err
 	}
 
+	if warn != nil {
+		return payment, extracted, warn
+	}
 	return payment, extracted, nil
 }
 

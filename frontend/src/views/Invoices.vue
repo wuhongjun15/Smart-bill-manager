@@ -691,6 +691,45 @@ const uploadOcrForm = reactive({
   buyer_name: '',
 })
 
+const PENDING_INVOICE_DRAFT_KEY = 'sbm_pending_invoice_upload_draft'
+
+const rememberPendingInvoiceDraft = (ids: string[]) => {
+  if (typeof window === 'undefined') return
+  const uniq = Array.from(new Set(ids.filter(Boolean)))
+  window.localStorage.setItem(PENDING_INVOICE_DRAFT_KEY, JSON.stringify({ ids: uniq, ts: Date.now() }))
+}
+
+const clearPendingInvoiceDraft = () => {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(PENDING_INVOICE_DRAFT_KEY)
+}
+
+const cleanupPendingInvoiceDraftOnLoad = async () => {
+  if (typeof window === 'undefined') return
+  const raw = window.localStorage.getItem(PENDING_INVOICE_DRAFT_KEY)
+  if (!raw) return
+  try {
+    const parsed = JSON.parse(raw) as { ids?: unknown }
+    const ids = Array.isArray(parsed?.ids) ? (parsed.ids as unknown[]) : []
+    for (const v of ids) {
+      if (typeof v !== 'string' || !v) continue
+      try {
+        const res = await invoiceApi.getById(v)
+        const inv = res.data?.data as any
+        if (inv?.is_draft) {
+          await invoiceApi.delete(v)
+        }
+      } catch {
+        // ignore per-item
+      }
+    }
+  } catch {
+    // ignore
+  } finally {
+    clearPendingInvoiceDraft()
+  }
+}
+
 const triggerInvoiceChoose = (event: MouseEvent) => {
   const target = event.target as HTMLElement | null
   if (!target) return
@@ -814,6 +853,7 @@ const resetUploadDraftState = () => {
   uploadOcrForm.amount = null
   uploadOcrForm.seller_name = ''
   uploadOcrForm.buyer_name = ''
+  clearPendingInvoiceDraft()
 }
 
 const discardUploadedInvoices = async () => {
@@ -903,6 +943,7 @@ const handleUpload = async () => {
       uploadOcrForm.seller_name = extracted?.seller_name || ''
       uploadOcrForm.buyer_name = extracted?.buyer_name || ''
     }
+    rememberPendingInvoiceDraft(uploadedInvoiceIds.value)
     toast.add({ severity: 'success', summary: '\u4E0A\u4F20\u6210\u529F\uFF0C\u8BF7\u786E\u8BA4\u8BC6\u522B\u7ED3\u679C', life: 2200 })
     notifications.add({
       severity: 'success',
@@ -945,6 +986,7 @@ const handleSaveUploadedInvoice = async () => {
         })
       }
     }
+    clearPendingInvoiceDraft()
     toast.add({ severity: 'success', summary: '\u53D1\u7968\u4FE1\u606F\u5DF2\u66F4\u65B0', life: 2000 })
     uploadConfirmed.value = true
     uploadModalVisible.value = false
@@ -1315,8 +1357,11 @@ const otherSourceCount = computed(() => {
 })
 
 onMounted(() => {
-  loadInvoices()
-  loadStats()
+  void (async () => {
+    await cleanupPendingInvoiceDraftOnLoad()
+    await loadInvoices()
+    await loadStats()
+  })()
 })
 </script>
 

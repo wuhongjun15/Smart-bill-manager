@@ -107,10 +107,13 @@ func main() {
 
 	// Initialize services
 	authService := services.NewAuthService()
-	paymentService := services.NewPaymentService()
+	paymentService := services.NewPaymentService(uploadsDir)
 	invoiceService := services.NewInvoiceService(uploadsDir)
 	emailService := services.NewEmailService(uploadsDir, invoiceService)
 	tripService := services.NewTripService(uploadsDir)
+
+	// Periodically clean up stale draft uploads (refresh/abandon cases).
+	services.StartDraftCleanup(db, uploadsDir)
 
 	// No longer automatically creating admin - use setup page instead
 	log.Println("System ready. Use setup page for initial configuration.")

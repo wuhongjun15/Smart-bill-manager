@@ -150,9 +150,10 @@ type UpdateInvoiceInput struct {
 }
 
 func (s *InvoiceService) Update(id string, input UpdateInvoiceInput) error {
+	confirming := input.Confirm != nil && *input.Confirm
 	needsRecalc := input.BadDebt != nil || input.PaymentID != nil
 	var affectedTrips []string
-	if needsRecalc {
+	if needsRecalc || confirming {
 		linked, err := s.repo.GetLinkedPayments(id)
 		if err != nil {
 			return err
@@ -259,7 +260,15 @@ func (s *InvoiceService) Delete(id string) error {
 	}
 	_ = os.Remove(filePath) // Ignore error if file doesn't exist
 
-	if err := s.repo.Delete(id); err != nil {
+	// Delete invoice + links atomically.
+	db := database.GetDB()
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		_ = tx.Where("invoice_id = ?", id).Delete(&models.InvoicePaymentLink{}).Error
+		if err := tx.Where("id = ?", id).Delete(&models.Invoice{}).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 

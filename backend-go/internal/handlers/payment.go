@@ -202,7 +202,7 @@ func (h *PaymentHandler) UploadScreenshot(c *gin.Context) {
 				extracted = &services.PaymentExtractedData{RawText: "", PrettyText: ""}
 			}
 			utils.Success(c, 200, "截图上传成功，但无法识别交易时间，请在下方手动选择交易时间", gin.H{
-				"payment":         nil,
+				"payment":         payment,
 				"extracted":       extracted,
 				"screenshot_path": relPath,
 				"ocr_error":       "missing transaction time",

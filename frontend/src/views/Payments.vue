@@ -589,6 +589,49 @@ const uploadedPaymentId = ref<string | null>(null)
 const uploadedScreenshotPath = ref<string | null>(null)
 const screenshotInput = ref<HTMLInputElement | null>(null)
 
+const PENDING_PAYMENT_DRAFT_KEY = 'sbm_pending_payment_upload_draft'
+
+const rememberPendingPaymentDraft = (draft: { paymentId?: string | null; screenshotPath?: string | null }) => {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(
+    PENDING_PAYMENT_DRAFT_KEY,
+    JSON.stringify({
+      paymentId: draft.paymentId || null,
+      screenshotPath: draft.screenshotPath || null,
+      ts: Date.now(),
+    }),
+  )
+}
+
+const clearPendingPaymentDraft = () => {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(PENDING_PAYMENT_DRAFT_KEY)
+}
+
+const cleanupPendingPaymentDraftOnLoad = async () => {
+  if (typeof window === 'undefined') return
+  const raw = window.localStorage.getItem(PENDING_PAYMENT_DRAFT_KEY)
+  if (!raw) return
+  try {
+    const parsed = JSON.parse(raw) as { paymentId?: string | null; screenshotPath?: string | null }
+    const paymentId = typeof parsed?.paymentId === 'string' ? parsed.paymentId : ''
+    const screenshotPath = typeof parsed?.screenshotPath === 'string' ? parsed.screenshotPath : ''
+    if (paymentId) {
+      const res = await paymentApi.getById(paymentId)
+      const p = res.data?.data as any
+      if (p?.is_draft) {
+        await paymentApi.delete(paymentId)
+      }
+    } else if (screenshotPath) {
+      await paymentApi.cancelUploadScreenshot(screenshotPath)
+    }
+  } catch {
+    // ignore
+  } finally {
+    clearPendingPaymentDraft()
+  }
+}
+
 const triggerScreenshotChoose = (event: MouseEvent) => {
   const target = event.target as HTMLElement | null
   if (!target) return
@@ -788,6 +831,7 @@ const handleScreenshotUpload = async () => {
       uploadedPaymentId.value = payment?.id || null
       uploadedScreenshotPath.value = screenshot_path || null
       ocrResult.value = extracted
+      rememberPendingPaymentDraft({ paymentId: uploadedPaymentId.value, screenshotPath: uploadedScreenshotPath.value })
 
       ocrForm.amount = extracted.amount || 0
       ocrForm.merchant = extracted.merchant || ''
@@ -801,16 +845,17 @@ const handleScreenshotUpload = async () => {
       ocrForm.description = ''
 
       if (ocr_error) {
+        const hasTime = !!(extracted?.transaction_time && dayjs(extracted.transaction_time).isValid())
         toast.add({
           severity: 'warn',
-          summary: uploadedPaymentId.value
+          summary: hasTime
             ? `\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0C\u4F46 OCR \u8BC6\u522B\u5931\u8D25\uFF1A${ocr_error}`
             : '\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0C\u4F46\u672A\u8BC6\u522B\u5230\u4EA4\u6613\u65F6\u95F4\uFF0C\u8BF7\u624B\u52A8\u9009\u62E9\u4EA4\u6613\u65F6\u95F4',
           life: 5000,
         })
         notifications.add({
           severity: 'warn',
-          title: uploadedPaymentId.value
+          title: hasTime
             ? '\u652F\u4ED8\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0COCR \u5931\u8D25'
             : '\u652F\u4ED8\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0C\u9700\u624B\u52A8\u8865\u5168',
           detail: selectedScreenshotName.value || undefined,
@@ -870,6 +915,7 @@ const handleSaveOcrResult = async () => {
       })
     }
 
+    clearPendingPaymentDraft()
     resetScreenshotUploadState()
     await loadPayments()
     await loadStats()
@@ -901,6 +947,7 @@ const cancelScreenshotUpload = () => {
   } else if (uploadedScreenshotPath.value) {
     paymentApi.cancelUploadScreenshot(uploadedScreenshotPath.value).catch((error) => console.error('Failed to delete screenshot file:', error))
   }
+  clearPendingPaymentDraft()
   resetScreenshotUploadState()
 }
 
@@ -1322,6 +1369,7 @@ onMounted(() => {
     window.addEventListener('scroll', handlePaymentTimeViewportChange, true)
   }
   void (async () => {
+    await cleanupPendingPaymentDraftOnLoad()
     await loadPayments()
     await loadStats()
     await tryOpenMatchFromRoute()
