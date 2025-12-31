@@ -1430,6 +1430,15 @@ watch(
   text-align: center !important;
 }
 
+.payments-table :deep(th.col-center .p-column-header-content) {
+  justify-content: center;
+}
+
+.payments-table :deep(th.col-center .p-column-header-content),
+.payments-table :deep(th.col-center .p-column-title) {
+  width: 100%;
+}
+
 .sbm-ellipsis {
   display: inline-block;
   max-width: 100%;
