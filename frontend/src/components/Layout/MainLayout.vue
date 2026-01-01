@@ -318,17 +318,11 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
 .layout {
   min-height: 100vh;
   display: flex;
-  gap: 32px;
+  gap: clamp(24px, 3vw, 44px);
   padding: 20px;
   width: 100%;
   margin: 0;
   align-items: flex-start;
-}
-
-@media (max-width: 1280px) {
-  .layout {
-    gap: 24px;
-  }
 }
 
 .sidebar {
@@ -375,7 +369,7 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
   cursor: pointer;
   gap: 10px;
   user-select: none;
-  padding: 0 10px;
+  padding: 0 14px;
 }
 
 .brand-logo {
@@ -418,8 +412,8 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
   transition: all var(--transition-base);
   text-align: left;
   position: relative;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 400;
   white-space: nowrap;
 }
 
