@@ -72,7 +72,8 @@
                     </div>
                   </div>
 
-                  <DataTable
+                  <div class="sbm-dt-hscroll">
+                    <DataTable
                     :value="tripPayments[trip.id] || []"
                     :loading="loadingPaymentsTripId === trip.id"
                     responsiveLayout="scroll"
@@ -81,6 +82,7 @@
                     class="trip-table"
                     :pt="tableScrollPt"
                     :tableStyle="tripTableStyle"
+                    :style="tripTableRootStyle"
                   >
                     <Column field="amount" header="金额" :style="{ width: '120px' }" sortable>
                       <template #body="{ data: row }">
@@ -159,7 +161,8 @@
                         </div>
                       </template>
                     </Column>
-                  </DataTable>
+                    </DataTable>
+                  </div>
                 </AccordionTab>
               </Accordion>
             </TabPanel>
@@ -176,14 +179,15 @@
                   <div class="empty-sub">当支付时间同时命中多个行程时，会出现在这里等待你选择归属。</div>
                 </div>
 
-                <DataTable
-                  v-else
-                  :value="pendingPayments"
-                  responsiveLayout="scroll"
-                  class="pending-table"
-                  :pt="tableScrollPt"
-                  :tableStyle="tripTableStyle"
-                >
+                <div v-else class="sbm-dt-hscroll">
+                  <DataTable
+                    :value="pendingPayments"
+                    responsiveLayout="scroll"
+                    class="pending-table"
+                    :pt="tableScrollPt"
+                    :tableStyle="tripTableStyle"
+                    :style="tripTableRootStyle"
+                  >
                   <Column header="金额" :style="{ width: '120px' }">
                     <template #body="{ data: row }">
                       <span class="amount">{{ formatMoney(row.payment.amount) }}</span>
@@ -233,7 +237,8 @@
                       </div>
                     </template>
                   </Column>
-                </DataTable>
+                  </DataTable>
+                </div>
               </div>
             </TabPanel>
 
@@ -278,13 +283,15 @@
                       </div>
                     </template>
                     <template #content>
-                      <DataTable
-                        :value="calendarSelectedPayments"
-                        responsiveLayout="scroll"
-                        class="calendar-table"
-                        :pt="tableScrollPt"
-                        :tableStyle="tripTableStyle"
-                      >
+                      <div class="sbm-dt-hscroll">
+                        <DataTable
+                          :value="calendarSelectedPayments"
+                          responsiveLayout="scroll"
+                          class="calendar-table"
+                          :pt="tableScrollPt"
+                          :tableStyle="tripTableStyle"
+                          :style="tripTableRootStyle"
+                        >
                         <Column field="amount" header="金额" :style="{ width: '120px' }">
                           <template #body="{ data: row }">
                             <span class="amount">{{ formatMoney(row.amount) }}</span>
@@ -310,7 +317,8 @@
                             <span v-else class="muted">-</span>
                           </template>
                         </Column>
-                      </DataTable>
+                        </DataTable>
+                      </div>
                       <small class="muted">日历视图按支付时间统计；关联发票请在“按行程”中查看。</small>
                     </template>
                   </Card>
@@ -478,6 +486,10 @@ const tableScrollPt = {
 
 const tripTableStyle = {
   minWidth: '960px',
+} as const
+
+const tripTableRootStyle = {
+  minWidth: '1200px',
 } as const
 
 const toast = useToast()
@@ -1385,6 +1397,15 @@ onMounted(async () => {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.sbm-dt-hscroll {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .trip-table :deep(.p-datatable-table-container),
