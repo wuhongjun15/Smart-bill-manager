@@ -74,6 +74,7 @@
           responsiveLayout="scroll"
           sortField="created_at"
           :sortOrder="-1"
+          @row-click="onInvoiceRowClick"
         >
           <Column field="original_name" :header="'\u6587\u4EF6\u540D'" :style="{ width: '17%' }">
             <template #body="{ data: row }">
@@ -108,8 +109,8 @@
           <Column :header="'\u64CD\u4F5C'" :style="{ width: '8%' }">
             <template #body="{ data: row }">
               <div class="row-actions">
-                <Button class="p-button-text" icon="pi pi-eye" @click="openPreview(row)" />
-                <Button class="p-button-text p-button-danger" icon="pi pi-trash" @click="confirmDelete(row.id)" />
+                <Button class="p-button-text" icon="pi pi-eye" @click.stop="openPreview(row)" />
+                <Button class="p-button-text p-button-danger" icon="pi pi-trash" @click.stop="confirmDelete(row.id)" />
               </div>
             </template>
           </Column>
@@ -273,6 +274,7 @@
 
     <Dialog
       v-model:visible="previewVisible"
+      class="invoice-preview-dialog"
       modal
       :header="'\u53D1\u7968\u8BE6\u60C5'"
       :style="{ width: '860px', maxWidth: '94vw' }"
@@ -592,6 +594,7 @@ import Button from 'primevue/button'
 import Card from 'primevue/card'
 import Column from 'primevue/column'
 import DataTable from 'primevue/datatable'
+import type { DataTableRowClickEvent } from 'primevue/datatable'
 import Dialog from 'primevue/dialog'
 import Divider from 'primevue/divider'
 import DatePicker from 'primevue/datepicker'
@@ -607,6 +610,7 @@ import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { invoiceApi, FILE_BASE_URL } from '@/api'
+import { useIsMobileUI } from '@/composables/useDevice'
 import { useNotificationStore } from '@/stores/notifications'
 import type { Invoice, Payment, DedupHint } from '@/types'
 
@@ -669,6 +673,8 @@ const confidenceClass = (c?: number) => {
 const toast = useToast()
 const notifications = useNotificationStore()
 const confirm = useConfirm()
+
+const { isMobileUI } = useIsMobileUI()
 
 const confirmForceSave = (message: string) =>
   new Promise<boolean>(resolve => {
@@ -1098,6 +1104,17 @@ const openPreview = (invoice: Invoice) => {
   loadLinkedPayments(invoice.id)
 }
 
+const isInteractiveTarget = (target: EventTarget | null) => {
+  if (!target || !(target instanceof HTMLElement)) return false
+  return !!target.closest('button, a, input, textarea, select, [role=\"button\"], .p-button, .p-checkbox, .p-radiobutton')
+}
+
+const onInvoiceRowClick = (event: DataTableRowClickEvent<Invoice>) => {
+  if (!isMobileUI.value) return
+  if (isInteractiveTarget(event.originalEvent?.target ?? null)) return
+  openPreview(event.data)
+}
+
 const downloadFile = (invoice: Invoice) => {
   window.open(`${FILE_BASE_URL}/${invoice.file_path}`, '_blank')
 }
@@ -1454,6 +1471,21 @@ onMounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 768px) {
+  .invoices-table :deep(.p-datatable-table) {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .invoices-table :deep(.p-datatable-tbody > tr) {
+    cursor: pointer;
+  }
+
+  .invoices-table :deep(.p-datatable-tbody > tr:active) {
+    background: rgba(2, 6, 23, 0.04);
+  }
 }
 
 .field {
@@ -1836,5 +1868,34 @@ onMounted(() => {
 
 .ocr-hint-mid {
   color: var(--color-text-secondary);
+}
+
+@media (max-width: 640px) {
+  :global(.p-dialog.invoice-preview-dialog) {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    display: flex;
+    flex-direction: column;
+  }
+
+  :global(.p-dialog.invoice-preview-dialog .p-dialog-header) {
+    padding: 12px 12px 8px !important;
+    border-top-left-radius: 0 !important;
+    border-top-right-radius: 0 !important;
+  }
+
+  :global(.p-dialog.invoice-preview-dialog .p-dialog-content) {
+    padding: 12px 12px 14px !important;
+    flex: 1 1 auto;
+    overflow: auto;
+  }
+
+  :global(.p-dialog.invoice-preview-dialog .p-dialog-footer) {
+    padding: 10px 12px 12px !important;
+  }
 }
 </style>
