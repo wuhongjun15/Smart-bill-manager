@@ -318,7 +318,7 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
 .layout {
   min-height: 100vh;
   display: flex;
-  gap: clamp(24px, 3vw, 44px);
+  gap: 24px;
   padding: 20px;
   width: 100%;
   margin: 0;
@@ -334,7 +334,8 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
   position: sticky;
   top: 20px;
   height: calc(100vh - 40px);
-  padding: 20px 14px 14px;
+  /* Keep width content-based, but add comfortable right breathing room */
+  padding: 20px 22px 14px 14px;
   border-radius: 24px;
   background: var(--p-surface-50);
 }
@@ -403,7 +404,7 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
-  padding: 0 10px;
+  padding: 0 14px;
   border: 0;
   border-radius: 12px;
   background: transparent;
