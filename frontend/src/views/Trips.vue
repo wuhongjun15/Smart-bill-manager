@@ -1350,6 +1350,35 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.trip-table :deep(.p-datatable-table),
+.pending-table :deep(.p-datatable-table) {
+  width: 100%;
+  table-layout: fixed;
+}
+
+.trip-table :deep(.p-datatable-thead > tr > th),
+.trip-table :deep(.p-datatable-tbody > tr > td),
+.pending-table :deep(.p-datatable-thead > tr > th),
+.pending-table :deep(.p-datatable-tbody > tr > td) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 768px) {
+  .trip-table :deep(.p-datatable-table-container),
+  .pending-table :deep(.p-datatable-table-container) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .trip-table :deep(.p-datatable-table),
+  .pending-table :deep(.p-datatable-table) {
+    width: max-content;
+    min-width: 100%;
+  }
+}
+
 .pending-panel {
   display: flex;
   flex-direction: column;
