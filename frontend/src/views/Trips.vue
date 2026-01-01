@@ -64,11 +64,7 @@
                         :loading="deletingTripId === trip.id"
                         @click="confirmDeleteTrip(trip)"
                       />
-                    </div>
-                    <div class="trip-actions-right">
-                      <small class="muted">
-                        删除行程会删除“归属到该行程”的支付记录，并按规则删除/解绑关联发票
-                      </small>
+                      <small class="trip-actions-hint muted">删除行程会删除“归属到该行程”的支付记录，并按规则删除/解绑关联发票</small>
                     </div>
                   </div>
 
@@ -1355,6 +1351,12 @@ onMounted(async () => {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.trip-actions-hint {
+  flex: 0 0 100%;
+  display: block;
+  margin-top: 2px;
 }
 
 .muted {
