@@ -269,7 +269,7 @@
                       </div>
                     </template>
                     <template #content>
-                      <DataTable :value="calendarSelectedPayments" responsiveLayout="scroll">
+                      <DataTable :value="calendarSelectedPayments" responsiveLayout="scroll" class="calendar-table">
                         <Column field="amount" header="金额" :style="{ width: '120px' }">
                           <template #body="{ data: row }">
                             <span class="amount">{{ formatMoney(row.amount) }}</span>
@@ -1350,8 +1350,16 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.trip-table :deep(.p-datatable-table-container),
+.pending-table :deep(.p-datatable-table-container),
+.calendar-table :deep(.p-datatable-table-container) {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .trip-table :deep(.p-datatable-table),
-.pending-table :deep(.p-datatable-table) {
+.pending-table :deep(.p-datatable-table),
+.calendar-table :deep(.p-datatable-table) {
   width: 100%;
   table-layout: fixed;
 }
@@ -1359,23 +1367,20 @@ onMounted(async () => {
 .trip-table :deep(.p-datatable-thead > tr > th),
 .trip-table :deep(.p-datatable-tbody > tr > td),
 .pending-table :deep(.p-datatable-thead > tr > th),
-.pending-table :deep(.p-datatable-tbody > tr > td) {
+.pending-table :deep(.p-datatable-tbody > tr > td),
+.calendar-table :deep(.p-datatable-thead > tr > th),
+.calendar-table :deep(.p-datatable-tbody > tr > td) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-@media (max-width: 768px) {
-  .trip-table :deep(.p-datatable-table-container),
-  .pending-table :deep(.p-datatable-table-container) {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
+@media (max-width: 1100px) {
   .trip-table :deep(.p-datatable-table),
-  .pending-table :deep(.p-datatable-table) {
+  .pending-table :deep(.p-datatable-table),
+  .calendar-table :deep(.p-datatable-table) {
     width: max-content;
-    min-width: 960px;
+    min-width: max(100%, 960px);
   }
 }
 
