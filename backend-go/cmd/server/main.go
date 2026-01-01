@@ -125,6 +125,11 @@ func main() {
 	tripService := services.NewTripService(uploadsDir)
 	taskService := services.NewTaskService(db, paymentService, invoiceService)
 	taskService.StartWorker()
+	if started, err := services.StartOCRWorkerIfEnabled(); err != nil {
+		log.Printf("[OCR] worker not started: %v", err)
+	} else if started {
+		log.Printf("[OCR] worker mode: enabled")
+	}
 
 	// Periodically clean up stale draft uploads (refresh/abandon cases).
 	services.StartDraftCleanup(db, uploadsDir)

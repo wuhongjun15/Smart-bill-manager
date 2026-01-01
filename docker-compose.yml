@@ -18,6 +18,8 @@ services:
       # Optional: Persist RapidOCR auto-downloaded models into a mounted directory
       # (models will be stored under: $SBM_OCR_DATA_DIR/rapidocr-models)
       - SBM_OCR_DATA_DIR=/app/backend/data
+      # Performance: keep a persistent RapidOCR worker process (avoid per-request Python startup)
+      - SBM_OCR_WORKER=1
     volumes:
       - app-data:/app/backend/data
       - app-uploads:/app/backend/uploads

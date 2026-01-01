@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -23,6 +24,11 @@ import (
 
 // OCRService provides OCR functionality
 type OCRService struct{}
+
+var (
+	rapidOCRModulesOnce sync.Once
+	rapidOCRModulesOK   bool
+)
 
 const (
 	// taxIDPattern matches common Chinese taxpayer identifiers:
@@ -242,6 +248,50 @@ func (s *OCRService) RecognizeWithRapidOCRProfile(imagePath, profile string) (st
 }
 
 func (s *OCRService) recognizeWithRapidOCRArgs(imagePath string, extraArgs []string) (string, error) {
+	// Prefer a persistent worker to avoid per-request Python startup overhead.
+	// Falls back to the CLI when the worker is disabled or unavailable.
+	reqProfile := parseOCRProfileFromArgs(extraArgs)
+	if ocrWorkerEnabled() {
+		workerScript := s.findOCRWorkerScript()
+		if workerScript == "" {
+			fmt.Printf("[OCR] OCR worker enabled but scripts/ocr_worker.py not found; falling back to CLI\n")
+		} else {
+			fmt.Printf("[OCR] Running OCR worker for: %s (engine=%s profile=%s)\n", imagePath, getOCREngine(), reqProfile)
+			out, err := recognizeWithRapidOCRWorker(workerScript, imagePath, reqProfile)
+			if err == nil {
+				var result OCRCLIResponse
+				parseErr := unmarshalPossiblyNoisyJSON(out, &result)
+				if parseErr == nil && result.Success {
+					engine := result.Engine
+					if strings.TrimSpace(engine) == "" {
+						engine = "rapidocr"
+					}
+					usedProfile := strings.TrimSpace(result.Profile)
+					if usedProfile == "" {
+						usedProfile = reqProfile
+					}
+					be := strings.TrimSpace(result.Backend)
+					if be == "" {
+						be = "custom"
+					}
+					if result.Variant != "" {
+						fmt.Printf("[OCR] OCR(worker) extracted %d lines, %d characters (engine=%s profile=%s variant=%s backend=%s)\n", result.LineCount, len(result.Text), engine, usedProfile, result.Variant, be)
+					} else {
+						fmt.Printf("[OCR] OCR(worker) extracted %d lines, %d characters (engine=%s profile=%s backend=%s)\n", result.LineCount, len(result.Text), engine, usedProfile, be)
+					}
+					return result.Text, nil
+				}
+				if parseErr != nil {
+					fmt.Printf("[OCR] OCR worker JSON parse failed: %v\n", parseErr)
+				} else if !result.Success {
+					fmt.Printf("[OCR] OCR worker returned error: %s\n", result.Error)
+				}
+			} else {
+				fmt.Printf("[OCR] OCR worker failed: %v; falling back to CLI\n", err)
+			}
+		}
+	}
+
 	fmt.Printf("[OCR] Running OCR CLI for: %s (engine=%s)\n", imagePath, getOCREngine())
 
 	// Find the OCR CLI script
@@ -416,15 +466,26 @@ func (s *OCRService) checkPythonModule(moduleName string) bool {
 
 // isRapidOCRAvailable checks if RapidOCR is available (Python module).
 func (s *OCRService) isRapidOCRAvailable() bool {
-	// Check if script exists
-	scriptPath := s.findOCRCLIScript()
-	if scriptPath == "" {
-		fmt.Printf("[OCR] ocr_cli.py script not found\n")
-		return false
+	// Check if script exists (worker preferred when enabled).
+	if ocrWorkerEnabled() {
+		workerPath := s.findOCRWorkerScript()
+		if workerPath == "" {
+			fmt.Printf("[OCR] ocr_worker.py script not found\n")
+			return false
+		}
+	} else {
+		scriptPath := s.findOCRCLIScript()
+		if scriptPath == "" {
+			fmt.Printf("[OCR] ocr_cli.py script not found\n")
+			return false
+		}
 	}
 
-	// RapidOCR v3 requires both rapidocr and onnxruntime.
-	if s.checkPythonModule("rapidocr") && s.checkPythonModule("onnxruntime") {
+	rapidOCRModulesOnce.Do(func() {
+		// RapidOCR v3 requires both rapidocr and onnxruntime.
+		rapidOCRModulesOK = s.checkPythonModule("rapidocr") && s.checkPythonModule("onnxruntime")
+	})
+	if rapidOCRModulesOK {
 		return true
 	}
 	fmt.Printf("[OCR] RapidOCR v3 is not available\n")
