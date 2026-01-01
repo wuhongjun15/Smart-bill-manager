@@ -204,6 +204,13 @@ func (s *AuthService) CreateInitialAdmin(username, password string, email *strin
 		if result.User != nil {
 			result.User.Role = "admin"
 		}
+
+		// Re-issue token with admin role (Register() always issues a "user" token).
+		if result.User != nil {
+			if token, err := utils.GenerateToken(result.User.ID, result.User.Username, "admin"); err == nil {
+				result.Token = token
+			}
+		}
 	}
 
 	return result, nil

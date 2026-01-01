@@ -10,7 +10,7 @@
 
       <nav class="nav">
         <button
-          v-for="item in navItems"
+          v-for="item in navItemsWithAdmin"
           :key="item.path"
           class="nav-item"
           :class="{ active: currentRoute === item.path }"
@@ -53,7 +53,7 @@
 
       <nav class="nav mobile-nav">
         <button
-          v-for="item in navItems"
+          v-for="item in navItemsWithAdmin"
           :key="item.path"
           class="nav-item"
           :class="{ active: currentRoute === item.path }"
@@ -125,14 +125,24 @@ const route = useRoute()
 const authStore = useAuthStore()
 const toast = useToast()
 
-const navItems = [
+type NavItem = { path: string; label: string; icon: string }
+
+const navItems: NavItem[] = [
   { path: '/dashboard', label: '仪表盘', icon: 'pi pi-chart-bar' },
   { path: '/payments', label: '支付记录', icon: 'pi pi-wallet' },
   { path: '/invoices', label: '发票管理', icon: 'pi pi-file' },
   { path: '/trips', label: '行程日历', icon: 'pi pi-calendar' },
   { path: '/email', label: '邮箱监控', icon: 'pi pi-inbox' },
   { path: '/logs', label: '日志', icon: 'pi pi-book' },
-] as const
+]
+
+const navItemsWithAdmin = computed(() => {
+  const items = [...navItems]
+  if (authStore.user?.role === 'admin') {
+    items.push({ path: '/admin/invites', label: '\u9080\u8bf7\u7801\u7ba1\u7406', icon: 'pi pi-ticket' })
+  }
+  return items
+})
 
 const isCollapsed = ref(true)
 const lastUserCollapsed = ref(true)
@@ -184,7 +194,7 @@ onBeforeUnmount(() => {
 const pageTitle = computed(() => {
   const metaTitle = route.meta?.title
   if (typeof metaTitle === 'string' && metaTitle.trim()) return metaTitle
-  const fallback = navItems.find((n) => n.path === route.path)?.label
+  const fallback = navItemsWithAdmin.value.find((n) => n.path === route.path)?.label
   return fallback || '仪表盘'
 })
 

@@ -91,6 +91,9 @@ export const authApi = {
   
   register: (username: string, password: string, email?: string) =>
     api.post<{ success: boolean; message: string; user?: User; token?: string }>('/auth/register', { username, password, email }),
+
+  inviteRegister: (inviteCode: string, username: string, password: string, email?: string) =>
+    api.post<{ success: boolean; message: string; user?: User; token?: string }>('/auth/invite/register', { inviteCode, username, password, email }),
   
   verify: () =>
     api.get<ApiResponse<{ userId: string; username: string; role: string }>>('/auth/verify'),
@@ -106,6 +109,25 @@ export const authApi = {
 
   setup: (username: string, password: string, email?: string) =>
     api.post<{ success: boolean; message: string; user?: User; token?: string }>('/auth/setup', { username, password, email }),
+
+  adminCreateInvite: (expiresInDays?: number) =>
+    api.post<ApiResponse<{ code: string; code_hint: string; expiresAt?: string | null }>>('/admin/invites', { expiresInDays }),
+
+  adminListInvites: (limit = 30) =>
+    api.get<
+      ApiResponse<
+        Array<{
+          id: string
+          code_hint: string
+          createdBy: string
+          createdAt: string
+          expiresAt?: string | null
+          usedAt?: string | null
+          usedBy?: string | null
+          expired: boolean
+        }>
+      >
+    >('/admin/invites', { params: { limit } }),
 }
 
 export default api

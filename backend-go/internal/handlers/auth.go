@@ -23,6 +23,7 @@ func (h *AuthHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.POST("/change-password", middleware.AuthMiddleware(h.authService), h.ChangePassword)
 	r.GET("/setup-required", h.SetupRequired)
 	r.POST("/setup", h.SetupAdmin)
+	r.POST("/invite/register", h.InviteRegister)
 }
 
 type RegisterInput struct {
@@ -32,6 +33,19 @@ type RegisterInput struct {
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
+	// Public registration is disabled. Use setup for the first admin and invite codes for additional users.
+	hasUsers, err := h.authService.HasUsers()
+	if err != nil {
+		utils.Error(c, 500, "检查用户失败", err)
+		return
+	}
+	if !hasUsers {
+		utils.Error(c, 403, "系统未初始化，请先完成 Setup 创建管理员账号", nil)
+		return
+	}
+	utils.Error(c, 403, "系统已关闭公开注册，请使用邀请码注册", nil)
+	return
+
 	var input RegisterInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		utils.Error(c, 400, "用户名和密码不能为空", err)
@@ -54,6 +68,53 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	if !result.Success {
+		utils.Error(c, 400, result.Message, nil)
+		return
+	}
+
+	c.JSON(201, result)
+}
+
+type InviteRegisterInput struct {
+	InviteCode string  `json:"inviteCode" binding:"required"`
+	Username   string  `json:"username" binding:"required"`
+	Password   string  `json:"password" binding:"required"`
+	Email      *string `json:"email"`
+}
+
+func (h *AuthHandler) InviteRegister(c *gin.Context) {
+	hasUsers, err := h.authService.HasUsers()
+	if err != nil {
+		utils.Error(c, 500, "检查用户失败", err)
+		return
+	}
+	if !hasUsers {
+		utils.Error(c, 403, "系统未初始化，请先完成 Setup 创建管理员账号", nil)
+		return
+	}
+
+	var input InviteRegisterInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		utils.Error(c, 400, "邀请码、用户名和密码不能为空", err)
+		return
+	}
+
+	if len(input.Username) < 3 || len(input.Username) > 50 {
+		utils.Error(c, 400, "用户名长度应为 3-50 个字符", nil)
+		return
+	}
+
+	if len(input.Password) < 6 {
+		utils.Error(c, 400, "密码长度至少 6 个字符", nil)
+		return
+	}
+
+	result, err := h.authService.RegisterWithInvite(input.InviteCode, input.Username, input.Password, input.Email)
+	if err != nil {
+		utils.Error(c, 500, "注册失败，请稍后重试", err)
+		return
+	}
 	if !result.Success {
 		utils.Error(c, 400, result.Message, nil)
 		return

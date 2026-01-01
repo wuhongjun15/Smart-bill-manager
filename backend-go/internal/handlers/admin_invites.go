@@ -1,0 +1,94 @@
+package handlers
+
+import (
+	"strconv"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"smart-bill-manager/internal/middleware"
+	"smart-bill-manager/internal/services"
+	"smart-bill-manager/internal/utils"
+)
+
+type AdminInvitesHandler struct {
+	authService *services.AuthService
+}
+
+func NewAdminInvitesHandler(authService *services.AuthService) *AdminInvitesHandler {
+	return &AdminInvitesHandler{authService: authService}
+}
+
+type CreateInviteInput struct {
+	// ExpiresInDays controls invite expiry. Use 0 for no expiry.
+	// Defaults to 7 when omitted.
+	ExpiresInDays *int `json:"expiresInDays"`
+}
+
+func (h *AdminInvitesHandler) RegisterRoutes(r *gin.RouterGroup) {
+	r.POST("", h.CreateInvite)
+	r.GET("", h.ListInvites)
+}
+
+func (h *AdminInvitesHandler) CreateInvite(c *gin.Context) {
+	var input CreateInviteInput
+	_ = c.ShouldBindJSON(&input)
+
+	expiresInDays := 7
+	if input.ExpiresInDays != nil {
+		expiresInDays = *input.ExpiresInDays
+	}
+	if expiresInDays < 0 || expiresInDays > 365 {
+		utils.Error(c, 400, "expiresInDays 必须在 0-365 之间", nil)
+		return
+	}
+
+	adminID := middleware.GetUserID(c)
+	res, err := h.authService.CreateInvite(adminID, expiresInDays)
+	if err != nil {
+		utils.Error(c, 500, "生成邀请码失败", err)
+		return
+	}
+
+	utils.SuccessData(c, gin.H{
+		"code":      res.Code,
+		"code_hint": res.CodeHint,
+		"expiresAt": res.ExpiresAt,
+	})
+}
+
+func (h *AdminInvitesHandler) ListInvites(c *gin.Context) {
+	limit := 30
+	if s := c.Query("limit"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 && v <= 200 {
+			limit = v
+		}
+	}
+
+	items, err := h.authService.ListInvites(limit)
+	if err != nil {
+		utils.Error(c, 500, "获取邀请码失败", err)
+		return
+	}
+
+	out := make([]gin.H, 0, len(items))
+	now := time.Now()
+	for _, inv := range items {
+		expired := false
+		if inv.ExpiresAt != nil && inv.ExpiresAt.Before(now) {
+			expired = true
+		}
+		out = append(out, gin.H{
+			"id":        inv.ID,
+			"code_hint": inv.CodeHint,
+			"createdBy": inv.CreatedBy,
+			"createdAt": inv.CreatedAt,
+			"expiresAt": inv.ExpiresAt,
+			"usedAt":    inv.UsedAt,
+			"usedBy":    inv.UsedBy,
+			"expired":   expired,
+		})
+	}
+
+	utils.SuccessData(c, out)
+}
+

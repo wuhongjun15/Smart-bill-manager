@@ -33,6 +33,7 @@ func main() {
 	// Run migrations
 	if err := db.AutoMigrate(
 		&models.User{},
+		&models.Invite{},
 		&models.Payment{},
 		&models.Trip{},
 		&models.Invoice{},
@@ -76,6 +77,9 @@ func main() {
 
 	// Create additional indexes
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_invites_code_hash ON invites(code_hash)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_invites_created_at ON invites(created_at)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_invites_used_at ON invites(used_at)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_time ON payments(transaction_time)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_time_ts ON payments(transaction_time_ts)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_trip_id ON payments(trip_id)")
@@ -179,6 +183,12 @@ func main() {
 	// Logs routes
 	logsHandler := handlers.NewLogsHandler()
 	logsHandler.RegisterRoutes(protectedGroup.Group("/logs"))
+
+	// Admin routes
+	adminGroup := protectedGroup.Group("/admin")
+	adminGroup.Use(middleware.RequireAdmin())
+	adminInvitesHandler := handlers.NewAdminInvitesHandler(authService)
+	adminInvitesHandler.RegisterRoutes(adminGroup.Group("/invites"))
 
 	// Dashboard endpoint
 	protectedGroup.GET("/dashboard", func(c *gin.Context) {

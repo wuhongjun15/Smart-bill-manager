@@ -16,6 +16,12 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false },
   },
   {
+    path: '/register',
+    name: 'Register',
+    component: () => import('@/views/Register.vue'),
+    meta: { requiresAuth: false },
+  },
+  {
     path: '/',
     component: () => import('@/components/Layout/MainLayout.vue'),
     meta: { requiresAuth: true },
@@ -56,6 +62,12 @@ const routes: RouteRecordRaw[] = [
         name: 'Logs',
         component: () => import('@/views/Logs.vue'),
         meta: { title: '\u65E5\u5FD7' },
+      },
+      {
+        path: 'admin/invites',
+        name: 'AdminInvites',
+        component: () => import('@/views/AdminInvites.vue'),
+        meta: { title: '邀请码管理', requiresAdmin: true },
       },
     ],
   },
@@ -115,6 +127,13 @@ router.beforeEach(async (to, _from, next) => {
         next('/login')
         return
       }
+    }
+  }
+
+  if ((to.meta as any)?.requiresAdmin) {
+    if (authStore.user?.role !== 'admin') {
+      next('/dashboard')
+      return
     }
   }
 

@@ -25,6 +25,11 @@
 
         <Button type="submit" class="submit-btn" :label="'\u767B\u5F55'" :loading="loading" />
       </form>
+
+      <div class="footer">
+        <span class="muted">没有账号？</span>
+        <Button class="p-button-text" label="邀请码注册" @click="router.push('/register')" />
+      </div>
     </div>
   </div>
 </template>
@@ -83,6 +88,18 @@ form {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.footer {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.muted {
+  color: var(--p-text-muted-color);
 }
 
 .field {
