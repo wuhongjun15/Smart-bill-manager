@@ -79,6 +79,8 @@
                     sortField="transaction_time"
                     :sortOrder="-1"
                     class="trip-table"
+                    :pt="tableScrollPt"
+                    :tableStyle="tripTableStyle"
                   >
                     <Column field="amount" header="金额" :style="{ width: '120px' }" sortable>
                       <template #body="{ data: row }">
@@ -174,7 +176,14 @@
                   <div class="empty-sub">当支付时间同时命中多个行程时，会出现在这里等待你选择归属。</div>
                 </div>
 
-                <DataTable v-else :value="pendingPayments" responsiveLayout="scroll" class="pending-table">
+                <DataTable
+                  v-else
+                  :value="pendingPayments"
+                  responsiveLayout="scroll"
+                  class="pending-table"
+                  :pt="tableScrollPt"
+                  :tableStyle="tripTableStyle"
+                >
                   <Column header="金额" :style="{ width: '120px' }">
                     <template #body="{ data: row }">
                       <span class="amount">{{ formatMoney(row.payment.amount) }}</span>
@@ -269,7 +278,13 @@
                       </div>
                     </template>
                     <template #content>
-                      <DataTable :value="calendarSelectedPayments" responsiveLayout="scroll" class="calendar-table">
+                      <DataTable
+                        :value="calendarSelectedPayments"
+                        responsiveLayout="scroll"
+                        class="calendar-table"
+                        :pt="tableScrollPt"
+                        :tableStyle="tripTableStyle"
+                      >
                         <Column field="amount" header="金额" :style="{ width: '120px' }">
                           <template #body="{ data: row }">
                             <span class="amount">{{ formatMoney(row.amount) }}</span>
@@ -441,7 +456,29 @@ import dayjs from 'dayjs'
 import { Temporal } from '@js-temporal/polyfill'
 import { invoiceApi, paymentApi, tripsApi } from '@/api'
 import type { Payment, PendingPayment, Trip, TripCascadePreview, TripPaymentInvoice, TripPaymentWithInvoices, TripSummary } from '@/types'
-import { useNotificationStore } from '@/stores/notifications'
+ import { useNotificationStore } from '@/stores/notifications'
+
+const tableScrollPt = {
+  root: {
+    style: {
+      maxWidth: '100%',
+      minWidth: '0',
+    },
+  },
+  tableContainer: {
+    style: {
+      width: '100%',
+      maxWidth: '100%',
+      minWidth: '0',
+      overflowX: 'auto',
+      WebkitOverflowScrolling: 'touch',
+    },
+  },
+} as const
+
+const tripTableStyle = {
+  minWidth: '960px',
+} as const
 
 const toast = useToast()
 const confirm = useConfirm()
