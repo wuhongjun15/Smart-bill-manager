@@ -28,7 +28,7 @@
           class="collapse-btn"
           severity="secondary"
           :icon="isCollapsed ? 'pi pi-angle-double-right' : 'pi pi-angle-double-left'"
-          @click="isCollapsed = !isCollapsed"
+          @click="toggleCollapsed"
         />
       </div>
     </aside>
@@ -143,6 +143,8 @@ const navItems = [
 ] as const
 
 const isCollapsed = ref(true)
+const lastUserCollapsed = ref(true)
+const autoCollapseActive = ref(false)
 const showChangePasswordDialog = ref(false)
 const userMenu = ref<InstanceType<typeof Menu> | null>(null)
 const mobileNavVisible = ref(false)
@@ -205,22 +207,42 @@ const syncMobileExpandedKeys = () => {
   if (fallback) mobileExpandedKeys.value = { [fallback]: true }
 }
 
-const updateIsMobile = () => {
+const updateLayoutMode = () => {
   if (typeof window === 'undefined') return
-  isMobile.value = window.matchMedia('(max-width: 768px)').matches
+
+  const isSmallWidth = window.matchMedia('(max-width: 768px)').matches
+  const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches
+  const isHoverNone = window.matchMedia('(hover: none)').matches
+
+  isMobile.value = isSmallWidth && (isCoarsePointer || isHoverNone)
   if (!isMobile.value) mobileNavVisible.value = false
+
+  const shouldAutoCollapse = !isMobile.value && window.matchMedia('(max-width: 1100px)').matches
+  if (shouldAutoCollapse) {
+    if (!autoCollapseActive.value) {
+      lastUserCollapsed.value = isCollapsed.value
+      autoCollapseActive.value = true
+    }
+    isCollapsed.value = true
+    return
+  }
+
+  if (autoCollapseActive.value) {
+    autoCollapseActive.value = false
+    isCollapsed.value = lastUserCollapsed.value
+  }
 }
 
 onMounted(() => {
-  updateIsMobile()
+  updateLayoutMode()
   syncMobileExpandedKeys()
   if (typeof window === 'undefined') return
-  window.addEventListener('resize', updateIsMobile, { passive: true })
+  window.addEventListener('resize', updateLayoutMode, { passive: true })
 })
 
 onBeforeUnmount(() => {
   if (typeof window === 'undefined') return
-  window.removeEventListener('resize', updateIsMobile as any)
+  window.removeEventListener('resize', updateLayoutMode as any)
 })
 
 watch(
@@ -272,6 +294,13 @@ const userMenuItems = computed(() => [
 
 const toggleUserMenu = (event: MouseEvent) => {
   userMenu.value?.toggle(event)
+}
+
+const toggleCollapsed = () => {
+  const next = !isCollapsed.value
+  isCollapsed.value = next
+  lastUserCollapsed.value = next
+  autoCollapseActive.value = false
 }
 
 const go = (path: string) => {
