@@ -1,7 +1,6 @@
 package services
 
 import (
-	"errors"
 	"math"
 	"strings"
 	"time"
@@ -9,7 +8,6 @@ import (
 	"smart-bill-manager/internal/models"
 	"smart-bill-manager/pkg/database"
 
-	"gorm.io/gorm"
 )
 
 func FindPaymentByFileSHA256(hash string, excludeID string) (*models.Payment, error) {
@@ -24,11 +22,12 @@ func FindPaymentByFileSHA256(hash string, excludeID string) (*models.Payment, er
 	}
 
 	var p models.Payment
-	if err := q.Order("is_draft ASC, created_at DESC").First(&p).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
+	res := q.Order("is_draft ASC, created_at DESC, id DESC").Limit(1).Find(&p)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &p, nil
 }
@@ -45,11 +44,12 @@ func FindInvoiceByFileSHA256(hash string, excludeID string) (*models.Invoice, er
 	}
 
 	var inv models.Invoice
-	if err := q.Order("is_draft ASC, created_at DESC").First(&inv).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
+	res := q.Order("is_draft ASC, created_at DESC, id DESC").Limit(1).Find(&inv)
+	if res.Error != nil {
+		return nil, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &inv, nil
 }
