@@ -9,6 +9,12 @@ type UploadScreenshotResult = {
   dedup?: DedupHint | null
 }
 
+type UploadScreenshotAsyncResult = {
+  taskId: string
+  payment: Payment | null
+  screenshot_path: string
+}
+
 export const paymentApi = {
   getAll: (params?: { limit?: number; offset?: number; startDate?: string; endDate?: string; category?: string }) =>
     api.get<ApiResponse<Payment[]>>('/payments', { params }),
@@ -33,6 +39,15 @@ export const paymentApi = {
     const formData = new FormData()
     formData.append('file', file)
     return api.post<ApiResponse<UploadScreenshotResult>>('/payments/upload-screenshot', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
+  // Upload screenshot and OCR recognition (async task)
+  uploadScreenshotAsync: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post<ApiResponse<UploadScreenshotAsyncResult>>('/payments/upload-screenshot-async', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },

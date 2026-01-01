@@ -6,6 +6,11 @@ type UploadInvoiceResult = {
   dedup?: DedupHint | null
 }
 
+type UploadInvoiceAsyncResult = {
+  taskId: string
+  invoice: Invoice
+}
+
 export const invoiceApi = {
   getAll: (params?: { limit?: number; offset?: number }) =>
     api.get<ApiResponse<Invoice[]>>('/invoices', { params }),
@@ -24,12 +29,30 @@ export const invoiceApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },
+
+  uploadAsync: (file: File, paymentId?: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (paymentId) formData.append('payment_id', paymentId)
+    return api.post<ApiResponse<UploadInvoiceAsyncResult>>('/invoices/upload-async', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
   
   uploadMultiple: (files: File[], paymentId?: string) => {
     const formData = new FormData()
     files.forEach(file => formData.append('files', file))
     if (paymentId) formData.append('payment_id', paymentId)
     return api.post<ApiResponse<Invoice[]>>('/invoices/upload-multiple', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
+  uploadMultipleAsync: (files: File[], paymentId?: string) => {
+    const formData = new FormData()
+    files.forEach(file => formData.append('files', file))
+    if (paymentId) formData.append('payment_id', paymentId)
+    return api.post<ApiResponse<Array<{ taskId: string; invoice: Invoice }>>>('/invoices/upload-multiple-async', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
   },

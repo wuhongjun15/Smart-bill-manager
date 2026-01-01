@@ -13,18 +13,21 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"smart-bill-manager/internal/middleware"
 	"smart-bill-manager/internal/services"
 	"smart-bill-manager/internal/utils"
 )
 
 type PaymentHandler struct {
 	paymentService *services.PaymentService
+	taskService    *services.TaskService
 	uploadsDir     string
 }
 
-func NewPaymentHandler(paymentService *services.PaymentService) *PaymentHandler {
+func NewPaymentHandler(paymentService *services.PaymentService, taskService *services.TaskService) *PaymentHandler {
 	return &PaymentHandler{
 		paymentService: paymentService,
+		taskService:    taskService,
 		uploadsDir:     "", // Will be set if needed
 	}
 }
@@ -41,6 +44,7 @@ func (h *PaymentHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/:id/suggest-invoices", h.SuggestInvoices)
 	r.POST("", h.Create)
 	r.POST("/upload-screenshot", h.UploadScreenshot)
+	r.POST("/upload-screenshot-async", h.UploadScreenshotAsync)
 	r.POST("/upload-screenshot/cancel", h.CancelUploadScreenshot)
 	r.POST("/:id/reparse", h.ReparseScreenshot)
 	r.PUT("/:id", h.Update)
@@ -265,6 +269,104 @@ func (h *PaymentHandler) UploadScreenshot(c *gin.Context) {
 		"extracted":       extracted,
 		"screenshot_path": relPath,
 		"dedup":           dedup,
+	})
+}
+
+func (h *PaymentHandler) UploadScreenshotAsync(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		utils.Error(c, 400, "请上传文件", err)
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+		utils.Error(c, 400, "只支持 JPG、JPEG、PNG 格式的图片", nil)
+		return
+	}
+	if file.Size > 10*1024*1024 {
+		utils.Error(c, 400, "文件大小不能超过10MB", nil)
+		return
+	}
+
+	uploadsDir := h.uploadsDir
+	if uploadsDir == "" {
+		uploadsDir = "uploads"
+	}
+	if !filepath.IsAbs(uploadsDir) {
+		wd, _ := os.Getwd()
+		uploadsDir = filepath.Join(wd, uploadsDir)
+	}
+	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
+		utils.Error(c, 500, "创建上传目录失败", err)
+		return
+	}
+
+	filename := utils.GenerateUUID() + ext
+	filePath := filepath.Join(uploadsDir, filename)
+
+	src, err := file.Open()
+	if err != nil {
+		utils.Error(c, 500, "打开上传文件失败", err)
+		return
+	}
+	defer src.Close()
+
+	dst, err := os.Create(filePath)
+	if err != nil {
+		utils.Error(c, 500, "保存文件失败", err)
+		return
+	}
+	defer dst.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(dst, hasher), src); err != nil {
+		_ = os.Remove(filePath)
+		utils.Error(c, 500, "保存文件失败", err)
+		return
+	}
+	fileSHA := hex.EncodeToString(hasher.Sum(nil))
+
+	if existing, err := services.FindPaymentByFileSHA256(fileSHA, ""); err != nil {
+		_ = os.Remove(filePath)
+		utils.Error(c, 500, "重复检查失败", err)
+		return
+	} else if existing != nil {
+		_ = os.Remove(filePath)
+		utils.ErrorData(c, 409, "文件内容重复，已存在记录", gin.H{
+			"kind":              "hash_duplicate",
+			"entity":            "payment",
+			"existing_id":       existing.ID,
+			"existing_is_draft": existing.IsDraft,
+		}, nil)
+		return
+	}
+
+	relPath := "uploads/" + filename
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		_ = os.Remove(filePath)
+		utils.Error(c, 401, "未授权，请先登录", nil)
+		return
+	}
+
+	payment, err := h.paymentService.CreateDraftFromScreenshotUpload(relPath, &fileSHA)
+	if err != nil {
+		_ = os.Remove(filePath)
+		utils.Error(c, 500, "创建草稿失败", err)
+		return
+	}
+
+	task, err := h.taskService.CreateTask(services.TaskTypePaymentOCR, userID, payment.ID, &fileSHA)
+	if err != nil {
+		utils.Error(c, 500, "创建识别任务失败", err)
+		return
+	}
+
+	utils.Success(c, 201, "截图上传成功，正在识别", gin.H{
+		"taskId":         task.ID,
+		"payment":        payment,
+		"screenshot_path": relPath,
 	})
 }
 

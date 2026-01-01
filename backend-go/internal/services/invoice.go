@@ -30,6 +30,165 @@ func NewInvoiceService(uploadsDir string) *InvoiceService {
 	}
 }
 
+func (s *InvoiceService) CreateDraftFromUpload(input CreateInvoiceInput) (*models.Invoice, error) {
+	id := utils.GenerateUUID()
+
+	if input.PaymentID != nil {
+		pid := strings.TrimSpace(*input.PaymentID)
+		if pid == "" {
+			input.PaymentID = nil
+		} else {
+			input.PaymentID = &pid
+		}
+	}
+
+	source := input.Source
+	if source == "" {
+		source = "upload"
+	}
+
+	inv := &models.Invoice{
+		ID:           id,
+		IsDraft:      true,
+		PaymentID:    input.PaymentID,
+		Filename:     input.Filename,
+		OriginalName: input.OriginalName,
+		FilePath:     input.FilePath,
+		FileSize:     &input.FileSize,
+		FileSHA256:   input.FileSHA256,
+		ParseStatus:  "pending",
+		ParseError:   nil,
+		Source:       source,
+		DedupStatus:  DedupStatusOK,
+	}
+
+	db := database.GetDB()
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(inv).Error; err != nil {
+			return err
+		}
+		if input.PaymentID != nil {
+			pid := strings.TrimSpace(*input.PaymentID)
+			if pid != "" {
+				if err := tx.Table("invoice_payment_links").Create(&models.InvoicePaymentLink{
+					InvoiceID: inv.ID,
+					PaymentID: pid,
+				}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return inv, nil
+}
+
+type invoiceOCRTaskResult struct {
+	Invoice *models.Invoice `json:"invoice"`
+	Dedup   any            `json:"dedup,omitempty"`
+}
+
+func (s *InvoiceService) ProcessInvoiceOCRTask(invoiceID string) (any, error) {
+	invoiceID = strings.TrimSpace(invoiceID)
+	if invoiceID == "" {
+		return nil, fmt.Errorf("missing invoice id")
+	}
+
+	inv, err := s.repo.FindByID(invoiceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build absolute file path
+	filePath := inv.FilePath
+	if !filepath.IsAbs(filePath) {
+		filePath = filepath.Join(s.uploadsDir, "..", filePath)
+	}
+
+	// Parse file (never returns Go error; failures are represented via parseStatus/parseError)
+	invoiceNumber, invoiceDate, sellerName, buyerName,
+		amount, taxAmount,
+		extractedData, rawText,
+		parseStatus, parseError := s.parseInvoiceFile(filePath, inv.Filename, inv.FileSHA256)
+
+	updateData := map[string]any{
+		"parse_status": parseStatus,
+		"parse_error":  parseError,
+		"raw_text":     rawText,
+		"extracted_data": extractedData,
+	}
+	if invoiceNumber != nil {
+		updateData["invoice_number"] = *invoiceNumber
+	} else {
+		updateData["invoice_number"] = nil
+	}
+	if invoiceDate != nil {
+		updateData["invoice_date"] = *invoiceDate
+	} else {
+		updateData["invoice_date"] = nil
+	}
+	if amount != nil {
+		updateData["amount"] = *amount
+	} else {
+		updateData["amount"] = nil
+	}
+	if taxAmount != nil {
+		updateData["tax_amount"] = *taxAmount
+	} else {
+		updateData["tax_amount"] = nil
+	}
+	if sellerName != nil {
+		updateData["seller_name"] = *sellerName
+	} else {
+		updateData["seller_name"] = nil
+	}
+	if buyerName != nil {
+		updateData["buyer_name"] = *buyerName
+	} else {
+		updateData["buyer_name"] = nil
+	}
+
+	if err := s.repo.Update(inv.ID, updateData); err != nil {
+		return nil, err
+	}
+
+	updated, _ := s.repo.FindByID(inv.ID)
+	dedup := any(nil)
+
+	// Mark suspected duplicates based on invoice_number.
+	if updated != nil && updated.InvoiceNumber != nil {
+		no := strings.TrimSpace(*updated.InvoiceNumber)
+		if no != "" {
+			if cands, derr := FindInvoiceCandidatesByInvoiceNumber(no, updated.ID, 5); derr == nil && len(cands) > 0 {
+				updated.DedupStatus = DedupStatusSuspected
+				ref := cands[0].ID
+				updated.DedupRefID = &ref
+				_ = database.GetDB().Model(&models.Invoice{}).Where("id = ?", updated.ID).Updates(map[string]any{
+					"dedup_status": DedupStatusSuspected,
+					"dedup_ref_id": ref,
+				}).Error
+				dedup = map[string]any{
+					"kind":       "suspected_duplicate",
+					"reason":     "invoice_number",
+					"candidates": cands,
+				}
+			} else {
+				_ = database.GetDB().Model(&models.Invoice{}).Where("id = ?", updated.ID).Updates(map[string]any{
+					"dedup_status": DedupStatusOK,
+					"dedup_ref_id": nil,
+				}).Error
+				updated.DedupStatus = DedupStatusOK
+				updated.DedupRefID = nil
+			}
+		}
+	}
+
+	return &invoiceOCRTaskResult{Invoice: updated, Dedup: dedup}, nil
+}
+
 type CreateInvoiceInput struct {
 	PaymentID    *string `json:"payment_id"`
 	Filename     string  `json:"filename"`
@@ -63,7 +222,7 @@ func (s *InvoiceService) Create(input CreateInvoiceInput) (*models.Invoice, erro
 	invoiceNumber, invoiceDate, sellerName, buyerName,
 		amount, taxAmount,
 		extractedData, rawText,
-		parseStatus, parseError := s.parseInvoiceFile(filePath, input.Filename)
+		parseStatus, parseError := s.parseInvoiceFile(filePath, input.Filename, input.FileSHA256)
 
 	source := input.Source
 	if source == "" {
@@ -601,7 +760,7 @@ func strValueOrNil(v *string) interface{} {
 // parseInvoiceFile parses an invoice file and returns the extracted data.
 // - PDF: PyMuPDF fast-path (with RapidOCR fallback) via OCRService.RecognizePDF
 // - Images: RapidOCR v3 via OCRService.RecognizeImage
-func (s *InvoiceService) parseInvoiceFile(filePath, filename string) (
+func (s *InvoiceService) parseInvoiceFile(filePath, filename string, fileSHA256 *string) (
 	invoiceNumber, invoiceDate, sellerName, buyerName *string,
 	amount, taxAmount *float64,
 	extractedData, rawText *string,
@@ -624,9 +783,9 @@ func (s *InvoiceService) parseInvoiceFile(filePath, filename string) (
 		err  error
 	)
 	if ext == ".pdf" {
-		text, err = s.ocrService.RecognizePDF(filePath)
+		text, err = s.ocrService.RecognizePDFCached(filePath, fileSHA256)
 	} else {
-		text, err = s.ocrService.RecognizeImage(filePath)
+		text, err = s.ocrService.RecognizeImageCached(filePath, fileSHA256)
 	}
 	if err != nil {
 		parseStatus = "failed"
@@ -687,7 +846,7 @@ func (s *InvoiceService) Reparse(id string) (*models.Invoice, error) {
 	invoiceNumber, invoiceDate, sellerName, buyerName,
 		amount, taxAmount,
 		extractedData, rawText,
-		parseStatus, parseError := s.parseInvoiceFile(filePath, invoice.Filename)
+		parseStatus, parseError := s.parseInvoiceFile(filePath, invoice.Filename, invoice.FileSHA256)
 
 	// Update the invoice with parsed data
 	updateData := map[string]interface{}{

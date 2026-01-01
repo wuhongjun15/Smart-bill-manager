@@ -34,6 +34,7 @@ func main() {
 	if err := db.AutoMigrate(
 		&models.User{},
 		&models.Invite{},
+		&models.Task{},
 		&models.Payment{},
 		&models.Trip{},
 		&models.Invoice{},
@@ -98,6 +99,8 @@ func main() {
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_bad_debt ON invoices(bad_debt)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_file_sha256 ON invoices(file_sha256)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_dedup_status ON invoices(dedup_status)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_at)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON tasks(created_by)")
 
 	// Enforce invoice<->payment 1:1 by making each side unique in link table.
 	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_payment_links_invoice_id ON invoice_payment_links(invoice_id)")
@@ -120,6 +123,8 @@ func main() {
 	invoiceService := services.NewInvoiceService(uploadsDir)
 	emailService := services.NewEmailService(uploadsDir, invoiceService)
 	tripService := services.NewTripService(uploadsDir)
+	taskService := services.NewTaskService(db, paymentService, invoiceService)
+	taskService.StartWorker()
 
 	// Periodically clean up stale draft uploads (refresh/abandon cases).
 	services.StartDraftCleanup(db, uploadsDir)
@@ -164,12 +169,12 @@ func main() {
 	protectedGroup.Use(middleware.AuthMiddleware(authService))
 
 	// Payment routes
-	paymentHandler := handlers.NewPaymentHandler(paymentService)
+	paymentHandler := handlers.NewPaymentHandler(paymentService, taskService)
 	paymentHandler.SetUploadsDir(uploadsDir)
 	paymentHandler.RegisterRoutes(protectedGroup.Group("/payments"))
 
 	// Invoice routes
-	invoiceHandler := handlers.NewInvoiceHandler(invoiceService, uploadsDir)
+	invoiceHandler := handlers.NewInvoiceHandler(invoiceService, taskService, uploadsDir)
 	invoiceHandler.RegisterRoutes(protectedGroup.Group("/invoices"))
 
 	// Email routes
@@ -183,6 +188,10 @@ func main() {
 	// Logs routes
 	logsHandler := handlers.NewLogsHandler()
 	logsHandler.RegisterRoutes(protectedGroup.Group("/logs"))
+
+	// Tasks routes
+	taskHandler := handlers.NewTaskHandler(taskService)
+	taskHandler.RegisterRoutes(protectedGroup.Group("/tasks"))
 
 	// Admin routes
 	adminGroup := protectedGroup.Group("/admin")

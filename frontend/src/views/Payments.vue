@@ -541,7 +541,7 @@ import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
-import { invoiceApi, paymentApi, FILE_BASE_URL } from '@/api'
+import { invoiceApi, paymentApi, tasksApi, FILE_BASE_URL } from '@/api'
 import { useNotificationStore } from '@/stores/notifications'
 import type { Invoice, Payment, DedupHint } from '@/types'
 
@@ -834,6 +834,21 @@ const openScreenshotModal = () => {
   uploadScreenshotModalVisible.value = true
 }
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const waitForTask = async (taskId: string, opts?: { timeoutMs?: number }) => {
+  const timeoutMs = opts?.timeoutMs ?? 120000
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const res = await tasksApi.getById(taskId)
+    const t = res.data?.data as any
+    if (!t) throw new Error('任务状态获取失败')
+    if (t.status === 'succeeded' || t.status === 'failed' || t.status === 'canceled') return t
+    await sleep(800)
+  }
+  throw new Error('识别超时，请稍后重试')
+}
+
 const handleScreenshotUpload = async () => {
   if (!selectedScreenshotFile.value) {
     toast.add({ severity: 'warn', summary: '\u8BF7\u9009\u62E9\u6587\u4EF6', life: 2200 })
@@ -842,19 +857,36 @@ const handleScreenshotUpload = async () => {
 
   uploadingScreenshot.value = true
   try {
-    const res = await paymentApi.uploadScreenshot(selectedScreenshotFile.value)
-    if (res.data.success && res.data.data) {
-      const { payment, extracted, ocr_error, screenshot_path, dedup } = res.data.data as any
+    const uploadRes = await paymentApi.uploadScreenshotAsync(selectedScreenshotFile.value)
+    if (uploadRes.data.success && uploadRes.data.data) {
+      const { taskId, payment, screenshot_path } = uploadRes.data.data as any
       uploadedPaymentId.value = payment?.id || null
       uploadedScreenshotPath.value = screenshot_path || null
-      ocrResult.value = extracted
-      uploadDedup.value = (dedup as DedupHint) || null
       rememberPendingPaymentDraft({ paymentId: uploadedPaymentId.value, screenshotPath: uploadedScreenshotPath.value })
 
-      ocrForm.amount = extracted.amount || 0
-      ocrForm.merchant = extracted.merchant || ''
-      ocrForm.payment_method = normalizePaymentMethodText(extracted.payment_method || '')
-      if (extracted.transaction_time) {
+      toast.add({ severity: 'info', summary: '截图已上传，正在识别…', life: 2000 })
+
+      const task = await waitForTask(taskId)
+      if (task.status === 'failed') {
+        toast.add({ severity: 'error', summary: task?.error || '识别失败', life: 5000 })
+        return
+      }
+      if (task.status === 'canceled') {
+        toast.add({ severity: 'warn', summary: '识别已取消', life: 2500 })
+        return
+      }
+
+      const payload = task.result as any
+      const { extracted, ocr_error, dedup } = payload || {}
+      const nextPayment = payload?.payment || payment || null
+      uploadedPaymentId.value = nextPayment?.id || uploadedPaymentId.value
+      ocrResult.value = extracted
+      uploadDedup.value = (dedup as DedupHint) || null
+
+      ocrForm.amount = extracted?.amount || 0
+      ocrForm.merchant = extracted?.merchant || ''
+      ocrForm.payment_method = normalizePaymentMethodText(extracted?.payment_method || '')
+      if (extracted?.transaction_time) {
         const t = dayjs(extracted.transaction_time)
         ocrForm.transaction_time = t.isValid() ? t.toDate() : null
       } else {
@@ -867,26 +899,24 @@ const handleScreenshotUpload = async () => {
         toast.add({
           severity: 'warn',
           summary: hasTime
-            ? `\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0C\u4F46 OCR \u8BC6\u522B\u5931\u8D25\uFF1A${ocr_error}`
-            : '\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0C\u4F46\u672A\u8BC6\u522B\u5230\u4EA4\u6613\u65F6\u95F4\uFF0C\u8BF7\u624B\u52A8\u9009\u62E9\u4EA4\u6613\u65F6\u95F4',
+            ? `截图上传成功，但 OCR 识别不完整：${ocr_error}`
+            : '截图上传成功，但未识别到交易时间，请手动选择交易时间',
           life: 5000,
         })
         notifications.add({
           severity: 'warn',
-          title: hasTime
-            ? '\u652F\u4ED8\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0COCR \u5931\u8D25'
-            : '\u652F\u4ED8\u622A\u56FE\u4E0A\u4F20\u6210\u529F\uFF0C\u9700\u624B\u52A8\u8865\u5168',
+          title: hasTime ? '支付截图已识别（需校对）' : '支付截图已识别（需补全）',
           detail: selectedScreenshotName.value || undefined,
         })
       } else {
         toast.add({
           severity: 'success',
-          summary: '\u622A\u56FE\u8BC6\u522B\u6210\u529F\uFF0C\u8BF7\u786E\u8BA4\u6216\u4FEE\u6539\u8BC6\u522B\u7ED3\u679C',
+          summary: '截图识别成功，请确认或修改识别结果',
           life: 2500,
         })
         notifications.add({
           severity: 'success',
-          title: '\u652F\u4ED8\u622A\u56FE\u5DF2\u8BC6\u522B',
+          title: '支付截图已识别',
           detail: selectedScreenshotName.value || undefined,
         })
       }

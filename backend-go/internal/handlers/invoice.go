@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"smart-bill-manager/internal/middleware"
 	"smart-bill-manager/internal/services"
 	"smart-bill-manager/internal/utils"
 )
@@ -40,12 +41,14 @@ func isAllowedInvoiceExt(ext string) bool {
 
 type InvoiceHandler struct {
 	invoiceService *services.InvoiceService
+	taskService    *services.TaskService
 	uploadsDir     string
 }
 
-func NewInvoiceHandler(invoiceService *services.InvoiceService, uploadsDir string) *InvoiceHandler {
+func NewInvoiceHandler(invoiceService *services.InvoiceService, taskService *services.TaskService, uploadsDir string) *InvoiceHandler {
 	return &InvoiceHandler{
 		invoiceService: invoiceService,
+		taskService:    taskService,
 		uploadsDir:     uploadsDir,
 	}
 }
@@ -59,7 +62,9 @@ func (h *InvoiceHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/:id/suggest-payments", h.SuggestPayments)
 	r.GET("/payment/:paymentId", h.GetByPaymentID)
 	r.POST("/upload", h.Upload)
+	r.POST("/upload-async", h.UploadAsync)
 	r.POST("/upload-multiple", h.UploadMultiple)
+	r.POST("/upload-multiple-async", h.UploadMultipleAsync)
 	r.POST("/:id/link-payment", h.LinkPayment)
 	r.POST("/:id/parse", h.Parse)
 	r.PUT("/:id", h.Update)
@@ -242,6 +247,108 @@ func (h *InvoiceHandler) Upload(c *gin.Context) {
 	})
 }
 
+func (h *InvoiceHandler) UploadAsync(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		utils.Error(c, 400, "请上传文件", err)
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if !isAllowedInvoiceExt(ext) {
+		utils.Error(c, 400, "只支持 PDF 或图片格式（PNG/JPG）", nil)
+		return
+	}
+	if file.Size > 20*1024*1024 {
+		utils.Error(c, 400, "文件大小不能超过20MB", nil)
+		return
+	}
+
+	if err := os.MkdirAll(h.uploadsDir, 0755); err != nil {
+		utils.Error(c, 500, "创建上传目录失败", err)
+		return
+	}
+
+	filename := utils.GenerateUUID() + ext
+	filePath := filepath.Join(h.uploadsDir, filename)
+
+	src, err := file.Open()
+	if err != nil {
+		utils.Error(c, 500, "打开上传文件失败", err)
+		return
+	}
+	defer src.Close()
+
+	dst, err := os.Create(filePath)
+	if err != nil {
+		utils.Error(c, 500, "保存文件失败", err)
+		return
+	}
+	defer dst.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(dst, hasher), src); err != nil {
+		_ = os.Remove(filePath)
+		utils.Error(c, 500, "保存文件失败", err)
+		return
+	}
+	fileSHA := hex.EncodeToString(hasher.Sum(nil))
+
+	if existing, err := services.FindInvoiceByFileSHA256(fileSHA, ""); err != nil {
+		_ = os.Remove(filePath)
+		utils.Error(c, 500, "重复检查失败", err)
+		return
+	} else if existing != nil {
+		_ = os.Remove(filePath)
+		utils.ErrorData(c, 409, "文件内容重复，已存在记录", gin.H{
+			"kind":              "hash_duplicate",
+			"entity":            "invoice",
+			"existing_id":       existing.ID,
+			"existing_is_draft": existing.IsDraft,
+		}, nil)
+		return
+	}
+
+	var paymentID *string
+	if pid := c.PostForm("payment_id"); pid != "" {
+		paymentID = &pid
+	}
+
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		_ = os.Remove(filePath)
+		utils.Error(c, 401, "未授权，请先登录", nil)
+		return
+	}
+
+	invoice, err := h.invoiceService.CreateDraftFromUpload(services.CreateInvoiceInput{
+		PaymentID:    paymentID,
+		Filename:     filename,
+		OriginalName: file.Filename,
+		FilePath:     "uploads/" + filename,
+		FileSize:     file.Size,
+		FileSHA256:   &fileSHA,
+		Source:       "upload",
+		IsDraft:      true,
+	})
+	if err != nil {
+		_ = os.Remove(filePath)
+		utils.Error(c, 500, "上传发票失败", err)
+		return
+	}
+
+	task, err := h.taskService.CreateTask(services.TaskTypeInvoiceOCR, userID, invoice.ID, &fileSHA)
+	if err != nil {
+		utils.Error(c, 500, "创建识别任务失败", err)
+		return
+	}
+
+	utils.Success(c, 201, "发票上传成功，正在识别", gin.H{
+		"taskId":  task.ID,
+		"invoice": invoice,
+	})
+}
+
 func (h *InvoiceHandler) UploadMultiple(c *gin.Context) {
 	form, err := c.MultipartForm()
 	if err != nil {
@@ -337,6 +444,123 @@ func (h *InvoiceHandler) UploadMultiple(c *gin.Context) {
 		msg = fmt.Sprintf("%s，跳过 %d 个重复文件", msg, skippedDuplicates)
 	}
 	utils.Success(c, 201, msg, invoices)
+}
+
+func (h *InvoiceHandler) UploadMultipleAsync(c *gin.Context) {
+	form, err := c.MultipartForm()
+	if err != nil {
+		utils.Error(c, 400, "请上传文件", err)
+		return
+	}
+
+	files := form.File["files"]
+	if len(files) == 0 {
+		utils.Error(c, 400, "请上传文件", nil)
+		return
+	}
+	if len(files) > 10 {
+		utils.Error(c, 400, "最多同时上传 10 个文件", nil)
+		return
+	}
+
+	if err := os.MkdirAll(h.uploadsDir, 0755); err != nil {
+		utils.Error(c, 500, "创建上传目录失败", err)
+		return
+	}
+
+	userID := middleware.GetUserID(c)
+	if userID == "" {
+		utils.Error(c, 401, "未授权，请先登录", nil)
+		return
+	}
+
+	var paymentID *string
+	if pid := c.PostForm("payment_id"); pid != "" {
+		paymentID = &pid
+	}
+
+	out := make([]gin.H, 0, len(files))
+	skippedDuplicates := 0
+
+	for _, file := range files {
+		ext := strings.ToLower(filepath.Ext(file.Filename))
+		if !isAllowedInvoiceExt(ext) {
+			continue
+		}
+		if file.Size > 20*1024*1024 {
+			continue
+		}
+
+		filename := utils.GenerateUUID() + ext
+		filePath := filepath.Join(h.uploadsDir, filename)
+
+		src, err := file.Open()
+		if err != nil {
+			continue
+		}
+
+		dst, err := os.Create(filePath)
+		if err != nil {
+			_ = src.Close()
+			continue
+		}
+
+		hasher := sha256.New()
+		_, copyErr := io.Copy(io.MultiWriter(dst, hasher), src)
+		_ = dst.Close()
+		_ = src.Close()
+
+		if copyErr != nil {
+			_ = os.Remove(filePath)
+			continue
+		}
+		fileSHA := hex.EncodeToString(hasher.Sum(nil))
+
+		if existing, err := services.FindInvoiceByFileSHA256(fileSHA, ""); err != nil {
+			_ = os.Remove(filePath)
+			continue
+		} else if existing != nil {
+			_ = os.Remove(filePath)
+			skippedDuplicates++
+			continue
+		}
+
+		invoice, err := h.invoiceService.CreateDraftFromUpload(services.CreateInvoiceInput{
+			PaymentID:    paymentID,
+			Filename:     filename,
+			OriginalName: file.Filename,
+			FilePath:     "uploads/" + filename,
+			FileSize:     file.Size,
+			FileSHA256:   &fileSHA,
+			Source:       "upload",
+			IsDraft:      true,
+		})
+		if err != nil {
+			_ = os.Remove(filePath)
+			continue
+		}
+
+		task, err := h.taskService.CreateTask(services.TaskTypeInvoiceOCR, userID, invoice.ID, &fileSHA)
+		if err != nil {
+			continue
+		}
+
+		out = append(out, gin.H{
+			"taskId":  task.ID,
+			"invoice": invoice,
+		})
+	}
+
+	if len(out) == 0 {
+		if skippedDuplicates > 0 {
+			utils.Error(c, 409, "文件内容重复，已存在记录", nil)
+			return
+		}
+		utils.Error(c, 400, "没有可上传的有效文件", nil)
+		return
+	}
+
+	utils.Success(c, 201, fmt.Sprintf("批量上传成功，正在识别（跳过重复：%d）", skippedDuplicates), out)
 }
 
 func (h *InvoiceHandler) Update(c *gin.Context) {

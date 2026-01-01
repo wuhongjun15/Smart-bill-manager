@@ -34,6 +34,144 @@ func NewPaymentService(uploadsDir string) *PaymentService {
 	}
 }
 
+func (s *PaymentService) CreateDraftFromScreenshotUpload(screenshotPath string, fileSHA256 *string) (*models.Payment, error) {
+	now := time.Now().UTC()
+	utcTimeStr := now.Format(time.RFC3339)
+
+	p := &models.Payment{
+		ID:                utils.GenerateUUID(),
+		IsDraft:           true,
+		Amount:            0.0,
+		TransactionTime:   utcTimeStr,
+		TransactionTimeTs: unixMilli(now),
+		ScreenshotPath:    &screenshotPath,
+		FileSHA256:        fileSHA256,
+		TripAssignSrc:     assignSrcAuto,
+		TripAssignState:   assignStateNoMatch,
+		DedupStatus:       DedupStatusOK,
+	}
+
+	db := database.GetDB()
+	if err := db.Create(p).Error; err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+type paymentOCRTaskResult struct {
+	Payment       *models.Payment       `json:"payment"`
+	Extracted     *PaymentExtractedData `json:"extracted"`
+	ScreenshotPath string               `json:"screenshot_path"`
+	OCRError      string               `json:"ocr_error,omitempty"`
+	Dedup         any                  `json:"dedup,omitempty"`
+}
+
+func (s *PaymentService) ProcessPaymentOCRTask(paymentID string) (any, error) {
+	paymentID = strings.TrimSpace(paymentID)
+	if paymentID == "" {
+		return nil, fmt.Errorf("missing payment id")
+	}
+
+	payment, err := s.repo.FindByID(paymentID)
+	if err != nil {
+		return nil, err
+	}
+	if payment.ScreenshotPath == nil || strings.TrimSpace(*payment.ScreenshotPath) == "" {
+		return nil, fmt.Errorf("payment has no screenshot")
+	}
+
+	text, err := s.ocrService.RecognizePaymentScreenshotCached(*payment.ScreenshotPath, payment.FileSHA256)
+	if err != nil {
+		return nil, err
+	}
+
+	extracted, parseErr := s.ocrService.ParsePaymentScreenshot(text)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+
+	warn := ""
+	if extracted.TransactionTime == nil || strings.TrimSpace(*extracted.TransactionTime) == "" {
+		warn = "missing transaction time"
+		extracted.TransactionTime = nil
+	} else {
+		shanghai := loadLocationOrUTC("Asia/Shanghai")
+		if payTime, err := parsePaymentTimeToUTC(*extracted.TransactionTime, shanghai); err == nil {
+			utcTimeStr := payTime.Format(time.RFC3339)
+			extracted.TransactionTime = &utcTimeStr
+		} else {
+			warn = "missing transaction time"
+			extracted.TransactionTime = nil
+		}
+	}
+
+	extractedDataJSON, err := ExtractedDataToJSON(extracted)
+	if err != nil {
+		extractedDataJSON = nil
+	}
+
+	updateData := map[string]any{
+		"extracted_data": extractedDataJSON,
+	}
+
+	if extracted.Amount != nil {
+		absAmount := math.Abs(*extracted.Amount)
+		if absAmount > 0 {
+			updateData["amount"] = absAmount
+			extracted.Amount = &absAmount
+		}
+	}
+	if extracted.Merchant != nil {
+		updateData["merchant"] = *extracted.Merchant
+	}
+	if extracted.PaymentMethod != nil {
+		updateData["payment_method"] = *extracted.PaymentMethod
+	}
+	if extracted.TransactionTime != nil && strings.TrimSpace(*extracted.TransactionTime) != "" {
+		if t, err := parseRFC3339ToUTC(*extracted.TransactionTime); err == nil {
+			updateData["transaction_time"] = t.Format(time.RFC3339)
+			updateData["transaction_time_ts"] = unixMilli(t)
+		}
+	}
+
+	if err := s.repo.Update(paymentID, updateData); err != nil {
+		return nil, err
+	}
+
+	updated, _ := s.repo.FindByID(paymentID)
+	dedup := any(nil)
+
+	// If we have a meaningful amount+time, compute suspected duplicates for UI.
+	if updated != nil && updated.Amount > 0 && updated.TransactionTimeTs > 0 {
+		if cands, derr := FindPaymentCandidatesByAmountTime(updated.Amount, updated.TransactionTimeTs, updated.ID, 5*time.Minute, 5); derr == nil && len(cands) > 0 {
+			updated.DedupStatus = DedupStatusSuspected
+			ref := cands[0].ID
+			updated.DedupRefID = &ref
+			_ = database.GetDB().Model(&models.Payment{}).Where("id = ?", updated.ID).Updates(map[string]any{
+				"dedup_status": DedupStatusSuspected,
+				"dedup_ref_id": ref,
+			}).Error
+			dedup = map[string]any{
+				"kind":       "suspected_duplicate",
+				"reason":     "amount_time",
+				"candidates": cands,
+			}
+		}
+	}
+
+	out := &paymentOCRTaskResult{
+		Payment:       updated,
+		Extracted:     extracted,
+		ScreenshotPath: strings.TrimSpace(*payment.ScreenshotPath),
+		OCRError:      warn,
+		Dedup:         dedup,
+	}
+	if warn == "" {
+		out.OCRError = ""
+	}
+	return out, nil
+}
+
 type CreatePaymentInput struct {
 	Amount          float64 `json:"amount" binding:"required"`
 	Merchant        *string `json:"merchant"`
@@ -462,7 +600,7 @@ type CreateFromScreenshotInput struct {
 func (s *PaymentService) CreateFromScreenshot(input CreateFromScreenshotInput) (*models.Payment, *PaymentExtractedData, error) {
 
 	// Perform OCR on the screenshot with specialized payment screenshot recognition
-	text, err := s.ocrService.RecognizePaymentScreenshot(input.ScreenshotPath)
+	text, err := s.ocrService.RecognizePaymentScreenshotCached(input.ScreenshotPath, input.FileSHA256)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -719,7 +857,7 @@ func (s *PaymentService) ReparseScreenshot(paymentID string) (*PaymentExtractedD
 	}
 
 	// Perform OCR on the screenshot with specialized payment screenshot recognition
-	text, err := s.ocrService.RecognizePaymentScreenshot(*payment.ScreenshotPath)
+	text, err := s.ocrService.RecognizePaymentScreenshotCached(*payment.ScreenshotPath, payment.FileSHA256)
 	if err != nil {
 		return nil, fmt.Errorf("OCR recognition failed: %w", err)
 	}

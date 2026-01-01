@@ -606,7 +606,7 @@ import Tabs from 'primevue/tabs'
 import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
-import { invoiceApi, FILE_BASE_URL } from '@/api'
+import { invoiceApi, tasksApi, FILE_BASE_URL } from '@/api'
 import { useNotificationStore } from '@/stores/notifications'
 import type { Invoice, Payment, DedupHint } from '@/types'
 
@@ -941,18 +941,57 @@ const handleUpload = async () => {
   uploading.value = true
   try {
     let createdInvoice: Invoice | null = null
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+    const waitForTask = async (taskId: string, opts?: { timeoutMs?: number }) => {
+      const timeoutMs = opts?.timeoutMs ?? 180000
+      const start = Date.now()
+      while (Date.now() - start < timeoutMs) {
+        const res = await tasksApi.getById(taskId)
+        const t = res.data?.data as any
+        if (!t) throw new Error('任务状态获取失败')
+        if (t.status === 'succeeded' || t.status === 'failed' || t.status === 'canceled') return t
+        await sleep(900)
+      }
+      throw new Error('识别超时，请稍后重试')
+    }
+
     if (selectedFiles.value.length === 1) {
-      const res = await invoiceApi.upload(selectedFiles.value[0])
+      const res = await invoiceApi.uploadAsync(selectedFiles.value[0])
       const payload = (res.data?.data || null) as any
-      createdInvoice = payload?.invoice || null
-      uploadDedup.value = (payload?.dedup as any) || null
+      const taskId = payload?.taskId as string
+      const draftInvoice = payload?.invoice as Invoice
+      createdInvoice = draftInvoice || null
       uploadedInvoiceIds.value = createdInvoice ? [createdInvoice.id] : []
+
+      if (taskId) {
+        const task = await waitForTask(taskId)
+        if (task.status === 'failed') throw new Error(task?.error || '识别失败')
+        if (task.status === 'canceled') throw new Error('识别已取消')
+        const result = task.result as any
+        createdInvoice = result?.invoice || createdInvoice
+        uploadDedup.value = (result?.dedup as any) || null
+      }
     } else {
-      const res = await invoiceApi.uploadMultiple(selectedFiles.value)
-      const createdList = res.data?.data || []
+      const res = await invoiceApi.uploadMultipleAsync(selectedFiles.value)
+      const items = (res.data?.data || []) as Array<{ taskId: string; invoice: Invoice }>
+      const createdList = items.map(it => it.invoice)
       createdInvoice = createdList.length > 0 ? createdList[0] : null
       uploadedInvoiceIds.value = createdList.map(it => it.id)
       uploadDedup.value = null
+
+      // Wait until all invoices are parsed before allowing confirm-all.
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i]
+        if (!it?.taskId) continue
+        const task = await waitForTask(it.taskId)
+        if (task.status === 'failed') throw new Error(task?.error || '识别失败')
+        if (task.status === 'canceled') throw new Error('识别已取消')
+        if (i === 0) {
+          const result = task.result as any
+          createdInvoice = result?.invoice || createdInvoice
+          uploadDedup.value = (result?.dedup as any) || null
+        }
+      }
     }
     if (createdInvoice) {
       uploadedInvoiceId.value = createdInvoice.id
