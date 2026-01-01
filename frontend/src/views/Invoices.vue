@@ -1456,6 +1456,18 @@ onMounted(() => {
   text-overflow: ellipsis;
 }
 
+@media (max-width: 768px) {
+  .invoices-table :deep(.p-datatable-table-container) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .invoices-table :deep(.p-datatable-table) {
+    width: max-content;
+    min-width: 100%;
+  }
+}
+
 .field {
   margin: 0;
   display: flex;
