@@ -143,11 +143,7 @@ const handleRegister = async () => {
   margin-bottom: 18px;
 }
 
-.p-fluid {
-  width: 100%;
-}
-
-.p-fluid form {
+form {
   display: flex;
   flex-direction: column;
   gap: 14px;
