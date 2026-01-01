@@ -326,7 +326,9 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
 }
 
 .sidebar {
-  width: 260px;
+  width: fit-content;
+  min-width: 212px;
+  max-width: 260px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -360,7 +362,7 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
   align-items: center;
   justify-content: flex-start;
   color: var(--p-text-color);
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 800;
   white-space: nowrap;
   overflow: hidden;
@@ -412,6 +414,8 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
   transition: all var(--transition-base);
   text-align: left;
   position: relative;
+  font-size: 15px;
+  font-weight: 700;
 }
 
 .sidebar.collapsed .nav-item {
@@ -422,7 +426,7 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
 }
 
 .nav-item i {
-  font-size: 18px;
+  font-size: 19px;
 }
 
 .nav-item:hover {
