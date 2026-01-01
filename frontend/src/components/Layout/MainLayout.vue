@@ -318,11 +318,17 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
 .layout {
   min-height: 100vh;
   display: flex;
-  gap: 24px;
+  gap: 32px;
   padding: 20px;
   width: 100%;
   margin: 0;
   align-items: flex-start;
+}
+
+@media (max-width: 1280px) {
+  .layout {
+    gap: 24px;
+  }
 }
 
 .sidebar {
