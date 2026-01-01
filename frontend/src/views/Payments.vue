@@ -69,7 +69,6 @@
           responsiveLayout="scroll"
           sortField="transaction_time"
           :sortOrder="-1"
-          @row-click="onPaymentRowClick"
         >
           <Column field="amount" :header="'\u91D1\u989D'" sortable :style="{ width: '10%' }">
             <template #body="{ data: row }">
@@ -105,14 +104,14 @@
           </Column>
           <Column :header="'\u5173\u8054\u53D1\u7968'" :style="{ width: '7%' }">
             <template #body="{ data: row }">
-              <Button size="small" class="p-button-text" :label="`\u67E5\u770B (${row.invoiceCount || 0})`" @click.stop="viewLinkedInvoices(row)" />
+              <Button size="small" class="p-button-text" :label="`\u67E5\u770B (${row.invoiceCount || 0})`" @click="viewLinkedInvoices(row)" />
             </template>
           </Column>
           <Column :header="'\u64CD\u4F5C'" :style="{ width: '7%' }">
             <template #body="{ data: row }">
               <div class="row-actions">
-                <Button class="p-button-text" icon="pi pi-eye" @click.stop="openPaymentDetail(row)" />
-                <Button class="p-button-text p-button-danger" icon="pi pi-trash" @click.stop="confirmDelete(row.id)" />
+                <Button class="p-button-text" icon="pi pi-eye" @click="openPaymentDetail(row)" />
+                <Button class="p-button-text p-button-danger" icon="pi pi-trash" @click="confirmDelete(row.id)" />
               </div>
             </template>
           </Column>
@@ -364,7 +363,6 @@
 
     <Dialog
       v-model:visible="paymentDetailVisible"
-      class="payment-detail-dialog"
       modal
       :header="'\u652F\u4ED8\u8BB0\u5F55\u8BE6\u60C5'"
       :style="{ width: '740px', maxWidth: '94vw' }"
@@ -526,7 +524,6 @@ import Button from 'primevue/button'
 import Card from 'primevue/card'
 import Column from 'primevue/column'
 import DataTable from 'primevue/datatable'
-import type { DataTableRowClickEvent } from 'primevue/datatable'
 import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
 import Divider from 'primevue/divider'
@@ -545,7 +542,6 @@ import Textarea from 'primevue/textarea'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import { invoiceApi, paymentApi, FILE_BASE_URL } from '@/api'
-import { useIsMobileUI } from '@/composables/useDevice'
 import { useNotificationStore } from '@/stores/notifications'
 import type { Invoice, Payment, DedupHint } from '@/types'
 
@@ -571,8 +567,6 @@ const notifications = useNotificationStore()
 const confirm = useConfirm()
 const route = useRoute()
 const router = useRouter()
-
-const { isMobileUI } = useIsMobileUI()
 
 const confirmForceSave = (message: string) =>
   new Promise<boolean>(resolve => {
@@ -1152,17 +1146,6 @@ const openPaymentDetail = (payment: Payment) => {
   paymentDetailVisible.value = true
 }
 
-const isInteractiveTarget = (target: EventTarget | null) => {
-  if (!target || !(target instanceof HTMLElement)) return false
-  return !!target.closest('button, a, input, textarea, select, [role=\"button\"], .p-button, .p-checkbox, .p-radiobutton')
-}
-
-const onPaymentRowClick = (event: DataTableRowClickEvent<Payment>) => {
-  if (!isMobileUI.value) return
-  if (isInteractiveTarget(event.originalEvent?.target ?? null)) return
-  openPaymentDetail(event.data)
-}
-
 const formatDateTimeDraft = (date: Date | null) => {
   if (!date) return ''
   return dayjs(date).format('YYYY-MM-DD HH:mm')
@@ -1527,14 +1510,6 @@ watch(
   .payments-table :deep(.p-datatable-table) {
     width: max-content;
     min-width: 100%;
-  }
-
-  .payments-table :deep(.p-datatable-tbody > tr) {
-    cursor: pointer;
-  }
-
-  .payments-table :deep(.p-datatable-tbody > tr:active) {
-    background: rgba(2, 6, 23, 0.04);
   }
 }
 
@@ -1945,35 +1920,6 @@ watch(
   justify-content: flex-end;
   gap: 10px;
   padding-top: 10px;
-}
-
-@media (max-width: 640px) {
-  :global(.p-dialog.payment-detail-dialog) {
-    width: 100vw !important;
-    max-width: 100vw !important;
-    height: 100vh !important;
-    max-height: 100vh !important;
-    margin: 0 !important;
-    border-radius: 0 !important;
-    display: flex;
-    flex-direction: column;
-  }
-
-  :global(.p-dialog.payment-detail-dialog .p-dialog-header) {
-    padding: 12px 12px 8px !important;
-    border-top-left-radius: 0 !important;
-    border-top-right-radius: 0 !important;
-  }
-
-  :global(.p-dialog.payment-detail-dialog .p-dialog-content) {
-    padding: 12px 12px 14px !important;
-    flex: 1 1 auto;
-    overflow: auto;
-  }
-
-  :global(.p-dialog.payment-detail-dialog .p-dialog-footer) {
-    padding: 10px 12px 12px !important;
-  }
 }
 </style>
 
