@@ -51,19 +51,27 @@
         </div>
       </template>
 
-      <nav class="drawer-nav">
-        <button
-          v-for="item in navItems"
-          :key="item.path"
-          class="nav-item"
-          :class="{ active: currentRoute === item.path }"
-          type="button"
-          @click="go(item.path)"
-        >
-          <i :class="item.icon" />
-          <span>{{ item.label }}</span>
-        </button>
-      </nav>
+      <PanelMenu v-model:expandedKeys="mobileExpandedKeys" :model="mobileNavModel" class="mobile-panelmenu">
+        <template #item="{ item }">
+          <a
+            v-ripple
+            href="#"
+            class="sbm-mobile-nav-item"
+            :class="{
+              'is-group': !!item.items,
+              'is-leaf': !item.items,
+              'is-active': item.route && item.route === currentRoute,
+            }"
+            @click="onMobileNavItemClick($event, item)"
+          >
+            <span v-if="item.items" class="sbm-mobile-nav-icon">
+              <span :class="item.icon" />
+            </span>
+            <span class="sbm-mobile-nav-label" :class="{ 'is-group-label': !!item.items }">{{ item.label ?? '' }}</span>
+            <span v-if="item.items" class="pi pi-angle-down sbm-mobile-nav-chevron" />
+          </a>
+        </template>
+      </PanelMenu>
     </Drawer>
 
     <div class="content">
@@ -112,6 +120,7 @@ import Button from 'primevue/button'
 import Avatar from 'primevue/avatar'
 import Drawer from 'primevue/drawer'
 import Menu from 'primevue/menu'
+import PanelMenu from 'primevue/panelmenu'
 import { useToast } from 'primevue/usetoast'
 import ChangePassword from '@/components/ChangePassword.vue'
 import NotificationCenter from '@/components/NotificationCenter.vue'
@@ -139,6 +148,61 @@ const isMobile = ref(false)
 
 const currentRoute = computed(() => route.path)
 
+type MobileNavItem = {
+  key?: string
+  label?: string
+  icon?: string
+  route?: string
+  items?: MobileNavItem[]
+}
+
+const mobileNavModel = computed<MobileNavItem[]>(() => [
+  {
+    key: 'getting-started',
+    label: '概览',
+    icon: 'pi pi-home',
+    items: [{ label: '仪表盘', route: '/dashboard' }],
+  },
+  {
+    key: 'bills',
+    label: '账单',
+    icon: 'pi pi-wallet',
+    items: [
+      { label: '支付记录', route: '/payments' },
+      { label: '发票管理', route: '/invoices' },
+    ],
+  },
+  {
+    key: 'tools',
+    label: '工具',
+    icon: 'pi pi-wrench',
+    items: [{ label: '行程日历', route: '/trips' }],
+  },
+  {
+    key: 'system',
+    label: '系统',
+    icon: 'pi pi-cog',
+    items: [
+      { label: '邮箱监控', route: '/email' },
+      { label: '日志', route: '/logs' },
+    ],
+  },
+])
+
+const mobileExpandedKeys = ref<Record<string, boolean>>({})
+
+const syncMobileExpandedKeys = () => {
+  const current = currentRoute.value
+  const groups = mobileNavModel.value
+  const found = groups.find((g) => g.key && g.items?.some((c) => c.route === current))
+  if (found?.key) {
+    mobileExpandedKeys.value = { [found.key]: true }
+    return
+  }
+  const fallback = groups.find((g) => g.key)?.key
+  if (fallback) mobileExpandedKeys.value = { [fallback]: true }
+}
+
 const updateIsMobile = () => {
   if (typeof window === 'undefined') return
   isMobile.value = window.matchMedia('(max-width: 768px)').matches
@@ -147,6 +211,7 @@ const updateIsMobile = () => {
 
 onMounted(() => {
   updateIsMobile()
+  syncMobileExpandedKeys()
   if (typeof window === 'undefined') return
   window.addEventListener('resize', updateIsMobile, { passive: true })
 })
@@ -210,6 +275,11 @@ const toggleUserMenu = (event: MouseEvent) => {
 const go = (path: string) => {
   mobileNavVisible.value = false
   router.push(path)
+}
+
+const onMobileNavItemClick = (event: MouseEvent, item: any) => {
+  event.preventDefault()
+  if (typeof item?.route === 'string' && item.route) go(item.route)
 }
 </script>
 
@@ -469,11 +539,118 @@ const go = (path: string) => {
 <style>
 /* Drawer is teleported to <body>, so styles must be global. */
 .p-drawer.mobile-drawer {
-  width: min(84vw, 360px);
-  border-radius: 0 18px 18px 0;
+  width: min(86vw, 360px);
+  border-radius: 0 20px 20px 0;
 }
 
 .p-drawer.mobile-drawer .p-drawer-content {
-  padding: 12px 12px 16px;
+  padding: 10px 10px 16px;
+}
+
+.p-drawer.mobile-drawer .p-drawer-header {
+  padding: 16px 16px 8px;
+}
+
+.p-drawer.mobile-drawer .p-drawer-header .drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.p-drawer.mobile-drawer .p-drawer-header .drawer-title {
+  font-weight: 800;
+  letter-spacing: -0.2px;
+}
+
+.p-drawer.mobile-drawer .mobile-panelmenu {
+  border: 0;
+}
+
+.p-drawer.mobile-drawer .mobile-panelmenu .p-panelmenu-panel {
+  border: 0;
+  background: transparent;
+}
+
+.p-drawer.mobile-drawer .mobile-panelmenu .p-panelmenu-header {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.p-drawer.mobile-drawer .mobile-panelmenu .p-panelmenu-content {
+  border: 0;
+  background: transparent;
+  padding: 0 0 6px;
+}
+
+.p-drawer.mobile-drawer .sbm-mobile-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-decoration: none;
+  color: var(--p-text-color);
+  border-radius: 14px;
+  transition: background var(--transition-base);
+  user-select: none;
+}
+
+.p-drawer.mobile-drawer .sbm-mobile-nav-item.is-group {
+  padding: 10px 10px;
+  margin: 6px 0;
+}
+
+.p-drawer.mobile-drawer .sbm-mobile-nav-item.is-group:hover {
+  background: rgba(2, 6, 23, 0.05);
+}
+
+.p-drawer.mobile-drawer .sbm-mobile-nav-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: var(--p-surface-0);
+  border: 1px solid rgba(2, 6, 23, 0.1);
+  color: var(--p-text-color);
+  flex: 0 0 auto;
+}
+
+.p-drawer.mobile-drawer .sbm-mobile-nav-label.is-group-label {
+  font-weight: 800;
+}
+
+.p-drawer.mobile-drawer .sbm-mobile-nav-chevron {
+  margin-left: auto;
+  color: var(--p-text-muted-color);
+}
+
+.p-drawer.mobile-drawer .sbm-mobile-nav-item.is-leaf {
+  position: relative;
+  padding: 8px 10px 8px 58px;
+  margin: 2px 0;
+  color: var(--p-text-muted-color);
+  border-radius: 12px;
+}
+
+.p-drawer.mobile-drawer .sbm-mobile-nav-item.is-leaf::before {
+  content: '';
+  position: absolute;
+  left: 32px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.12);
+}
+
+.p-drawer.mobile-drawer .sbm-mobile-nav-item.is-leaf.is-active {
+  color: var(--p-text-color);
+  font-weight: 700;
+  background: rgba(2, 6, 23, 0.03);
+}
+
+.p-drawer.mobile-drawer .sbm-mobile-nav-item.is-leaf.is-active::before {
+  background: var(--p-primary-color);
 }
 </style>
