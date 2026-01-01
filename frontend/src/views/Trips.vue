@@ -82,7 +82,6 @@
                     class="trip-table"
                     :pt="tableScrollPt"
                     :tableStyle="tripTableStyle"
-                    :style="tripTableRootStyle"
                   >
                     <Column field="amount" header="金额" :style="{ width: '120px' }" sortable>
                       <template #body="{ data: row }">
@@ -186,7 +185,6 @@
                     class="pending-table"
                     :pt="tableScrollPt"
                     :tableStyle="tripTableStyle"
-                    :style="tripTableRootStyle"
                   >
                   <Column header="金额" :style="{ width: '120px' }">
                     <template #body="{ data: row }">
@@ -290,7 +288,6 @@
                           class="calendar-table"
                           :pt="tableScrollPt"
                           :tableStyle="tripTableStyle"
-                          :style="tripTableRootStyle"
                         >
                         <Column field="amount" header="金额" :style="{ width: '120px' }">
                           <template #body="{ data: row }">
@@ -486,10 +483,6 @@ const tableScrollPt = {
 
 const tripTableStyle = {
   minWidth: '960px',
-} as const
-
-const tripTableRootStyle = {
-  minWidth: '1200px',
 } as const
 
 const toast = useToast()
@@ -1297,6 +1290,18 @@ onMounted(async () => {
   gap: 10px;
 }
 
+.trip-accordion :deep(.p-accordioncontent),
+.trip-accordion :deep(.p-accordioncontent-wrapper),
+.trip-accordion :deep(.p-accordioncontent-content) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.trip-accordion :deep(.p-accordioncontent-content) {
+  overflow: hidden;
+}
+
 .trip-header {
   display: flex;
   align-items: center;
@@ -1406,6 +1411,8 @@ onMounted(async () => {
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
 }
 
 .trip-table :deep(.p-datatable-table-container),
@@ -1413,6 +1420,7 @@ onMounted(async () => {
 .calendar-table :deep(.p-datatable-table-container) {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
 }
 
 .trip-table :deep(.p-datatable-table),
