@@ -241,7 +241,7 @@ const userAvatarLabel = computed(() => {
   const trimmed = userDisplayName.value.trim()
   if (!trimmed || trimmed === '用户') return ''
   const first = trimmed[0]
-  if (/^\\d$/.test(first)) return ''
+  if (/^\d$/.test(first)) return ''
   return /[a-z]/i.test(first) ? first.toUpperCase() : first
 })
 
@@ -435,8 +435,7 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
 
 .content-inner {
   width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
+  max-width: none;
 }
 
 .topbar {
@@ -666,4 +665,3 @@ const onMobileNavItemClick = (event: MouseEvent, item: any) => {
   background: var(--p-primary-color);
 }
 </style>
-
