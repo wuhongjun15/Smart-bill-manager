@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -138,6 +139,18 @@ func main() {
 
 	// Periodically clean up stale draft uploads (refresh/abandon cases).
 	services.StartDraftCleanup(db, uploadsDir)
+
+	// Import built-in regression samples (repo/docker-bundled) into DB.
+	// Mode B: if a matching local (ui) sample exists, it will be promoted as origin=repo.
+	if res, err := services.NewRegressionSampleService().ImportRepoSamples(); err != nil {
+		if !errors.Is(err, services.ErrRepoSampleDirNotFound) {
+			log.Printf("[Regression] repo sample import failed: %v", err)
+		}
+	} else if res != nil {
+		if res.Files > 0 || res.Inserted > 0 || res.Updated > 0 || res.Promoted > 0 {
+			log.Printf("[Regression] repo samples: scanned=%d inserted=%d updated=%d promoted=%d errors=%d", res.Files, res.Inserted, res.Updated, res.Promoted, res.Errors)
+		}
+	}
 
 	// No longer automatically creating admin - use setup page instead
 	log.Println("System ready. Use setup page for initial configuration.")

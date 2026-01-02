@@ -23,6 +23,7 @@ import (
 )
 
 var ErrSampleNotFound = errors.New("regression sample not found")
+var ErrRepoSampleDirNotFound = errors.New("repo sample dir not found")
 
 type RegressionSampleService struct{}
 
@@ -306,6 +307,7 @@ func (s *RegressionSampleService) CreateOrUpdateFromInvoice(invoiceID string, cr
 
 type ListRegressionSamplesParams struct {
 	Kind   string
+	Origin string // ui | repo
 	Search string
 	Limit  int
 	Offset int
@@ -318,6 +320,10 @@ func (s *RegressionSampleService) List(params ListRegressionSamplesParams) ([]mo
 	kind := strings.TrimSpace(params.Kind)
 	if kind != "" {
 		q = q.Where("kind = ?", kind)
+	}
+	origin := strings.TrimSpace(params.Origin)
+	if origin != "" {
+		q = q.Where("origin = ?", origin)
 	}
 	search := strings.TrimSpace(params.Search)
 	if search != "" {
@@ -390,13 +396,42 @@ func (s *RegressionSampleService) BulkDelete(ids []string) (deleted int, err err
 	return int(res.RowsAffected), nil
 }
 
-func (s *RegressionSampleService) ExportZip(kind string) ([]byte, string, error) {
+type ExportRegressionSamplesParams struct {
+	Kind   string
+	Origin string   // ui | repo
+	IDs    []string // optional
+}
+
+func (s *RegressionSampleService) ExportZip(params ExportRegressionSamplesParams) ([]byte, string, error) {
 	db := database.GetDB()
 	backfillRegressionSampleRawHashes(db)
 	q := db.Model(&models.RegressionSample{})
-	kind = strings.TrimSpace(kind)
+	kind := strings.TrimSpace(params.Kind)
 	if kind != "" {
 		q = q.Where("kind = ?", kind)
+	}
+	origin := strings.TrimSpace(params.Origin)
+	if origin != "" {
+		q = q.Where("origin = ?", origin)
+	}
+	if len(params.IDs) > 0 {
+		clean := make([]string, 0, len(params.IDs))
+		seen := map[string]struct{}{}
+		for _, id := range params.IDs {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			clean = append(clean, id)
+		}
+		if len(clean) == 0 {
+			return nil, "", fmt.Errorf("no samples to export")
+		}
+		q = q.Where("id IN ?", clean)
 	}
 
 	var rows []models.RegressionSample
@@ -465,18 +500,11 @@ func (s *RegressionSampleService) ExportZip(kind string) ([]byte, string, error)
 	return buf.Bytes(), zipName, nil
 }
 
-type RepoSyncMode string
-
-const (
-	RepoSyncModeRepoOnly  RepoSyncMode = "repo_only" // update only records with origin=repo; skip ui records
-	RepoSyncModeOverwrite RepoSyncMode = "overwrite" // overwrite any existing record with same (kind, raw_hash)
-)
-
-type RepoSyncResult struct {
+type RepoImportResult struct {
 	Files     int      `json:"files"`
 	Inserted  int      `json:"inserted"`
 	Updated   int      `json:"updated"`
-	Skipped   int      `json:"skipped"`
+	Promoted  int      `json:"promoted"` // ui -> repo
 	Errors    int      `json:"errors"`
 	ErrorList []string `json:"error_list,omitempty"`
 }
@@ -508,17 +536,12 @@ func resolveRepoSampleDir() (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("no repo sample dir found (set SBM_REGRESSION_SAMPLES_DIR)")
+	return "", fmt.Errorf("%w (set SBM_REGRESSION_SAMPLES_DIR)", ErrRepoSampleDirNotFound)
 }
 
-func (s *RegressionSampleService) SyncFromRepoDir(mode RepoSyncMode) (*RepoSyncResult, error) {
-	if mode == "" {
-		mode = RepoSyncModeRepoOnly
-	}
-	if mode != RepoSyncModeRepoOnly && mode != RepoSyncModeOverwrite {
-		return nil, fmt.Errorf("invalid sync mode")
-	}
-
+// ImportRepoSamples imports repo (built-in) regression samples into DB.
+// Behavior (mode B): if a matching (kind, raw_hash) exists, it is promoted/overwritten as origin=repo.
+func (s *RegressionSampleService) ImportRepoSamples() (*RepoImportResult, error) {
 	baseDir, err := resolveRepoSampleDir()
 	if err != nil {
 		return nil, err
@@ -526,7 +549,7 @@ func (s *RegressionSampleService) SyncFromRepoDir(mode RepoSyncMode) (*RepoSyncR
 
 	db := database.GetDB()
 	backfillRegressionSampleRawHashes(db)
-	result := &RepoSyncResult{}
+	result := &RepoImportResult{}
 
 	walkErr := filepath.WalkDir(baseDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -572,7 +595,6 @@ func (s *RegressionSampleService) SyncFromRepoDir(mode RepoSyncMode) (*RepoSyncR
 		}
 		if kind != "payment_screenshot" && kind != "invoice" {
 			// Ignore unknown kinds for now.
-			result.Skipped++
 			return nil
 		}
 
@@ -626,11 +648,6 @@ func (s *RegressionSampleService) SyncFromRepoDir(mode RepoSyncMode) (*RepoSyncR
 			return nil
 		}
 
-		if mode == RepoSyncModeRepoOnly && strings.TrimSpace(existing.Origin) != "repo" {
-			result.Skipped++
-			return nil
-		}
-
 		update := map[string]any{
 			"name":          name,
 			"raw_text":      raw,
@@ -639,8 +656,21 @@ func (s *RegressionSampleService) SyncFromRepoDir(mode RepoSyncMode) (*RepoSyncR
 			"source_type":   "repo",
 			"source_id":     filepath.ToSlash(path),
 			"origin":        "repo",
-			"updated_at":    time.Now(),
 		}
+		if strings.TrimSpace(existing.Origin) != "repo" {
+			result.Promoted++
+		}
+		shouldUpdate := strings.TrimSpace(existing.Origin) != "repo" ||
+			strings.TrimSpace(existing.Name) != name ||
+			strings.TrimSpace(existing.SourceType) != "repo" ||
+			strings.TrimSpace(existing.SourceID) != filepath.ToSlash(path) ||
+			strings.TrimSpace(existing.RawText) != raw ||
+			strings.TrimSpace(existing.ExpectedJSON) != string(expB) ||
+			strings.TrimSpace(existing.RawHash) != rawHash
+		if !shouldUpdate {
+			return nil
+		}
+		update["updated_at"] = time.Now()
 		if err := db.Model(&models.RegressionSample{}).Where("id = ?", existing.ID).Updates(update).Error; err != nil {
 			result.Errors++
 			if len(result.ErrorList) < 20 {

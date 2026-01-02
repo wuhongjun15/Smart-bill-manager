@@ -77,10 +77,13 @@ RUN /opt/venv/bin/python3 -m pip install --no-cache-dir --upgrade pip setuptools
     /opt/venv/bin/python3 -c "import rapidocr, onnxruntime; print('RapidOCR v3 OK')"
 
 WORKDIR /app
-
+ 
 # Copy built backend binary
 COPY --from=backend-builder /app/backend/server ./backend/server
-
+ 
+# Copy built-in regression samples (used by the admin "sync from repo" feature)
+COPY --from=backend-builder /app/backend/internal/services/testdata/regression /app/backend/internal/services/testdata/regression
+ 
 # Copy built frontend files to nginx html directory
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 
@@ -103,9 +106,10 @@ RUN mkdir -p /var/log/supervisor
 
 # Expose port 80 (nginx serves both frontend and proxies to backend)
 EXPOSE 80
-
+ 
 # Set environment variables
 ENV PORT=3001
-
+ENV SBM_REGRESSION_SAMPLES_DIR=/app/backend/internal/services/testdata/regression
+ 
 # Start supervisord which manages both nginx and Go backend
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

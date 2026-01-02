@@ -26,12 +26,18 @@ type bulkDeleteInput struct {
 	IDs []string `json:"ids"`
 }
 
+type exportSamplesInput struct {
+	IDs    []string `json:"ids"`
+	Kind   string   `json:"kind"`
+	Origin string   `json:"origin"` // ui | repo
+}
+
 func (h *AdminRegressionSamplesHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.POST("/payments/:id", h.MarkPayment)
 	r.POST("/invoices/:id", h.MarkInvoice)
 	r.GET("", h.List)
-	r.POST("/sync", h.SyncFromRepo)
 	r.GET("/export", h.Export)
+	r.POST("/export", h.ExportSelected)
 	r.DELETE("/:id", h.Delete)
 	r.POST("/bulk-delete", h.BulkDelete)
 }
@@ -84,6 +90,7 @@ func (h *AdminRegressionSamplesHandler) MarkInvoice(c *gin.Context) {
 
 func (h *AdminRegressionSamplesHandler) List(c *gin.Context) {
 	kind := strings.TrimSpace(c.Query("kind"))
+	origin := strings.TrimSpace(c.Query("origin"))
 	search := strings.TrimSpace(c.Query("search"))
 
 	limit := 50
@@ -101,6 +108,7 @@ func (h *AdminRegressionSamplesHandler) List(c *gin.Context) {
 
 	items, total, err := h.svc.List(services.ListRegressionSamplesParams{
 		Kind:   kind,
+		Origin: origin,
 		Search: search,
 		Limit:  limit,
 		Offset: offset,
@@ -149,7 +157,11 @@ func (h *AdminRegressionSamplesHandler) BulkDelete(c *gin.Context) {
 
 func (h *AdminRegressionSamplesHandler) Export(c *gin.Context) {
 	kind := strings.TrimSpace(c.Query("kind"))
-	b, filename, err := h.svc.ExportZip(kind)
+	origin := strings.TrimSpace(c.Query("origin"))
+	b, filename, err := h.svc.ExportZip(services.ExportRegressionSamplesParams{
+		Kind:   kind,
+		Origin: origin,
+	})
 	if err != nil {
 		utils.Error(c, 400, "导出失败", err)
 		return
@@ -159,11 +171,25 @@ func (h *AdminRegressionSamplesHandler) Export(c *gin.Context) {
 	c.Data(200, "application/zip", b)
 }
 
-func (h *AdminRegressionSamplesHandler) SyncFromRepo(c *gin.Context) {
-	mode := strings.TrimSpace(c.Query("mode"))
-	syncMode := services.RepoSyncModeRepoOnly
-	if mode != "" {
-		switch mode {
+func (h *AdminRegressionSamplesHandler) ExportSelected(c *gin.Context) {
+	var input exportSamplesInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		utils.Error(c, 400, "å‚æ•°é”™è¯¯", err)
+		return
+	}
+	b, filename, err := h.svc.ExportZip(services.ExportRegressionSamplesParams{
+		Kind:   strings.TrimSpace(input.Kind),
+		Origin: strings.TrimSpace(input.Origin),
+		IDs:    input.IDs,
+	})
+	if err != nil {
+		utils.Error(c, 400, "å¯¼å‡ºå¤±è´¥", err)
+		return
+	}
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	c.Data(200, "application/zip", b)
+	/*
 		case string(services.RepoSyncModeRepoOnly):
 			syncMode = services.RepoSyncModeRepoOnly
 		case string(services.RepoSyncModeOverwrite):
@@ -180,4 +206,5 @@ func (h *AdminRegressionSamplesHandler) SyncFromRepo(c *gin.Context) {
 		return
 	}
 	utils.SuccessData(c, res)
+	*/
 }

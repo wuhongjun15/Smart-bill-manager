@@ -20,23 +20,19 @@ export const regressionSamplesApi = {
   markInvoice: (invoiceId: string, name?: string) =>
     api.post<ApiResponse<RegressionSample>>(`/admin/regression-samples/invoices/${invoiceId}`, { name: name || '' }),
 
-  list: (params?: { kind?: string; search?: string; limit?: number; offset?: number }) =>
+  list: (params?: { kind?: string; origin?: string; search?: string; limit?: number; offset?: number }) =>
     api.get<ApiResponse<{ items: RegressionSample[]; total: number }>>('/admin/regression-samples', { params }),
 
   bulkDelete: (ids: string[]) => api.post<ApiResponse<{ deleted: number }>>('/admin/regression-samples/bulk-delete', { ids }),
 
   delete: (id: string) => api.delete<ApiResponse<{ deleted: boolean }>>(`/admin/regression-samples/${id}`),
 
-  exportZip: async (kind?: string) =>
+  exportZip: async (params?: { kind?: string; origin?: string }) =>
     api.get('/admin/regression-samples/export', {
-      params: { kind: kind || undefined },
+      params: { kind: params?.kind || undefined, origin: params?.origin || undefined },
       responseType: 'blob',
     }),
 
-  syncFromRepo: (mode?: 'repo_only' | 'overwrite') =>
-    api.post<ApiResponse<{ files: number; inserted: number; updated: number; skipped: number; errors: number; error_list?: string[] }>>(
-      '/admin/regression-samples/sync',
-      {},
-      { params: { mode: mode || 'repo_only' } }
-    ),
+  exportSelectedZip: async (input: { ids: string[]; kind?: string; origin?: string }) =>
+    api.post('/admin/regression-samples/export', input, { responseType: 'blob' }),
 }
