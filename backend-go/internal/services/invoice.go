@@ -307,6 +307,10 @@ func (s *InvoiceService) GetAll(filter InvoiceFilterInput) ([]models.Invoice, er
 	})
 }
 
+func (s *InvoiceService) GetUnlinked(limit int, offset int) ([]models.Invoice, int64, error) {
+	return s.repo.FindUnlinked(limit, offset)
+}
+
 func (s *InvoiceService) GetByID(id string) (*models.Invoice, error) {
 	return s.repo.FindByID(id)
 }

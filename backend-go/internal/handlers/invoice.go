@@ -55,6 +55,7 @@ func NewInvoiceHandler(invoiceService *services.InvoiceService, taskService *ser
 
 func (h *InvoiceHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("", h.GetAll)
+	r.GET("/unlinked", h.GetUnlinked)
 	r.GET("/stats", h.GetStats)
 	r.GET("/:id", h.GetByID)
 	r.GET("/:id/download", h.Download)
@@ -86,6 +87,32 @@ func (h *InvoiceHandler) GetAll(c *gin.Context) {
 	}
 
 	utils.SuccessData(c, invoices)
+}
+
+func (h *InvoiceHandler) GetUnlinked(c *gin.Context) {
+	limit := 20
+	if v := strings.TrimSpace(c.Query("limit")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	offset := 0
+	if v := strings.TrimSpace(c.Query("offset")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	items, total, err := h.invoiceService.GetUnlinked(limit, offset)
+	if err != nil {
+		utils.Error(c, 500, "获取未关联发票失败", err)
+		return
+	}
+
+	utils.SuccessData(c, gin.H{
+		"items": items,
+		"total": total,
+	})
 }
 
 func (h *InvoiceHandler) GetStats(c *gin.Context) {

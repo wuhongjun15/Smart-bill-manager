@@ -320,6 +320,7 @@
         <TabList>
           <Tab value="linked">&#24050;&#20851;&#32852; ({{ linkedInvoices.length }})</Tab>
           <Tab value="suggested">&#26234;&#33021;&#25512;&#33616; ({{ suggestedInvoices.length }})</Tab>
+          <Tab value="unlinked">待关联 ({{ unlinkedInvoicesTotal }})</Tab>
         </TabList>
         <TabPanels>
         <TabPanel value="linked">
@@ -386,6 +387,51 @@
           <div v-if="!loadingSuggestedInvoices && suggestedInvoices.length === 0" class="no-data">
             <i class="pi pi-info-circle" />
             <span>&#26242;&#26080;&#25512;&#33616;</span>
+          </div>
+        </TabPanel>
+
+        <TabPanel value="unlinked">
+          <DataTable
+            class="match-table"
+            :value="unlinkedInvoices"
+            :loading="loadingUnlinkedInvoices"
+            responsiveLayout="scroll"
+            :paginator="true"
+            :rows="unlinkedRows"
+            :first="unlinkedFirst"
+            :totalRecords="unlinkedInvoicesTotal"
+            :rowsPerPageOptions="[10, 20, 50]"
+            :lazy="true"
+            @page="onUnlinkedPage"
+          >
+            <Column :header="'\u53D1\u7968\u53F7'" :style="{ width: '200px' }">
+              <template #body="{ data: row }">
+                <span class="sbm-ellipsis" :title="row.invoice_number || '-'">{{ row.invoice_number || '-' }}</span>
+              </template>
+            </Column>
+            <Column :header="'\u91D1\u989D'" :style="{ width: '120px' }">
+              <template #body="{ data: row }">{{ row.amount ? formatMoney(row.amount) : '-' }}</template>
+            </Column>
+            <Column :header="'\u9500\u552E\u65B9'" :style="{ width: '320px' }">
+              <template #body="{ data: row }">
+                <span class="sbm-ellipsis" :title="row.seller_name || '-'">{{ row.seller_name || '-' }}</span>
+              </template>
+            </Column>
+            <Column :header="'\u5F00\u7968\u65F6\u95F4'" :style="{ width: '150px' }">
+              <template #body="{ data: row }">
+                <span class="sbm-ellipsis" :title="row.invoice_date || '-'">{{ row.invoice_date || '-' }}</span>
+              </template>
+            </Column>
+            <Column :header="'\u64CD\u4F5C'" :style="{ width: '90px' }">
+              <template #body="{ data: row }">
+                <Button size="small" class="p-button-text" :label="'\u5173\u8054'" :loading="linkingInvoiceToPayment" @click="handleLinkInvoiceToPayment(row.id)" />
+              </template>
+            </Column>
+          </DataTable>
+
+          <div v-if="!loadingUnlinkedInvoices && unlinkedInvoices.length === 0" class="no-data">
+            <i class="pi pi-info-circle" />
+            <span>暂无待关联发票</span>
           </div>
         </TabPanel>
         </TabPanels>
@@ -803,9 +849,14 @@ const linkedInvoices = ref<Invoice[]>([])
 const currentPaymentForInvoices = ref<Payment | null>(null)
 const loadingSuggestedInvoices = ref(false)
 const suggestedInvoices = ref<Invoice[]>([])
+const loadingUnlinkedInvoices = ref(false)
+const unlinkedInvoices = ref<Invoice[]>([])
+const unlinkedInvoicesTotal = ref(0)
+const unlinkedFirst = ref(0)
+const unlinkedRows = ref(10)
 const linkingInvoiceToPayment = ref(false)
 const unlinkingInvoiceFromPayment = ref(false)
-const invoiceMatchTab = ref<'linked' | 'suggested'>('linked')
+const invoiceMatchTab = ref<'linked' | 'suggested' | 'unlinked'>('linked')
 
 // Detail dialog
 const paymentDetailVisible = ref(false)
@@ -1219,6 +1270,29 @@ const viewLinkedInvoices = async (payment: Payment) => {
     loadingLinkedInvoices.value = false
   }
   await refreshSuggestedInvoices({ showToast: false })
+  void fetchUnlinkedInvoices({ reset: true })
+}
+
+const fetchUnlinkedInvoices = async (opts?: { reset?: boolean }) => {
+  if (opts?.reset) unlinkedFirst.value = 0
+  loadingUnlinkedInvoices.value = true
+  try {
+    const res = await invoiceApi.getUnlinked({ limit: unlinkedRows.value, offset: unlinkedFirst.value })
+    const payload = res.data?.data as any
+    unlinkedInvoices.value = Array.isArray(payload?.items) ? (payload.items as Invoice[]) : []
+    unlinkedInvoicesTotal.value = typeof payload?.total === 'number' ? payload.total : 0
+  } catch {
+    unlinkedInvoices.value = []
+    unlinkedInvoicesTotal.value = 0
+  } finally {
+    loadingUnlinkedInvoices.value = false
+  }
+}
+
+const onUnlinkedPage = (event: { first: number; rows: number }) => {
+  unlinkedFirst.value = event.first
+  unlinkedRows.value = event.rows
+  void fetchUnlinkedInvoices()
 }
 
 const linkedInvoiceAmount = computed(() => {
@@ -1284,6 +1358,7 @@ const handleLinkInvoiceToPayment = async (invoiceId: string) => {
     toast.add({ severity: 'success', summary: '\u5173\u8054\u6210\u529F', life: 2000 })
     await viewLinkedInvoices(currentPaymentForInvoices.value)
     await loadPayments()
+    void fetchUnlinkedInvoices()
   } catch (error: unknown) {
     const err = error as { response?: { data?: { message?: string } } }
     toast.add({ severity: 'error', summary: err.response?.data?.message || '\u5173\u8054\u5931\u8D25', life: 3500 })
@@ -1300,6 +1375,7 @@ const handleUnlinkInvoiceFromPayment = async (invoiceId: string) => {
     toast.add({ severity: 'success', summary: '\u53D6\u6D88\u5173\u8054\u6210\u529F', life: 2000 })
     await viewLinkedInvoices(currentPaymentForInvoices.value)
     await loadPayments()
+    void fetchUnlinkedInvoices()
   } catch (error: unknown) {
     const err = error as { response?: { data?: { message?: string } } }
     toast.add({ severity: 'error', summary: err.response?.data?.message || '\u53D6\u6D88\u5173\u8054\u5931\u8D25', life: 3500 })
@@ -1639,6 +1715,13 @@ onBeforeUnmount(() => {
   window.removeEventListener('orientationchange', handlePaymentTimeViewportChange as any)
   window.removeEventListener('scroll', handlePaymentTimeViewportChange as any, true)
 })
+
+watch(
+  () => invoiceMatchTab.value,
+  (tab) => {
+    if (tab === 'unlinked') void fetchUnlinkedInvoices()
+  },
+)
 
 watch(
   () => route.query.match,

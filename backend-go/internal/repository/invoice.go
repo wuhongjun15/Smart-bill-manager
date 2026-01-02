@@ -79,6 +79,39 @@ func (r *InvoiceRepository) FindAll(filter InvoiceFilter) ([]models.Invoice, err
 	return invoices, err
 }
 
+func (r *InvoiceRepository) FindUnlinked(limit int, offset int) ([]models.Invoice, int64, error) {
+	db := database.GetDB()
+
+	base := db.
+		Model(&models.Invoice{}).
+		Select("invoices.*").
+		Joins("LEFT JOIN invoice_payment_links AS l ON l.invoice_id = invoices.id").
+		Where("invoices.is_draft = 0").
+		Where("l.invoice_id IS NULL").
+		Where("(invoices.payment_id IS NULL OR TRIM(invoices.payment_id) = '')")
+
+	var total int64
+	if err := base.Distinct("invoices.id").Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	query := base.
+		Distinct("invoices.id").
+		Order("invoices.created_at DESC")
+	if limit > 0 {
+		query = query.Limit(limit)
+		if offset > 0 {
+			query = query.Offset(offset)
+		}
+	}
+
+	var invoices []models.Invoice
+	if err := query.Find(&invoices).Error; err != nil {
+		return nil, 0, err
+	}
+	return invoices, total, nil
+}
+
 func (r *InvoiceRepository) FindByPaymentID(paymentID string) ([]models.Invoice, error) {
 	var invoices []models.Invoice
 	err := database.GetDB().Where("payment_id = ?", paymentID).Where("is_draft = 0").Find(&invoices).Error

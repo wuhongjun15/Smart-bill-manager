@@ -14,6 +14,9 @@ type UploadInvoiceAsyncResult = {
 export const invoiceApi = {
   getAll: (params?: { limit?: number; offset?: number }) =>
     api.get<ApiResponse<Invoice[]>>('/invoices', { params }),
+
+  getUnlinked: (params?: { limit?: number; offset?: number }) =>
+    api.get<ApiResponse<{ items: Invoice[]; total: number }>>('/invoices/unlinked', { params }),
   
   getById: (id: string) =>
     api.get<ApiResponse<Invoice>>(`/invoices/${id}`),
