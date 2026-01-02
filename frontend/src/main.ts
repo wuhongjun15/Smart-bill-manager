@@ -14,6 +14,7 @@ import router from './router'
 import './index.css'
 import './App.css'
 import './styles/prime-demo.css'
+import { initTheme } from './stores/theme'
 
 const app = createApp(App)
 
@@ -25,6 +26,7 @@ app.use(PrimeVue, {
     preset: Aura,
     options: {
       prefix: 'p',
+      darkModeSelector: '.sbm-dark',
       cssLayer: false,
     },
   },
@@ -33,4 +35,5 @@ app.use(ToastService)
 app.use(ConfirmationService)
 app.directive('ripple', Ripple)
 
+initTheme()
 app.mount('#app')

@@ -627,8 +627,8 @@ onMounted(() => {
   justify-content: space-between;
   padding: 10px 12px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 35%);
+  background: color-mix(in srgb, var(--p-surface-0), transparent 10%);
   margin-top: 12px;
 }
 

@@ -290,8 +290,8 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding: 6px 10px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 35%);
+  background: color-mix(in srgb, var(--p-surface-0), transparent 12%);
 }
 
 .switch-label {
@@ -304,8 +304,8 @@ onBeforeUnmount(() => {
   height: 70vh;
   overflow: auto;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 35%);
+  background: color-mix(in srgb, var(--p-surface-0), transparent 10%);
   padding: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: 12px;
@@ -321,12 +321,12 @@ onBeforeUnmount(() => {
 
 .ts {
   flex: 0 0 auto;
-  color: rgba(0, 0, 0, 0.45);
+  color: color-mix(in srgb, var(--p-text-muted-color), transparent 20%);
 }
 
 .src {
   flex: 0 0 auto;
-  color: rgba(0, 0, 0, 0.65);
+  color: var(--p-text-muted-color);
 }
 
 .msg {

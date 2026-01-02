@@ -1765,8 +1765,8 @@ watch(
   gap: 8px;
   padding: 8px 10px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 35%);
+  background: color-mix(in srgb, var(--p-surface-0), transparent 10%);
 }
 
 .file-row-name {
@@ -1795,7 +1795,7 @@ watch(
   word-break: break-word;
   max-height: 260px;
   overflow: auto;
-  background: rgba(0, 0, 0, 0.03);
+  background: color-mix(in srgb, var(--p-surface-0), transparent 8%);
   padding: 10px;
   border-radius: var(--radius-md);
   font-family: var(--font-mono);
@@ -1830,8 +1830,8 @@ watch(
 }
 
 .kv {
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 35%);
+  background: color-mix(in srgb, var(--p-surface-0), transparent 10%);
   border-radius: var(--radius-md);
   padding: 8px 10px;
 }

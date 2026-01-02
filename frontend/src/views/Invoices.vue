@@ -1661,8 +1661,8 @@ onMounted(() => {
 }
 
 .stat-icon.secondary {
-  background: rgba(0, 0, 0, 0.06);
-  color: rgba(0, 0, 0, 0.55);
+  background: color-mix(in srgb, var(--p-surface-200), transparent 70%);
+  color: var(--p-text-muted-color);
 }
 
 .source-row {

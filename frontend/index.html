@@ -5,6 +5,24 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>智能账单管理系统</title>
+    <script>
+      ;(() => {
+        try {
+          const key = 'sbm.theme.mode'
+          const raw = localStorage.getItem(key)
+          const mode = raw === 'light' || raw === 'dark' ? raw : 'system'
+          const prefersDark =
+            typeof window !== 'undefined' &&
+            typeof window.matchMedia === 'function' &&
+            window.matchMedia('(prefers-color-scheme: dark)').matches
+          const isDark = mode === 'dark' || (mode === 'system' && prefersDark)
+          if (isDark) document.documentElement.classList.add('sbm-dark')
+          document.documentElement.dataset.sbmThemeMode = mode
+        } catch {
+          // ignore
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

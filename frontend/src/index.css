@@ -24,6 +24,10 @@
   /* Base sizing (closer to PrimeVue templates) */
   font-size: 14px;
   color-scheme: light;
+
+  /* Compatibility aliases (PrimeVue v3-style vars used in a few places) */
+  --text-color: var(--p-text-color);
+  --text-color-secondary: var(--p-text-muted-color);
   
   /* App tokens mapped to PrimeVue theme vars */
   --color-text-primary: var(--p-text-color);
@@ -86,18 +90,17 @@
 }
 
 /* Dark Mode Support */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-text-primary: var(--p-text-color);
-    --color-text-secondary: var(--p-text-muted-color);
-    --color-text-tertiary: rgba(255, 255, 255, 0.45);
-    --color-text-tertiary: color-mix(in srgb, var(--p-text-muted-color), transparent 35%);
-    --color-bg-primary: var(--p-surface-950);
-    --color-bg-secondary: var(--p-surface-900);
-    --color-bg-elevated: var(--p-surface-900);
-    --glass-bg: rgba(30, 30, 30, 0.7);
-    --glass-border: rgba(255, 255, 255, 0.1);
-  }
+:root.sbm-dark {
+  color-scheme: dark;
+  --color-text-primary: var(--p-text-color);
+  --color-text-secondary: var(--p-text-muted-color);
+  --color-text-tertiary: rgba(255, 255, 255, 0.45);
+  --color-text-tertiary: color-mix(in srgb, var(--p-text-muted-color), transparent 35%);
+  --color-bg-primary: var(--p-surface-950);
+  --color-bg-secondary: var(--p-surface-900);
+  --color-bg-elevated: var(--p-surface-900);
+  --glass-bg: rgba(30, 30, 30, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
 }
 
 body {

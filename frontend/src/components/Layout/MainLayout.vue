@@ -76,6 +76,16 @@
           </div>
 
           <div class="topbar-right">
+            <Button
+              class="theme-toggle"
+              severity="secondary"
+              text
+              rounded
+              :icon="themeToggleIcon"
+              :aria-label="themeToggleLabel"
+              :title="themeToggleLabel"
+              @click="toggleTheme"
+            />
             <NotificationCenter />
 
             <Button
@@ -119,11 +129,13 @@ import { useToast } from 'primevue/usetoast'
 import ChangePassword from '@/components/ChangePassword.vue'
 import NotificationCenter from '@/components/NotificationCenter.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useTheme } from '@/stores/theme'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const toast = useToast()
+const theme = useTheme()
 
 type NavItem = { path: string; label: string; icon: string }
 
@@ -198,6 +210,10 @@ const pageTitle = computed(() => {
   const fallback = navItemsWithAdmin.value.find((n) => n.path === route.path)?.label
   return fallback || '仪表盘'
 })
+
+const themeToggleIcon = computed(() => (theme.effectiveDark.value ? 'pi pi-sun' : 'pi pi-moon'))
+const themeToggleLabel = computed(() => (theme.effectiveDark.value ? '切换到明亮模式' : '切换到暗色模式'))
+const toggleTheme = () => theme.toggleTheme()
 
 const userDisplayName = computed(() => authStore.user?.username?.trim() || '用户')
 
@@ -367,7 +383,7 @@ const go = (path: string) => {
 }
 
 .nav-item:hover {
-  background: rgba(2, 6, 23, 0.06);
+  background: color-mix(in srgb, var(--p-surface-200), transparent 65%);
 }
 
 .nav-item.active {
@@ -394,7 +410,7 @@ const go = (path: string) => {
 }
 
 .collapse-btn:hover {
-  background: rgba(2, 6, 23, 0.06) !important;
+  background: color-mix(in srgb, var(--p-surface-200), transparent 65%) !important;
 }
 
 .content {
@@ -433,6 +449,12 @@ const go = (path: string) => {
   border-radius: 12px !important;
 }
 
+.theme-toggle {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px !important;
+}
+
 .page-kicker {
   font-size: 13px;
   font-weight: 700;
@@ -463,12 +485,12 @@ const go = (path: string) => {
   padding: 8px 10px;
   border-radius: 999px;
   transition: all var(--transition-base);
-  border: 1px solid rgba(2, 6, 23, 0.1);
-  background: rgba(2, 6, 23, 0.03);
+  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 35%);
+  background: color-mix(in srgb, var(--p-surface-0), transparent 12%);
 }
 
 .user-button:hover {
-  background: rgba(2, 6, 23, 0.06);
+  background: color-mix(in srgb, var(--p-surface-0), transparent 6%);
 }
 
 .user-avatar {
