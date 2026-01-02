@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -134,11 +135,7 @@ func diffPaymentExpected(exp paymentExpected, got *PaymentExtractedData) []strin
 	diffs := make([]string, 0, 8)
 
 	if exp.Merchant != nil {
-		if got.Merchant == nil {
-			diffs = append(diffs, fmt.Sprintf("diff: merchant expected=%q got=<nil>", strings.TrimSpace(*exp.Merchant)))
-		} else if strings.TrimSpace(*got.Merchant) != strings.TrimSpace(*exp.Merchant) {
-			diffs = append(diffs, fmt.Sprintf("diff: merchant expected=%q got=%q", strings.TrimSpace(*exp.Merchant), strings.TrimSpace(*got.Merchant)))
-		}
+		diffs = append(diffs, diffStringField("merchant", exp.Merchant, got.Merchant, normalizeLooseText)...)
 	}
 
 	if exp.TransactionTime != nil {
@@ -164,29 +161,26 @@ func diffPaymentExpected(exp paymentExpected, got *PaymentExtractedData) []strin
 	}
 
 	if exp.PaymentMethod != nil {
-		if got.PaymentMethod == nil {
-			diffs = append(diffs, fmt.Sprintf("diff: payment_method expected=%q got=<nil>", strings.TrimSpace(*exp.PaymentMethod)))
-		} else if strings.TrimSpace(*got.PaymentMethod) != strings.TrimSpace(*exp.PaymentMethod) {
-			diffs = append(diffs, fmt.Sprintf("diff: payment_method expected=%q got=%q", strings.TrimSpace(*exp.PaymentMethod), strings.TrimSpace(*got.PaymentMethod)))
-		}
+		diffs = append(diffs, diffStringField("payment_method", exp.PaymentMethod, got.PaymentMethod, normalizeLooseText)...)
 	}
 
 	if exp.OrderNumber != nil {
-		if got.OrderNumber == nil {
-			diffs = append(diffs, fmt.Sprintf("diff: order_number expected=%q got=<nil>", strings.TrimSpace(*exp.OrderNumber)))
-		} else if strings.TrimSpace(*got.OrderNumber) != strings.TrimSpace(*exp.OrderNumber) {
-			diffs = append(diffs, fmt.Sprintf("diff: order_number expected=%q got=%q", strings.TrimSpace(*exp.OrderNumber), strings.TrimSpace(*got.OrderNumber)))
-		}
+		diffs = append(diffs, diffStringField("order_number", exp.OrderNumber, got.OrderNumber, normalizeIdentifier)...)
 	}
 
 	if exp.Amount != nil {
 		if got.Amount == nil {
 			diffs = append(diffs, fmt.Sprintf("diff: amount expected=%v got=<nil>", *exp.Amount))
 		} else {
-			expV := math.Abs(*exp.Amount)
-			gotV := math.Abs(*got.Amount)
-			if !approxEqMoney(expV, gotV) {
-				diffs = append(diffs, fmt.Sprintf("diff: amount expected≈%v got=%v", expV, gotV))
+			expC := moneyCents(*exp.Amount)
+			gotC := moneyCents(*got.Amount)
+			if expC != gotC {
+				diffs = append(diffs, fmt.Sprintf("diff: amount expected=%s got=%s (raw expected=%v got=%v)",
+					formatCents(expC),
+					formatCents(gotC),
+					*exp.Amount,
+					*got.Amount,
+				))
 			}
 		}
 	}
@@ -202,11 +196,7 @@ func diffInvoiceExpected(exp invoiceExpected, got *InvoiceExtractedData) []strin
 	diffs := make([]string, 0, 8)
 
 	if exp.InvoiceNumber != nil {
-		if got.InvoiceNumber == nil {
-			diffs = append(diffs, fmt.Sprintf("diff: invoice_number expected=%q got=<nil>", strings.TrimSpace(*exp.InvoiceNumber)))
-		} else if strings.TrimSpace(*got.InvoiceNumber) != strings.TrimSpace(*exp.InvoiceNumber) {
-			diffs = append(diffs, fmt.Sprintf("diff: invoice_number expected=%q got=%q", strings.TrimSpace(*exp.InvoiceNumber), strings.TrimSpace(*got.InvoiceNumber)))
-		}
+		diffs = append(diffs, diffStringField("invoice_number", exp.InvoiceNumber, got.InvoiceNumber, normalizeIdentifier)...)
 	}
 
 	if exp.InvoiceDate != nil {
@@ -232,42 +222,111 @@ func diffInvoiceExpected(exp invoiceExpected, got *InvoiceExtractedData) []strin
 	}
 
 	if exp.SellerName != nil {
-		if got.SellerName == nil {
-			diffs = append(diffs, fmt.Sprintf("diff: seller_name expected=%q got=<nil>", strings.TrimSpace(*exp.SellerName)))
-		} else if strings.TrimSpace(*got.SellerName) != strings.TrimSpace(*exp.SellerName) {
-			diffs = append(diffs, fmt.Sprintf("diff: seller_name expected=%q got=%q", strings.TrimSpace(*exp.SellerName), strings.TrimSpace(*got.SellerName)))
-		}
+		diffs = append(diffs, diffStringField("seller_name", exp.SellerName, got.SellerName, normalizeLooseText)...)
 	}
 
 	if exp.BuyerName != nil {
-		if got.BuyerName == nil {
-			diffs = append(diffs, fmt.Sprintf("diff: buyer_name expected=%q got=<nil>", strings.TrimSpace(*exp.BuyerName)))
-		} else if strings.TrimSpace(*got.BuyerName) != strings.TrimSpace(*exp.BuyerName) {
-			diffs = append(diffs, fmt.Sprintf("diff: buyer_name expected=%q got=%q", strings.TrimSpace(*exp.BuyerName), strings.TrimSpace(*got.BuyerName)))
-		}
+		diffs = append(diffs, diffStringField("buyer_name", exp.BuyerName, got.BuyerName, normalizeLooseText)...)
 	}
 
 	if exp.Amount != nil {
 		if got.Amount == nil {
 			diffs = append(diffs, fmt.Sprintf("diff: amount expected=%v got=<nil>", *exp.Amount))
-		} else if !approxEqMoney(*exp.Amount, *got.Amount) {
-			diffs = append(diffs, fmt.Sprintf("diff: amount expected=%v got=%v", *exp.Amount, *got.Amount))
+		} else {
+			expC := moneyCents(*exp.Amount)
+			gotC := moneyCents(*got.Amount)
+			if expC != gotC {
+				diffs = append(diffs, fmt.Sprintf("diff: amount expected=%s got=%s (raw expected=%v got=%v)",
+					formatCents(expC),
+					formatCents(gotC),
+					*exp.Amount,
+					*got.Amount,
+				))
+			}
 		}
 	}
 
 	if exp.TaxAmount != nil {
 		if got.TaxAmount == nil {
 			diffs = append(diffs, fmt.Sprintf("diff: tax_amount expected=%v got=<nil>", *exp.TaxAmount))
-		} else if !approxEqMoney(*exp.TaxAmount, *got.TaxAmount) {
-			diffs = append(diffs, fmt.Sprintf("diff: tax_amount expected=%v got=%v", *exp.TaxAmount, *got.TaxAmount))
+		} else {
+			expC := moneyCents(*exp.TaxAmount)
+			gotC := moneyCents(*got.TaxAmount)
+			if expC != gotC {
+				diffs = append(diffs, fmt.Sprintf("diff: tax_amount expected=%s got=%s (raw expected=%v got=%v)",
+					formatCents(expC),
+					formatCents(gotC),
+					*exp.TaxAmount,
+					*got.TaxAmount,
+				))
+			}
 		}
 	}
 
 	return diffs
 }
 
-func approxEqMoney(a float64, b float64) bool {
-	return math.Abs(a-b) <= 0.01
+func diffStringField(field string, exp *string, got *string, normalize func(string) string) []string {
+	if exp == nil {
+		return nil
+	}
+	expRaw := strings.TrimSpace(*exp)
+	if got == nil {
+		return []string{fmt.Sprintf("diff: %s expected=%q got=<nil>", field, expRaw)}
+	}
+	gotRaw := strings.TrimSpace(*got)
+	expN := normalize(expRaw)
+	gotN := normalize(gotRaw)
+	if expN != gotN {
+		return []string{fmt.Sprintf("diff: %s expected=%q got=%q (raw expected=%q got=%q)", field, expN, gotN, expRaw, gotRaw)}
+	}
+	return nil
+}
+
+func moneyCents(v float64) int64 {
+	v = math.Abs(v)
+	return int64(math.Round(v * 100))
+}
+
+func formatCents(c int64) string {
+	sign := ""
+	if c < 0 {
+		sign = "-"
+		c = -c
+	}
+	return fmt.Sprintf("%s%d.%02d", sign, c/100, c%100)
+}
+
+var (
+	whitespaceRegex   = regexp.MustCompile(`\s+`)
+	identifierKeepReg = regexp.MustCompile(`[A-Za-z0-9]+`)
+)
+
+func normalizeLooseText(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	s = strings.NewReplacer(
+		"（", "(",
+		"）", ")",
+		"【", "[",
+		"】", "]",
+		"：", ":",
+		"，", ",",
+		"；", ";",
+	).Replace(s)
+	s = whitespaceRegex.ReplaceAllString(s, " ")
+	return strings.TrimSpace(s)
+}
+
+func normalizeIdentifier(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	parts := identifierKeepReg.FindAllString(s, -1)
+	return strings.ToLower(strings.Join(parts, ""))
 }
 
 func parseAnyPaymentTimeToUTC(s string) (time.Time, error) {
