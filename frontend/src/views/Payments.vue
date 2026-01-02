@@ -271,7 +271,7 @@
 
       <template #footer>
         <div class="dialog-footer-center">
-          <Button type="button" class="p-button-outlined" severity="secondary" :label="'\u53D6\u6D88'" @click="cancelScreenshotUpload" />
+          <Button type="button" class="p-button-outlined" severity="secondary" :label="'\u53D6\u6D88'" @click="closeScreenshotModal" />
           <Button
             v-if="!ocrResult"
             type="button"
@@ -722,7 +722,9 @@ const ocrResult = ref<OcrExtractedData | null>(null)
 const uploadDedup = ref<DedupHint | null>(null)
 const uploadedPaymentId = ref<string | null>(null)
 const uploadedScreenshotPath = ref<string | null>(null)
+const ocrTaskId = ref<string | null>(null)
 const screenshotInput = ref<HTMLInputElement | null>(null)
+const screenshotUploadAttempt = ref(0)
 
 const PENDING_PAYMENT_DRAFT_KEY = 'sbm_pending_payment_upload_draft'
 
@@ -1002,12 +1004,17 @@ const openScreenshotModal = () => {
   uploadScreenshotModalVisible.value = true
 }
 
+const closeScreenshotModal = () => {
+  uploadScreenshotModalVisible.value = false
+}
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-const waitForTask = async (taskId: string, opts?: { timeoutMs?: number }) => {
+const waitForTask = async (taskId: string, opts?: { timeoutMs?: number; shouldStop?: () => boolean }) => {
   const timeoutMs = opts?.timeoutMs ?? 120000
   const start = Date.now()
   while (Date.now() - start < timeoutMs) {
+    if (opts?.shouldStop?.()) return { status: 'canceled' }
     const res = await tasksApi.getById(taskId)
     const t = res.data?.data as any
     if (!t) throw new Error('任务状态获取失败')
@@ -1023,18 +1030,31 @@ const handleScreenshotUpload = async () => {
     return
   }
 
+  const attemptId = ++screenshotUploadAttempt.value
   uploadingScreenshot.value = true
   try {
     const uploadRes = await paymentApi.uploadScreenshotAsync(selectedScreenshotFile.value)
     if (uploadRes.data.success && uploadRes.data.data) {
       const { taskId, payment, screenshot_path } = uploadRes.data.data as any
+      if (attemptId !== screenshotUploadAttempt.value) {
+        tasksApi.cancel(taskId).catch(() => undefined)
+        const draftPaymentId = payment?.id as string | undefined
+        if (draftPaymentId) {
+          paymentApi.delete(draftPaymentId).catch(() => undefined)
+        } else if (screenshot_path) {
+          paymentApi.cancelUploadScreenshot(screenshot_path).catch(() => undefined)
+        }
+        return
+      }
+
       uploadedPaymentId.value = payment?.id || null
       uploadedScreenshotPath.value = screenshot_path || null
+      ocrTaskId.value = taskId || null
       rememberPendingPaymentDraft({ paymentId: uploadedPaymentId.value, screenshotPath: uploadedScreenshotPath.value })
 
       toast.add({ severity: 'info', summary: '截图已上传，正在识别…', life: 2000 })
 
-      const task = await waitForTask(taskId)
+      const task = await waitForTask(taskId, { shouldStop: () => attemptId !== screenshotUploadAttempt.value })
       if (task.status === 'failed') {
         toast.add({ severity: 'error', summary: task?.error || '识别失败', life: 5000 })
         return
@@ -1043,6 +1063,7 @@ const handleScreenshotUpload = async () => {
         toast.add({ severity: 'warn', summary: '识别已取消', life: 2500 })
         return
       }
+      if (attemptId !== screenshotUploadAttempt.value) return
 
       const payload = task.result as any
       const { extracted, ocr_error, dedup } = payload || {}
@@ -1102,7 +1123,7 @@ const handleScreenshotUpload = async () => {
     const detail = data?.error
     toast.add({ severity: 'error', summary: detail ? `${message}\uFF1A${detail}` : message, life: 5000 })
   } finally {
-    uploadingScreenshot.value = false
+    if (attemptId === screenshotUploadAttempt.value) uploadingScreenshot.value = false
   }
 }
 
@@ -1170,8 +1191,12 @@ const handleSaveOcrResult = async () => {
 }
 
 const resetScreenshotUploadState = () => {
+  screenshotUploadAttempt.value++
+  uploadingScreenshot.value = false
+  savingOcrResult.value = false
   uploadedPaymentId.value = null
   uploadedScreenshotPath.value = null
+  ocrTaskId.value = null
   selectedScreenshotFile.value = null
   selectedScreenshotName.value = ''
   screenshotError.value = ''
@@ -1182,10 +1207,13 @@ const resetScreenshotUploadState = () => {
   ocrForm.payment_method = ''
   ocrForm.description = ''
   ocrForm.transaction_time = null
+  if (screenshotInput.value) screenshotInput.value.value = ''
   uploadScreenshotModalVisible.value = false
 }
 
 const cancelScreenshotUpload = () => {
+  const taskId = ocrTaskId.value
+  if (taskId) tasksApi.cancel(taskId).catch(() => undefined)
   if (uploadedPaymentId.value) {
     paymentApi.delete(uploadedPaymentId.value).catch((error) => console.error('Failed to delete payment record:', error))
   } else if (uploadedScreenshotPath.value) {
