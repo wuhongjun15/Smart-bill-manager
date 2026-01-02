@@ -174,7 +174,7 @@ func (h *AdminRegressionSamplesHandler) Export(c *gin.Context) {
 func (h *AdminRegressionSamplesHandler) ExportSelected(c *gin.Context) {
 	var input exportSamplesInput
 	if err := c.ShouldBindJSON(&input); err != nil {
-		utils.Error(c, 400, "å‚æ•°é”™è¯¯", err)
+		utils.Error(c, 400, "参数错误", err)
 		return
 	}
 	b, filename, err := h.svc.ExportZip(services.ExportRegressionSamplesParams{
@@ -183,28 +183,11 @@ func (h *AdminRegressionSamplesHandler) ExportSelected(c *gin.Context) {
 		IDs:    input.IDs,
 	})
 	if err != nil {
-		utils.Error(c, 400, "å¯¼å‡ºå¤±è´¥", err)
+		utils.Error(c, 400, "导出失败", err)
 		return
 	}
 	c.Header("Content-Type", "application/zip")
 	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	c.Data(200, "application/zip", b)
-	/*
-		case string(services.RepoSyncModeRepoOnly):
-			syncMode = services.RepoSyncModeRepoOnly
-		case string(services.RepoSyncModeOverwrite):
-			syncMode = services.RepoSyncModeOverwrite
-		default:
-			utils.Error(c, 400, "mode 仅支持 repo_only/overwrite", nil)
-			return
-		}
-	}
-
-	res, err := h.svc.SyncFromRepoDir(syncMode)
-	if err != nil {
-		utils.Error(c, 400, "同步失败", err)
-		return
-	}
-	utils.SuccessData(c, res)
-	*/
 }
+

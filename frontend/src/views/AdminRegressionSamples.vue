@@ -22,10 +22,11 @@
             <Button
               class="p-button-danger p-button-outlined"
               icon="pi pi-trash"
-              :label="`删除所选（${selected.length}）`"
+              label="删除"
               :disabled="loading || !selectMode || selected.length === 0"
               @click="onDeleteSelectedClick"
             />
+            <Button class="p-button-outlined" icon="pi pi-refresh" label="刷新" :disabled="loading" @click="reload" />
           </div>
         </div>
       </template>
@@ -37,8 +38,6 @@
             <SelectButton v-model="kindFilter" :options="kindOptions" optionLabel="label" optionValue="value" />
             <SelectButton v-model="originFilter" :options="originOptions" optionLabel="label" optionValue="value" />
             <span class="spacer" />
-            <InputText v-model.trim="search" class="search" placeholder="搜索名称/来源ID" @keydown.enter="reload" />
-            <Button class="p-button-outlined" icon="pi pi-refresh" label="刷新" :disabled="loading" @click="reload" />
           </div>
 
           <DataTable
@@ -57,32 +56,36 @@
             <Column v-if="selectMode" selectionMode="multiple" :style="{ width: '48px' }" />
             <Column field="origin" header="来源" :style="{ width: '110px' }">
               <template #body="{ data: row }">
-                <Tag v-if="row.origin === 'repo'" severity="secondary" value="云端" />
-                <Tag v-else severity="info" value="本地" />
+                <span class="dt-nowrap">
+                  <Tag v-if="row.origin === 'repo'" severity="secondary" value="云端" />
+                  <Tag v-else severity="info" value="本地" />
+                </span>
               </template>
             </Column>
             <Column field="kind" header="类型" :style="{ width: '140px' }">
               <template #body="{ data: row }">
-                <Tag v-if="row.kind === 'payment_screenshot'" severity="info" value="支付截图" />
-                <Tag v-else-if="row.kind === 'invoice'" severity="success" value="发票" />
-                <Tag v-else severity="secondary" :value="row.kind" />
+                <span class="dt-nowrap">
+                  <Tag v-if="row.kind === 'payment_screenshot'" severity="info" value="支付截图" />
+                  <Tag v-else-if="row.kind === 'invoice'" severity="success" value="发票" />
+                  <Tag v-else severity="secondary" :value="row.kind" />
+                </span>
               </template>
             </Column>
-            <Column field="name" header="名称" :style="{ width: '28%' }">
+            <Column field="name" header="名称" :style="{ width: '22%' }">
               <template #body="{ data: row }">
                 <span class="sbm-ellipsis" :title="row.name">{{ row.name }}</span>
               </template>
             </Column>
-            <Column field="source_id" header="来源ID" :style="{ width: '34%' }">
+            <Column field="source_id" header="来源ID" :style="{ width: '44%' }">
               <template #body="{ data: row }">
                 <span class="mono sbm-ellipsis" :title="row.source_id">{{ row.source_id }}</span>
               </template>
             </Column>
             <Column field="created_at" header="创建时间" :style="{ width: '180px' }">
-              <template #body="{ data: row }">{{ formatDateTime(row.created_at) }}</template>
+              <template #body="{ data: row }"><span class="dt-nowrap">{{ formatDateTime(row.created_at) }}</span></template>
             </Column>
             <Column field="updated_at" header="更新时间" :style="{ width: '180px' }">
-              <template #body="{ data: row }">{{ formatDateTime(row.updated_at) }}</template>
+              <template #body="{ data: row }"><span class="dt-nowrap">{{ formatDateTime(row.updated_at) }}</span></template>
             </Column>
           </DataTable>
         </div>
@@ -97,7 +100,6 @@ import Card from 'primevue/card'
 import Button from 'primevue/button'
 import DataTable from 'primevue/datatable'
 import Column from 'primevue/column'
-import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import SelectButton from 'primevue/selectbutton'
 import Tag from 'primevue/tag'
@@ -136,7 +138,6 @@ const originOptions: Array<{ label: string; value: OriginValue }> = [
   { label: '云端', value: 'repo' },
 ]
 
-const search = ref('')
 const offset = ref(0)
 const limit = ref(20)
 
@@ -152,7 +153,7 @@ const load = async () => {
   try {
     const kind = kindFilter.value === 'all' ? undefined : kindFilter.value
     const origin = originFilter.value === 'all' ? undefined : originFilter.value
-    const res = await regressionSamplesApi.list({ kind, origin, search: search.value || undefined, limit: limit.value, offset: offset.value })
+    const res = await regressionSamplesApi.list({ kind, origin, limit: limit.value, offset: offset.value })
     if (res.data.success && res.data.data) {
       items.value = res.data.data.items || []
       total.value = res.data.data.total || 0
@@ -303,11 +304,16 @@ watch(originFilter, () => {
   flex: 1;
 }
 
-.search {
-  min-width: 240px;
-}
-
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+.dt-nowrap {
+  white-space: nowrap;
+}
+
+.samples-table :deep(.p-tag),
+.samples-table :deep(.p-tag-label) {
+  white-space: nowrap;
 }
 </style>
