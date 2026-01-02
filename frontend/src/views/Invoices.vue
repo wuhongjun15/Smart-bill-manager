@@ -428,74 +428,30 @@
         <Divider />
 
         <div class="match-header">
-          <div class="match-title">&#26234;&#33021;&#21305;&#37197;&#24314;&#35758;</div>
-          <Button
-            class="p-button-text"
-            :label="'\u63A8\u8350\u5339\u914D'"
-            icon="pi pi-star"
-            :loading="loadingSuggestedPayments"
-            @click="handleRecommendMatch"
-          />
+          <div class="match-title">已关联支付记录 ({{ linkedPayments.length }})</div>
+          <small class="muted">关联/取消关联请在支付记录页面操作</small>
         </div>
 
-        <Tabs v-model:value="paymentMatchTab">
-          <TabList>
-            <Tab value="linked">&#24050;&#20851;&#32852; ({{ linkedPayments.length }})</Tab>
-            <Tab value="suggested">&#26234;&#33021;&#25512;&#33616; ({{ suggestedPayments.length }})</Tab>
-          </TabList>
-          <TabPanels>
-          <TabPanel value="linked">
-            <DataTable class="match-table" :value="linkedPayments" :loading="loadingLinkedPayments" scrollHeight="320px" :scrollable="true" responsiveLayout="scroll">
-              <Column :header="'\u91D1\u989D'" :style="{ width: '120px' }">
-                <template #body="{ data: row }">
-                  <span class="money">{{ `\u00A5${row.amount.toFixed(2)}` }}</span>
-                </template>
-              </Column>
-              <Column :header="'\u5546\u5BB6'" :style="{ width: '260px' }">
-                <template #body="{ data: row }">
-                  <span class="sbm-ellipsis" :title="row.merchant || '-'">{{ row.merchant || '-' }}</span>
-                </template>
-              </Column>
-              <Column :header="'\u4EA4\u6613\u65F6\u95F4'" :style="{ width: '170px' }">
-                <template #body="{ data: row }">{{ formatDateTime(row.transaction_time) }}</template>
-              </Column>
-              <Column :header="'\u64CD\u4F5C'" :style="{ width: '110px' }">
-                <template #body="{ data: row }">
-                  <Button size="small" class="p-button-text p-button-danger" :label="'\u53D6\u6D88\u5173\u8054'" icon="pi pi-times" @click="handleUnlinkPayment(row.id)" />
-                </template>
-              </Column>
-            </DataTable>
-          </TabPanel>
+        <DataTable class="match-table" :value="linkedPayments" :loading="loadingLinkedPayments" scrollHeight="320px" :scrollable="true" responsiveLayout="scroll">
+          <Column :header="'\u91D1\u989D'" :style="{ width: '120px' }">
+            <template #body="{ data: row }">
+              <span class="money">{{ `\u00A5${row.amount.toFixed(2)}` }}</span>
+            </template>
+          </Column>
+          <Column :header="'\u5546\u5BB6'" :style="{ width: '260px' }">
+            <template #body="{ data: row }">
+              <span class="sbm-ellipsis" :title="row.merchant || '-'">{{ row.merchant || '-' }}</span>
+            </template>
+          </Column>
+          <Column :header="'\u4EA4\u6613\u65F6\u95F4'" :style="{ width: '170px' }">
+            <template #body="{ data: row }">{{ formatDateTime(row.transaction_time) }}</template>
+          </Column>
+        </DataTable>
 
-          <TabPanel value="suggested">
-            <DataTable class="match-table" :value="suggestedPayments" :loading="loadingSuggestedPayments" scrollHeight="320px" :scrollable="true" responsiveLayout="scroll">
-              <Column :header="'\u91D1\u989D'" :style="{ width: '120px' }">
-                <template #body="{ data: row }">
-                  <span class="money">{{ `\u00A5${row.amount.toFixed(2)}` }}</span>
-                </template>
-              </Column>
-              <Column :header="'\u5546\u5BB6'" :style="{ width: '260px' }">
-                <template #body="{ data: row }">
-                  <span class="sbm-ellipsis" :title="row.merchant || '-'">{{ row.merchant || '-' }}</span>
-                </template>
-              </Column>
-              <Column :header="'\u4EA4\u6613\u65F6\u95F4'" :style="{ width: '170px' }">
-                <template #body="{ data: row }">{{ formatDateTime(row.transaction_time) }}</template>
-              </Column>
-              <Column :header="'\u64CD\u4F5C'" :style="{ width: '90px' }">
-                <template #body="{ data: row }">
-                  <Button size="small" class="p-button-text" :label="'\u5173\u8054'" :loading="linkingPayment" @click="handleLinkPayment(row.id)" />
-                </template>
-              </Column>
-            </DataTable>
-
-            <div v-if="!loadingSuggestedPayments && suggestedPayments.length === 0" class="no-data">
-              <i class="pi pi-info-circle" />
-              <span>&#26242;&#26080;&#25512;&#33616;</span>
-            </div>
-          </TabPanel>
-          </TabPanels>
-        </Tabs>
+        <div v-if="!loadingLinkedPayments && linkedPayments.length === 0" class="no-data">
+          <i class="pi pi-info-circle" />
+          <span>暂无关联</span>
+        </div>
 
         <Divider />
 
@@ -623,11 +579,6 @@ import DatePicker from 'primevue/datepicker'
 import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
-import Tab from 'primevue/tab'
-import TabList from 'primevue/tablist'
-import TabPanel from 'primevue/tabpanel'
-import TabPanels from 'primevue/tabpanels'
-import Tabs from 'primevue/tabs'
 import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
@@ -837,10 +788,6 @@ const invoiceDetailForm = reactive({
 // Linked payments state
 const loadingLinkedPayments = ref(false)
 const linkedPayments = ref<Payment[]>([])
-const suggestedPayments = ref<Payment[]>([])
-const loadingSuggestedPayments = ref(false)
-const linkingPayment = ref(false)
-const paymentMatchTab = ref<'linked' | 'suggested'>('linked')
 
 const loadInvoices = async () => {
   loading.value = true
@@ -1323,7 +1270,6 @@ const saveInvoiceEditMode = async () => {
 const loadLinkedPayments = async (invoiceId: string) => {
   loadingLinkedPayments.value = true
   linkedPayments.value = []
-  suggestedPayments.value = []
   try {
     const linkedRes = await invoiceApi.getLinkedPayments(invoiceId)
     if (linkedRes.data.success && linkedRes.data.data) linkedPayments.value = linkedRes.data.data
@@ -1331,70 +1277,6 @@ const loadLinkedPayments = async (invoiceId: string) => {
     console.error('Load linked payments failed:', error)
   } finally {
     loadingLinkedPayments.value = false
-  }
-}
-
-const refreshSuggestedPayments = async (invoiceId: string, opts?: { showToast?: boolean }) => {
-  loadingSuggestedPayments.value = true
-  try {
-    const suggestedRes = await invoiceApi.getSuggestedPayments(invoiceId, { debug: true })
-    suggestedPayments.value = suggestedRes.data.success && suggestedRes.data.data ? suggestedRes.data.data : []
-    if (opts?.showToast) {
-      if (suggestedPayments.value.length > 0) {
-        toast.add({ severity: 'success', summary: `\u63A8\u8350\u5230 ${suggestedPayments.value.length} \u6761\u53EF\u5173\u8054\u7684\u652F\u4ED8\u8BB0\u5F55`, life: 2500 })
-      } else if (!linkingPayment.value && linkedPayments.value.length === 0) {
-        toast.add({ severity: 'warn', summary: '\u6CA1\u6709\u627E\u5230\u53EF\u63A8\u8350\u7684\u652F\u4ED8\u8BB0\u5F55', life: 2500 })
-      }
-    }
-  } catch (error) {
-    console.error('Load suggested payments failed:', error)
-    suggestedPayments.value = []
-    if (opts?.showToast) toast.add({ severity: 'error', summary: '\u63A8\u8350\u5339\u914D\u5931\u8D25', life: 3000 })
-  } finally {
-    loadingSuggestedPayments.value = false
-  }
-}
-
-const handleRecommendMatch = async () => {
-  if (!previewInvoice.value) return
-  await refreshSuggestedPayments(previewInvoice.value.id, { showToast: true })
-}
-
-const handleLinkPayment = async (paymentId: string) => {
-  if (!previewInvoice.value) return
-  try {
-    linkingPayment.value = true
-    await invoiceApi.linkPayment(previewInvoice.value.id, paymentId)
-    toast.add({ severity: 'success', summary: '\u5173\u8054\u6210\u529F', life: 2000 })
-    notifications.add({
-      severity: 'success',
-      title: '\u53D1\u7968\u5DF2\u5173\u8054\u652F\u4ED8\u8BB0\u5F55',
-      detail: `invoice=${previewInvoice.value.invoice_number || previewInvoice.value.original_name || previewInvoice.value.id} payment=${paymentId}`,
-    })
-    await loadLinkedPayments(previewInvoice.value.id)
-    await refreshSuggestedPayments(previewInvoice.value.id, { showToast: false })
-  } catch (error: unknown) {
-    const err = error as { response?: { data?: { message?: string } } }
-    toast.add({ severity: 'error', summary: err.response?.data?.message || '\u5173\u8054\u5931\u8D25', life: 3500 })
-  } finally {
-    linkingPayment.value = false
-  }
-}
-
-const handleUnlinkPayment = async (paymentId: string) => {
-  if (!previewInvoice.value) return
-  try {
-    await invoiceApi.unlinkPayment(previewInvoice.value.id, paymentId)
-    toast.add({ severity: 'success', summary: '\u53D6\u6D88\u5173\u8054\u6210\u529F', life: 2000 })
-    notifications.add({
-      severity: 'info',
-      title: '\u53D1\u7968\u5DF2\u53D6\u6D88\u5173\u8054\u652F\u4ED8\u8BB0\u5F55',
-      detail: `invoice=${previewInvoice.value.invoice_number || previewInvoice.value.original_name || previewInvoice.value.id} payment=${paymentId}`,
-    })
-    await loadLinkedPayments(previewInvoice.value.id)
-  } catch (error: unknown) {
-    const err = error as { response?: { data?: { message?: string } } }
-    toast.add({ severity: 'error', summary: err.response?.data?.message || '\u53D6\u6D88\u5173\u8054\u5931\u8D25', life: 3500 })
   }
 }
 
