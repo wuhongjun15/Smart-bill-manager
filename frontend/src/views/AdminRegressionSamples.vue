@@ -45,6 +45,7 @@
             :value="items"
             :loading="loading"
             responsiveLayout="scroll"
+            :tableStyle="samplesTableStyle"
             :paginator="true"
             :rows="20"
             :totalRecords="total"
@@ -54,7 +55,7 @@
             @page="onPage"
           >
             <Column v-if="selectMode" selectionMode="multiple" :style="{ width: '48px' }" />
-            <Column field="origin" header="来源" :style="{ width: '110px' }">
+            <Column field="origin" header="来源" :style="{ width: '10%', minWidth: '90px' }">
               <template #body="{ data: row }">
                 <span class="dt-nowrap">
                   <Tag v-if="row.origin === 'repo'" severity="secondary" value="云端" />
@@ -62,7 +63,7 @@
                 </span>
               </template>
             </Column>
-            <Column field="kind" header="类型" :style="{ width: '140px' }">
+            <Column field="kind" header="类型" :style="{ width: '12%', minWidth: '120px' }">
               <template #body="{ data: row }">
                 <span class="dt-nowrap">
                   <Tag v-if="row.kind === 'payment_screenshot'" severity="info" value="支付截图" />
@@ -71,20 +72,20 @@
                 </span>
               </template>
             </Column>
-            <Column field="name" header="名称" :style="{ width: '22%' }">
+            <Column field="name" header="名称" :style="{ width: '20%', minWidth: '200px' }">
               <template #body="{ data: row }">
                 <span class="sbm-ellipsis" :title="row.name">{{ row.name }}</span>
               </template>
             </Column>
-            <Column field="source_id" header="来源ID" :style="{ width: '44%' }">
+            <Column field="source_id" header="来源ID" :style="{ width: '26%', minWidth: '240px' }">
               <template #body="{ data: row }">
-                <span class="mono sbm-ellipsis" :title="row.source_id">{{ row.source_id }}</span>
+                <span class="mono sbm-ellipsis">{{ displaySourceId(row) }}</span>
               </template>
             </Column>
-            <Column field="created_at" header="创建时间" :style="{ width: '180px' }">
+            <Column field="created_at" header="创建时间" :style="{ width: '16%', minWidth: '170px' }">
               <template #body="{ data: row }"><span class="dt-nowrap">{{ formatDateTime(row.created_at) }}</span></template>
             </Column>
-            <Column field="updated_at" header="更新时间" :style="{ width: '180px' }">
+            <Column field="updated_at" header="更新时间" :style="{ width: '16%', minWidth: '170px' }">
               <template #body="{ data: row }"><span class="dt-nowrap">{{ formatDateTime(row.updated_at) }}</span></template>
             </Column>
           </DataTable>
@@ -114,6 +115,21 @@ const toast = useToast()
 const confirm = useConfirm()
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.user?.role === 'admin')
+
+const samplesTableStyle = {
+  minWidth: '920px',
+  tableLayout: 'fixed',
+} as const
+
+const displaySourceId = (row: RegressionSample) => {
+  const raw = String(row?.source_id || '')
+  const origin = String(row?.origin || '')
+  if (origin === 'repo' && (raw.includes('/') || raw.includes('\\'))) {
+    const parts = raw.split(/[/\\\\]+/).filter(Boolean)
+    return parts[parts.length - 1] || raw
+  }
+  return raw
+}
 
 const loading = ref(false)
 const items = ref<RegressionSample[]>([])
