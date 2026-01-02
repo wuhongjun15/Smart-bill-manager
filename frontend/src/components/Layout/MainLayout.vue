@@ -290,7 +290,8 @@ const go = (path: string) => {
   /* Keep width content-based, but add comfortable right breathing room */
   padding: 20px 22px 14px 14px;
   border-radius: 24px;
-  background: var(--p-surface-50);
+  background: var(--p-content-background);
+  border: 1px solid color-mix(in srgb, var(--p-content-border-color), transparent 20%);
 }
 
 .sidebar.collapsed {
@@ -332,7 +333,7 @@ const go = (path: string) => {
   border-radius: 14px;
   display: grid;
   place-items: center;
-  background: var(--p-surface-0);
+  background: color-mix(in srgb, var(--p-content-background), transparent 8%);
   border: 1px solid var(--p-primary-color);
   color: var(--p-primary-color);
 }
@@ -485,12 +486,12 @@ const go = (path: string) => {
   padding: 8px 10px;
   border-radius: 999px;
   transition: all var(--transition-base);
-  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 35%);
-  background: color-mix(in srgb, var(--p-surface-0), transparent 12%);
+  border: 1px solid color-mix(in srgb, var(--p-content-border-color), transparent 20%);
+  background: color-mix(in srgb, var(--p-content-background), transparent 12%);
 }
 
 .user-button:hover {
-  background: color-mix(in srgb, var(--p-surface-0), transparent 6%);
+  background: color-mix(in srgb, var(--p-content-background), transparent 6%);
 }
 
 .user-avatar {

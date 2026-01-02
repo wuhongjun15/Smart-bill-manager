@@ -35,8 +35,8 @@
   --color-text-tertiary: rgba(0, 0, 0, 0.45);
   --color-text-tertiary: color-mix(in srgb, var(--p-text-muted-color), transparent 35%);
   --color-bg-primary: var(--p-surface-50);
-  --color-bg-secondary: var(--p-surface-0);
-  --color-bg-elevated: var(--p-surface-0);
+  --color-bg-secondary: var(--p-content-background);
+  --color-bg-elevated: var(--p-content-background);
   
   /* Brand Colors */
   --color-primary: var(--p-primary-500);
@@ -97,8 +97,6 @@
   --color-text-tertiary: rgba(255, 255, 255, 0.45);
   --color-text-tertiary: color-mix(in srgb, var(--p-text-muted-color), transparent 35%);
   --color-bg-primary: var(--p-surface-950);
-  --color-bg-secondary: var(--p-surface-900);
-  --color-bg-elevated: var(--p-surface-900);
   --glass-bg: rgba(30, 30, 30, 0.7);
   --glass-border: rgba(255, 255, 255, 0.1);
 }

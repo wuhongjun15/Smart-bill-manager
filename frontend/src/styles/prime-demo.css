@@ -30,9 +30,8 @@ body {
 
 /* Layout helpers */
 .sbm-surface {
-  background: var(--p-surface-0);
-  border: 1px solid rgba(2, 6, 23, 0.08);
-  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 20%);
+  background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color);
   border-radius: var(--sbm-card-radius);
   box-shadow: var(--sbm-card-shadow);
 }
@@ -54,8 +53,7 @@ body {
 }
 
 .p-card {
-  border: 1px solid rgba(2, 6, 23, 0.06);
-  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 35%);
+  border: 1px solid color-mix(in srgb, var(--p-content-border-color), transparent 20%);
   box-shadow: none;
 }
 
@@ -71,7 +69,7 @@ body {
 .p-datatable .p-datatable-thead > tr > th {
   font-weight: 800;
   color: var(--p-text-color);
-  background: color-mix(in srgb, var(--p-surface-0), transparent 0%);
+  background: var(--p-content-background);
 }
 
 .p-datatable .p-datatable-thead > tr > th,
@@ -81,7 +79,7 @@ body {
 }
 
 .p-datatable .p-datatable-tbody > tr:hover {
-  background: color-mix(in srgb, var(--p-primary-50), var(--p-surface-0) 85%);
+  background: var(--p-content-hover-background);
 }
 
 .p-button.p-button-primary {
@@ -94,7 +92,7 @@ body {
 }
 
 .p-button.p-button-outlined.p-button-secondary {
-  background: color-mix(in srgb, var(--p-surface-0), transparent 20%);
+  background: color-mix(in srgb, var(--p-content-background), transparent 20%);
 }
 
 /* Auth pages */

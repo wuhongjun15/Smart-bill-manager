@@ -290,8 +290,8 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding: 6px 10px;
   border-radius: var(--radius-md);
-  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 35%);
-  background: color-mix(in srgb, var(--p-surface-0), transparent 12%);
+  border: 1px solid color-mix(in srgb, var(--p-content-border-color), transparent 20%);
+  background: color-mix(in srgb, var(--p-content-background), transparent 12%);
 }
 
 .switch-label {
@@ -304,8 +304,8 @@ onBeforeUnmount(() => {
   height: 70vh;
   overflow: auto;
   border-radius: var(--radius-md);
-  border: 1px solid color-mix(in srgb, var(--p-surface-200), transparent 35%);
-  background: color-mix(in srgb, var(--p-surface-0), transparent 10%);
+  border: 1px solid color-mix(in srgb, var(--p-content-border-color), transparent 20%);
+  background: color-mix(in srgb, var(--p-content-background), transparent 10%);
   padding: 10px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: 12px;
