@@ -35,6 +35,7 @@ func main() {
 		&models.User{},
 		&models.Invite{},
 		&models.Task{},
+		&models.RegressionSample{},
 		&models.Payment{},
 		&models.Trip{},
 		&models.Invoice{},
@@ -101,6 +102,9 @@ func main() {
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_dedup_status ON invoices(dedup_status)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_at)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON tasks(created_by)")
+	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_regression_samples_source ON regression_samples(source_type, source_id, kind)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_regression_samples_kind_created_at ON regression_samples(kind, created_at)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_regression_samples_name ON regression_samples(name)")
 
 	// Enforce invoice<->payment 1:1 by making each side unique in link table.
 	db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS ux_invoice_payment_links_invoice_id ON invoice_payment_links(invoice_id)")
@@ -203,6 +207,8 @@ func main() {
 	adminGroup.Use(middleware.RequireAdmin())
 	adminInvitesHandler := handlers.NewAdminInvitesHandler(authService)
 	adminInvitesHandler.RegisterRoutes(adminGroup.Group("/invites"))
+	adminRegressionHandler := handlers.NewAdminRegressionSamplesHandler(services.NewRegressionSampleService())
+	adminRegressionHandler.RegisterRoutes(adminGroup.Group("/regression-samples"))
 
 	// Dashboard endpoint
 	protectedGroup.GET("/dashboard", func(c *gin.Context) {

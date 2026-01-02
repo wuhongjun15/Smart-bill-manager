@@ -380,6 +380,15 @@
           </div>
           <div class="actions">
             <Button
+              v-if="isAdmin && !paymentDetailEditing"
+              class="p-button-outlined"
+              severity="secondary"
+              icon="pi pi-verified"
+              :label="'\u6807\u8bb0\u4e3a\u56de\u5f52\u6837\u672c'"
+              :loading="markingRegressionSample"
+              @click="markPaymentRegressionSample(detailPayment.id)"
+            />
+            <Button
               v-if="!paymentDetailEditing"
               class="p-button-outlined"
               severity="secondary"
@@ -541,8 +550,9 @@ import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
-import { invoiceApi, paymentApi, tasksApi, FILE_BASE_URL } from '@/api'
+import { invoiceApi, paymentApi, tasksApi, FILE_BASE_URL, regressionSamplesApi } from '@/api'
 import { useNotificationStore } from '@/stores/notifications'
+import { useAuthStore } from '@/stores/auth'
 import type { Invoice, Payment, DedupHint } from '@/types'
 
 interface OcrExtractedData {
@@ -565,8 +575,10 @@ interface OcrExtractedData {
 const toast = useToast()
 const notifications = useNotificationStore()
 const confirm = useConfirm()
+const authStore = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const confirmForceSave = (message: string) =>
   new Promise<boolean>(resolve => {
@@ -741,6 +753,7 @@ const detailPayment = ref<Payment | null>(null)
 const reparsingOcr = ref(false)
 const paymentDetailEditing = ref(false)
 const savingPaymentDetail = ref(false)
+const markingRegressionSample = ref(false)
 const paymentTimePanel = ref<InstanceType<typeof OverlayPanel> | null>(null)
 const paymentTimeLastTarget = ref<HTMLElement | null>(null)
 const paymentDetailTimeDraft = ref<Date | null>(null)
@@ -1289,6 +1302,24 @@ const onPaymentDetailHide = () => {
   paymentTimePanel.value?.hide?.()
   paymentTimeLastTarget.value = null
   paymentDetailTimeDraft.value = null
+}
+
+const markPaymentRegressionSample = async (id: string) => {
+  if (!isAdmin.value) return
+  if (!id) return
+  markingRegressionSample.value = true
+  try {
+    const res = await regressionSamplesApi.markPayment(id)
+    if (res.data.success) {
+      toast.add({ severity: 'success', summary: '\u5df2\u6807\u8bb0\u4e3a\u56de\u5f52\u6837\u672c', life: 2000 })
+      return
+    }
+    toast.add({ severity: 'error', summary: res.data.message || '\u6807\u8bb0\u5931\u8d25', life: 3000 })
+  } catch (e: any) {
+    toast.add({ severity: 'error', summary: e.response?.data?.message || '\u6807\u8bb0\u5931\u8d25', life: 3000 })
+  } finally {
+    markingRegressionSample.value = false
+  }
 }
 
 const handlePaymentTimeViewportChange = () => {

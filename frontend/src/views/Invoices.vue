@@ -289,6 +289,15 @@
           </div>
           <div class="actions">
             <Button
+              v-if="isAdmin && !invoiceDetailEditing"
+              class="p-button-outlined"
+              severity="secondary"
+              icon="pi pi-verified"
+              :label="'\u6807\u8bb0\u4e3a\u56de\u5f52\u6837\u672c'"
+              :loading="markingRegressionSample"
+              @click="markInvoiceRegressionSample(previewInvoice.id)"
+            />
+            <Button
               v-if="!invoiceDetailEditing"
               class="p-button-outlined"
               severity="secondary"
@@ -606,8 +615,9 @@ import Tabs from 'primevue/tabs'
 import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
-import { invoiceApi, tasksApi, FILE_BASE_URL } from '@/api'
+import { invoiceApi, tasksApi, FILE_BASE_URL, regressionSamplesApi } from '@/api'
 import { useNotificationStore } from '@/stores/notifications'
+import { useAuthStore } from '@/stores/auth'
 import type { Invoice, Payment, DedupHint } from '@/types'
 
 interface InvoiceExtractedData {
@@ -669,6 +679,8 @@ const confidenceClass = (c?: number) => {
 const toast = useToast()
 const notifications = useNotificationStore()
 const confirm = useConfirm()
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const confirmForceSave = (message: string) =>
   new Promise<boolean>(resolve => {
@@ -771,6 +783,7 @@ const previewInvoice = ref<Invoice | null>(null)
 const parseStatusPending = ref(false)
 const invoiceDetailEditing = ref(false)
 const savingInvoiceDetail = ref(false)
+const markingRegressionSample = ref(false)
 const invoiceDetailForm = reactive({
   invoice_number: '',
   invoice_date: null as Date | null,
@@ -1162,6 +1175,24 @@ const cancelInvoiceEditMode = () => {
   invoiceDetailForm.seller_name = previewInvoice.value.seller_name || ''
   invoiceDetailForm.buyer_name = previewInvoice.value.buyer_name || ''
   invoiceDetailEditing.value = false
+}
+
+const markInvoiceRegressionSample = async (id: string) => {
+  if (!isAdmin.value) return
+  if (!id) return
+  markingRegressionSample.value = true
+  try {
+    const res = await regressionSamplesApi.markInvoice(id)
+    if (res.data.success) {
+      toast.add({ severity: 'success', summary: '\u5df2\u6807\u8bb0\u4e3a\u56de\u5f52\u6837\u672c', life: 2000 })
+      return
+    }
+    toast.add({ severity: 'error', summary: res.data.message || '\u6807\u8bb0\u5931\u8d25', life: 3000 })
+  } catch (e: any) {
+    toast.add({ severity: 'error', summary: e.response?.data?.message || '\u6807\u8bb0\u5931\u8d25', life: 3000 })
+  } finally {
+    markingRegressionSample.value = false
+  }
 }
 
 const saveInvoiceEditMode = async () => {
