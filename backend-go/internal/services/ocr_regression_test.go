@@ -92,7 +92,15 @@ func TestRegressionSamples(t *testing.T) {
 				if err != nil {
 					t.Fatalf("parse payment screenshot: %v", err)
 				}
-				assertPaymentExpected(t, exp, got)
+				if diffs := diffPaymentExpected(exp, got); len(diffs) > 0 {
+					t.Fatalf("regression mismatch\nsample=%s\nkind=%s name=%s\n%s\nraw_text(head):\n%s",
+						path,
+						s.Kind,
+						s.Name,
+						strings.Join(diffs, "\n"),
+						headLines(s.RawText, 12, 1200),
+					)
+				}
 			case "invoice":
 				var exp invoiceExpected
 				if err := json.Unmarshal(s.Expected, &exp); err != nil {
@@ -102,7 +110,15 @@ func TestRegressionSamples(t *testing.T) {
 				if err != nil {
 					t.Fatalf("parse invoice: %v", err)
 				}
-				assertInvoiceExpected(t, exp, got)
+				if diffs := diffInvoiceExpected(exp, got); len(diffs) > 0 {
+					t.Fatalf("regression mismatch\nsample=%s\nkind=%s name=%s\n%s\nraw_text(head):\n%s",
+						path,
+						s.Kind,
+						s.Name,
+						strings.Join(diffs, "\n"),
+						headLines(s.RawText, 12, 1200),
+					)
+				}
 			default:
 				t.Fatalf("unknown kind: %s", s.Kind)
 			}
@@ -110,129 +126,144 @@ func TestRegressionSamples(t *testing.T) {
 	}
 }
 
-func assertPaymentExpected(t *testing.T, exp paymentExpected, got *PaymentExtractedData) {
-	t.Helper()
+func diffPaymentExpected(exp paymentExpected, got *PaymentExtractedData) []string {
 	if got == nil {
-		t.Fatalf("got nil parsed payment")
+		return []string{"diff: parsed payment is nil"}
 	}
+
+	diffs := make([]string, 0, 8)
 
 	if exp.Merchant != nil {
 		if got.Merchant == nil {
-			t.Fatalf("expected merchant=%q, got nil", *exp.Merchant)
-		}
-		if strings.TrimSpace(*got.Merchant) != strings.TrimSpace(*exp.Merchant) {
-			t.Fatalf("expected merchant=%q, got %q", *exp.Merchant, *got.Merchant)
+			diffs = append(diffs, fmt.Sprintf("diff: merchant expected=%q got=<nil>", strings.TrimSpace(*exp.Merchant)))
+		} else if strings.TrimSpace(*got.Merchant) != strings.TrimSpace(*exp.Merchant) {
+			diffs = append(diffs, fmt.Sprintf("diff: merchant expected=%q got=%q", strings.TrimSpace(*exp.Merchant), strings.TrimSpace(*got.Merchant)))
 		}
 	}
 
 	if exp.TransactionTime != nil {
 		if got.TransactionTime == nil {
-			t.Fatalf("expected transaction_time=%q, got nil", *exp.TransactionTime)
-		}
-		expT, expErr := parseAnyPaymentTimeToUTC(*exp.TransactionTime)
-		gotT, gotErr := parseAnyPaymentTimeToUTC(*got.TransactionTime)
-		if expErr == nil && gotErr == nil {
-			if !expT.Equal(gotT) {
-				t.Fatalf("expected transaction_time(utc)=%s, got %s", expT.Format(time.RFC3339), gotT.Format(time.RFC3339))
+			diffs = append(diffs, fmt.Sprintf("diff: transaction_time expected=%q got=<nil>", strings.TrimSpace(*exp.TransactionTime)))
+		} else {
+			expT, expErr := parseAnyPaymentTimeToUTC(*exp.TransactionTime)
+			gotT, gotErr := parseAnyPaymentTimeToUTC(*got.TransactionTime)
+			if expErr == nil && gotErr == nil {
+				if !expT.Equal(gotT) {
+					diffs = append(diffs, fmt.Sprintf(
+						"diff: transaction_time expected(utc)=%s got(utc)=%s (raw expected=%q got=%q)",
+						expT.Format(time.RFC3339),
+						gotT.Format(time.RFC3339),
+						strings.TrimSpace(*exp.TransactionTime),
+						strings.TrimSpace(*got.TransactionTime),
+					))
+				}
+			} else if strings.TrimSpace(*got.TransactionTime) != strings.TrimSpace(*exp.TransactionTime) {
+				diffs = append(diffs, fmt.Sprintf("diff: transaction_time expected=%q got=%q", strings.TrimSpace(*exp.TransactionTime), strings.TrimSpace(*got.TransactionTime)))
 			}
-		} else if strings.TrimSpace(*got.TransactionTime) != strings.TrimSpace(*exp.TransactionTime) {
-			t.Fatalf("expected transaction_time=%q, got %q", *exp.TransactionTime, *got.TransactionTime)
 		}
 	}
 
 	if exp.PaymentMethod != nil {
 		if got.PaymentMethod == nil {
-			t.Fatalf("expected payment_method=%q, got nil", *exp.PaymentMethod)
-		}
-		if strings.TrimSpace(*got.PaymentMethod) != strings.TrimSpace(*exp.PaymentMethod) {
-			t.Fatalf("expected payment_method=%q, got %q", *exp.PaymentMethod, *got.PaymentMethod)
+			diffs = append(diffs, fmt.Sprintf("diff: payment_method expected=%q got=<nil>", strings.TrimSpace(*exp.PaymentMethod)))
+		} else if strings.TrimSpace(*got.PaymentMethod) != strings.TrimSpace(*exp.PaymentMethod) {
+			diffs = append(diffs, fmt.Sprintf("diff: payment_method expected=%q got=%q", strings.TrimSpace(*exp.PaymentMethod), strings.TrimSpace(*got.PaymentMethod)))
 		}
 	}
 
 	if exp.OrderNumber != nil {
 		if got.OrderNumber == nil {
-			t.Fatalf("expected order_number=%q, got nil", *exp.OrderNumber)
-		}
-		if strings.TrimSpace(*got.OrderNumber) != strings.TrimSpace(*exp.OrderNumber) {
-			t.Fatalf("expected order_number=%q, got %q", *exp.OrderNumber, *got.OrderNumber)
+			diffs = append(diffs, fmt.Sprintf("diff: order_number expected=%q got=<nil>", strings.TrimSpace(*exp.OrderNumber)))
+		} else if strings.TrimSpace(*got.OrderNumber) != strings.TrimSpace(*exp.OrderNumber) {
+			diffs = append(diffs, fmt.Sprintf("diff: order_number expected=%q got=%q", strings.TrimSpace(*exp.OrderNumber), strings.TrimSpace(*got.OrderNumber)))
 		}
 	}
 
 	if exp.Amount != nil {
 		if got.Amount == nil {
-			t.Fatalf("expected amount=%v, got nil", *exp.Amount)
-		}
-		if !approxEqMoney(math.Abs(*exp.Amount), math.Abs(*got.Amount)) {
-			t.Fatalf("expected amount≈%v, got %v", *exp.Amount, *got.Amount)
+			diffs = append(diffs, fmt.Sprintf("diff: amount expected=%v got=<nil>", *exp.Amount))
+		} else {
+			expV := math.Abs(*exp.Amount)
+			gotV := math.Abs(*got.Amount)
+			if !approxEqMoney(expV, gotV) {
+				diffs = append(diffs, fmt.Sprintf("diff: amount expected≈%v got=%v", expV, gotV))
+			}
 		}
 	}
+
+	return diffs
 }
 
-func assertInvoiceExpected(t *testing.T, exp invoiceExpected, got *InvoiceExtractedData) {
-	t.Helper()
+func diffInvoiceExpected(exp invoiceExpected, got *InvoiceExtractedData) []string {
 	if got == nil {
-		t.Fatalf("got nil parsed invoice")
+		return []string{"diff: parsed invoice is nil"}
 	}
+
+	diffs := make([]string, 0, 8)
 
 	if exp.InvoiceNumber != nil {
 		if got.InvoiceNumber == nil {
-			t.Fatalf("expected invoice_number=%q, got nil", *exp.InvoiceNumber)
-		}
-		if strings.TrimSpace(*got.InvoiceNumber) != strings.TrimSpace(*exp.InvoiceNumber) {
-			t.Fatalf("expected invoice_number=%q, got %q", *exp.InvoiceNumber, *got.InvoiceNumber)
+			diffs = append(diffs, fmt.Sprintf("diff: invoice_number expected=%q got=<nil>", strings.TrimSpace(*exp.InvoiceNumber)))
+		} else if strings.TrimSpace(*got.InvoiceNumber) != strings.TrimSpace(*exp.InvoiceNumber) {
+			diffs = append(diffs, fmt.Sprintf("diff: invoice_number expected=%q got=%q", strings.TrimSpace(*exp.InvoiceNumber), strings.TrimSpace(*got.InvoiceNumber)))
 		}
 	}
 
 	if exp.InvoiceDate != nil {
 		if got.InvoiceDate == nil {
-			t.Fatalf("expected invoice_date=%q, got nil", *exp.InvoiceDate)
-		}
-		expD, expErr := normalizeAnyInvoiceDate(*exp.InvoiceDate)
-		gotD, gotErr := normalizeAnyInvoiceDate(*got.InvoiceDate)
-		if expErr == nil && gotErr == nil {
-			if expD != gotD {
-				t.Fatalf("expected invoice_date=%q, got %q", expD, gotD)
+			diffs = append(diffs, fmt.Sprintf("diff: invoice_date expected=%q got=<nil>", strings.TrimSpace(*exp.InvoiceDate)))
+		} else {
+			expD, expErr := normalizeAnyInvoiceDate(*exp.InvoiceDate)
+			gotD, gotErr := normalizeAnyInvoiceDate(*got.InvoiceDate)
+			if expErr == nil && gotErr == nil {
+				if expD != gotD {
+					diffs = append(diffs, fmt.Sprintf(
+						"diff: invoice_date expected=%q got=%q (raw expected=%q got=%q)",
+						expD,
+						gotD,
+						strings.TrimSpace(*exp.InvoiceDate),
+						strings.TrimSpace(*got.InvoiceDate),
+					))
+				}
+			} else if strings.TrimSpace(*got.InvoiceDate) != strings.TrimSpace(*exp.InvoiceDate) {
+				diffs = append(diffs, fmt.Sprintf("diff: invoice_date expected=%q got=%q", strings.TrimSpace(*exp.InvoiceDate), strings.TrimSpace(*got.InvoiceDate)))
 			}
-		} else if strings.TrimSpace(*got.InvoiceDate) != strings.TrimSpace(*exp.InvoiceDate) {
-			t.Fatalf("expected invoice_date=%q, got %q", *exp.InvoiceDate, *got.InvoiceDate)
 		}
 	}
 
 	if exp.SellerName != nil {
 		if got.SellerName == nil {
-			t.Fatalf("expected seller_name=%q, got nil", *exp.SellerName)
-		}
-		if strings.TrimSpace(*got.SellerName) != strings.TrimSpace(*exp.SellerName) {
-			t.Fatalf("expected seller_name=%q, got %q", *exp.SellerName, *got.SellerName)
+			diffs = append(diffs, fmt.Sprintf("diff: seller_name expected=%q got=<nil>", strings.TrimSpace(*exp.SellerName)))
+		} else if strings.TrimSpace(*got.SellerName) != strings.TrimSpace(*exp.SellerName) {
+			diffs = append(diffs, fmt.Sprintf("diff: seller_name expected=%q got=%q", strings.TrimSpace(*exp.SellerName), strings.TrimSpace(*got.SellerName)))
 		}
 	}
 
 	if exp.BuyerName != nil {
 		if got.BuyerName == nil {
-			t.Fatalf("expected buyer_name=%q, got nil", *exp.BuyerName)
-		}
-		if strings.TrimSpace(*got.BuyerName) != strings.TrimSpace(*exp.BuyerName) {
-			t.Fatalf("expected buyer_name=%q, got %q", *exp.BuyerName, *got.BuyerName)
+			diffs = append(diffs, fmt.Sprintf("diff: buyer_name expected=%q got=<nil>", strings.TrimSpace(*exp.BuyerName)))
+		} else if strings.TrimSpace(*got.BuyerName) != strings.TrimSpace(*exp.BuyerName) {
+			diffs = append(diffs, fmt.Sprintf("diff: buyer_name expected=%q got=%q", strings.TrimSpace(*exp.BuyerName), strings.TrimSpace(*got.BuyerName)))
 		}
 	}
 
 	if exp.Amount != nil {
 		if got.Amount == nil {
-			t.Fatalf("expected amount=%v, got nil", *exp.Amount)
-		}
-		if !approxEqMoney(*exp.Amount, *got.Amount) {
-			t.Fatalf("expected amount=%v, got %v", *exp.Amount, *got.Amount)
+			diffs = append(diffs, fmt.Sprintf("diff: amount expected=%v got=<nil>", *exp.Amount))
+		} else if !approxEqMoney(*exp.Amount, *got.Amount) {
+			diffs = append(diffs, fmt.Sprintf("diff: amount expected=%v got=%v", *exp.Amount, *got.Amount))
 		}
 	}
 
 	if exp.TaxAmount != nil {
 		if got.TaxAmount == nil {
-			t.Fatalf("expected tax_amount=%v, got nil", *exp.TaxAmount)
-		}
-		if !approxEqMoney(*exp.TaxAmount, *got.TaxAmount) {
-			t.Fatalf("expected tax_amount=%v, got %v", *exp.TaxAmount, *got.TaxAmount)
+			diffs = append(diffs, fmt.Sprintf("diff: tax_amount expected=%v got=<nil>", *exp.TaxAmount))
+		} else if !approxEqMoney(*exp.TaxAmount, *got.TaxAmount) {
+			diffs = append(diffs, fmt.Sprintf("diff: tax_amount expected=%v got=%v", *exp.TaxAmount, *got.TaxAmount))
 		}
 	}
+
+	return diffs
 }
 
 func approxEqMoney(a float64, b float64) bool {
@@ -302,4 +333,21 @@ func normalizeAnyInvoiceDate(s string) (string, error) {
 	}
 
 	return "", fmt.Errorf("unsupported date format: %q", s)
+}
+
+func headLines(s string, maxLines int, maxChars int) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	lines := strings.Split(s, "\n")
+	if maxLines > 0 && len(lines) > maxLines {
+		lines = lines[:maxLines]
+	}
+	out := strings.Join(lines, "\n")
+	out = strings.TrimSpace(out)
+	if maxChars > 0 && len(out) > maxChars {
+		return out[:maxChars] + "\n...(truncated)"
+	}
+	return out
 }
