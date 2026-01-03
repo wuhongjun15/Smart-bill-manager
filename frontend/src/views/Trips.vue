@@ -286,7 +286,7 @@
             <TabPanel value="pending">
               <div class="pending-panel">
                 <div class="pending-header">
-                  <div class="pending-title">待处理（行程重叠）</div>
+                  <div class="pending-title">待处理（待分配）</div>
                   <Button
                     label="刷新"
                     icon="pi pi-refresh"
@@ -1441,9 +1441,14 @@ const unassignPayment = (paymentId: string) => {
       try {
         await paymentApi.update(paymentId, {
           trip_id: "",
-          trip_assignment_source: "blocked",
+          // Move to "pending" for manual re-assignment instead of blocking it forever.
+          trip_assignment_source: "manual",
         });
-        toast.add({ severity: "success", summary: "已移出行程", life: 2000 });
+        toast.add({
+          severity: "success",
+          summary: "已移出行程，已进入待处理",
+          life: 2200,
+        });
         notifications.add({
           severity: "info",
           title: "支付记录已移出行程",

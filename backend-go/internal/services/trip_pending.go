@@ -72,7 +72,19 @@ func (s *TripService) GetPendingPayments() ([]PendingPayment, error) {
 		`).
 		Joins("JOIN trips AS t ON t.start_time_ts <= p.transaction_time_ts AND t.end_time_ts > p.transaction_time_ts").
 		Where("p.is_draft = 0").
-		Where("p.trip_id IS NULL AND p.trip_assignment_source = ? AND p.trip_assignment_state = ?", assignSrcAuto, assignStateOverlap).
+		Where(
+			`
+			p.trip_id IS NULL AND (
+				(p.trip_assignment_source = ? AND p.trip_assignment_state = ?)
+				OR
+				(p.trip_assignment_source = ? AND p.trip_assignment_state = ?)
+			)
+			`,
+			assignSrcAuto,
+			assignStateOverlap,
+			assignSrcManual,
+			assignStateNoMatch,
+		).
 		Order("p.transaction_time_ts DESC, p.id").
 		Scan(&rows).Error; err != nil {
 		return nil, err

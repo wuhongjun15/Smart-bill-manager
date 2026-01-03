@@ -466,6 +466,9 @@ func (s *PaymentService) Update(id string, input UpdatePaymentInput) error {
 				normalizedTripID = ""
 			} else if src == assignSrcManual && normalizedTripID != "" {
 				data["trip_assignment_state"] = assignStateAssigned
+			} else if src == assignSrcManual && normalizedTripID == "" {
+				// Manual but unassigned: keep it in a reviewable state so UI can route it to "pending".
+				data["trip_assignment_state"] = assignStateNoMatch
 			} else if src == assignSrcAuto {
 				// state will be recomputed by automatic logic elsewhere
 			}
