@@ -63,11 +63,13 @@ import InputText from 'primevue/inputtext'
 import Password from 'primevue/password'
 import Button from 'primevue/button'
 import { useToast } from 'primevue/usetoast'
-import { authApi, setStoredUser, setToken } from '@/api/auth'
+import { authApi } from '@/api/auth'
+import { useAuthStore } from '@/stores/auth'
 import { checkPasswordStrength, type PasswordStrength } from '@/utils/password'
 
 const router = useRouter()
 const toast = useToast()
+const authStore = useAuthStore()
 
 const loading = ref(false)
 const form = reactive({
@@ -131,10 +133,14 @@ const handleSetup = async () => {
   try {
     const response = await authApi.setup(form.username, form.password, form.email || undefined)
     if (response.data.success) {
-      if (response.data.token) setToken(response.data.token)
-      if (response.data.user) setStoredUser(response.data.user)
+      if (response.data.token && response.data.user) {
+        authStore.setSession(response.data.user, response.data.token)
+      } else {
+        toast.add({ severity: 'error', summary: '\u521B\u5EFA\u6210\u529F\uFF0C\u4F46\u8FD4\u56DE\u6570\u636E\u4E0D\u5B8C\u6574\uFF0C\u8BF7\u5237\u65B0\u540E\u91CD\u8BD5', life: 3500 })
+        return
+      }
       toast.add({ severity: 'success', summary: '\u7BA1\u7406\u5458\u8D26\u6237\u521B\u5EFA\u6210\u529F', life: 2200 })
-      setTimeout(() => router.push('/dashboard'), 300)
+      setTimeout(() => router.replace('/dashboard'), 300)
       return
     }
     toast.add({ severity: 'error', summary: response.data.message || '\u521B\u5EFA\u5931\u8D25', life: 3500 })

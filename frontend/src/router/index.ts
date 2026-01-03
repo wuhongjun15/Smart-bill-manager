@@ -97,23 +97,18 @@ router.beforeEach(async (to, _from, next) => {
   // - when user tries to visit /setup
   // - when user is not authenticated (first install / logged out)
   let setupResponse: { setupRequired: boolean } | null = null
-  let setupCheckFailed = false
   if (to.path === '/setup' || !authStore.isAuthenticated) {
     try {
       setupResponse = await authStore.checkSetupRequired()
-      if (setupResponse === null) {
-        setupCheckFailed = true
-        console.warn('Setup check returned null - setup status unknown')
-      }
     } catch (error) {
       console.error('Failed to check setup status:', error)
-      setupCheckFailed = true
     }
   }
 
   if (to.path === '/setup') {
-    // If setup is not required (admin already exists) or status is unknown, always redirect to login.
-    if (setupCheckFailed || (setupResponse && !setupResponse.setupRequired)) {
+    // If setup is not required (admin already exists), redirect to login.
+    // If setup status is unknown (e.g. server still starting), allow the setup page to load.
+    if (setupResponse && !setupResponse.setupRequired) {
       next('/login')
       return
     }
@@ -121,9 +116,22 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
-  if (!authStore.isAuthenticated && setupResponse && setupResponse.setupRequired) {
-    next('/setup')
-    return
+  if (!authStore.isAuthenticated) {
+    if (setupResponse?.setupRequired) {
+      next('/setup')
+      return
+    }
+
+    // If setup status is unknown and there is no local session, prefer /setup over /login.
+    // This avoids "first open goes to login" on fresh installs when the setup check fails.
+    if (setupResponse === null) {
+      const hasLocalToken = !!localStorage.getItem('token')
+      const hasLocalUser = !!localStorage.getItem('user')
+      if (!hasLocalToken && !hasLocalUser) {
+        next('/setup')
+        return
+      }
+    }
   }
 
   if (to.meta.requiresAuth !== false) {

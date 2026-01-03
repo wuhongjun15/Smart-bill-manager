@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { authApi, setToken, setStoredUser, getStoredUser, clearAuth } from '@/api/auth'
+import { computed, ref } from 'vue'
+import { authApi, clearAuth, getStoredUser, setStoredUser, setToken } from '@/api/auth'
 import type { User } from '@/types'
 
 // Cache TTL for setup-required check (5 minutes)
@@ -13,14 +13,25 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAuthenticated = computed(() => !!user.value)
 
+  function setSession(nextUser: User, token: string) {
+    setToken(token)
+    setStoredUser(nextUser)
+    user.value = nextUser
+    // After a successful login/setup, setup is definitely not required anymore.
+    setupRequiredCache.value = { setupRequired: false, timestamp: Date.now() }
+  }
+
+  function clearSession() {
+    clearAuth()
+    user.value = null
+  }
+
   async function login(username: string, password: string): Promise<{ success: boolean; message: string }> {
     loading.value = true
     try {
       const res = await authApi.login(username, password)
       if (res.data.success && res.data.token && res.data.user) {
-        setToken(res.data.token)
-        setStoredUser(res.data.user)
-        user.value = res.data.user
+        setSession(res.data.user, res.data.token)
         return { success: true, message: '登录成功' }
       }
       return { success: false, message: res.data.message || '登录失败' }
@@ -45,15 +56,13 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = storedUser
       return true
     } catch {
-      clearAuth()
-      user.value = null
+      clearSession()
       return false
     }
   }
 
   function logout() {
-    clearAuth()
-    user.value = null
+    clearSession()
   }
 
   async function checkSetupRequired(): Promise<{ setupRequired: boolean } | null> {
@@ -61,15 +70,12 @@ export const useAuthStore = defineStore('auth', () => {
     if (setupRequiredCache.value && Date.now() - setupRequiredCache.value.timestamp < SETUP_CACHE_TTL_MS) {
       return { setupRequired: setupRequiredCache.value.setupRequired }
     }
-    
+
     try {
       const res = await authApi.checkSetupRequired()
       if (res.data.success && res.data.data) {
         const result = { setupRequired: res.data.data.setupRequired }
-        setupRequiredCache.value = {
-          setupRequired: result.setupRequired,
-          timestamp: Date.now()
-        }
+        setupRequiredCache.value = { setupRequired: result.setupRequired, timestamp: Date.now() }
         return result
       }
       return null
@@ -83,9 +89,12 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     loading,
     isAuthenticated,
+    setSession,
+    clearSession,
     login,
     verifyToken,
     logout,
-    checkSetupRequired
+    checkSetupRequired,
   }
 })
+
