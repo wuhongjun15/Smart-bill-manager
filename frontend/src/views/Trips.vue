@@ -723,7 +723,7 @@
             }} 张（仅限未被其它支付关联的发票）。
           </div>
           <div v-else>
-            将删除该行程下的支付记录 {{ deleteTripPreview.payments }} 条，不会删除发票（0 张）。
+            将删除该行程下的支付记录 {{ deleteTripPreview.payments }} 条，不会删除发票。
           </div>
         </div>
       </div>
