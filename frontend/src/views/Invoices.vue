@@ -190,7 +190,7 @@
               <label for="inv_num">发票号码</label>
               <InputText id="inv_num" v-model.trim="uploadOcrForm.invoice_number" />
               <small
-                v-if="uploadOcrResult?.invoice_number_source || uploadOcrResult?.invoice_number_confidence"
+                v-if="isAdmin && (uploadOcrResult?.invoice_number_source || uploadOcrResult?.invoice_number_confidence)"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.invoice_number_confidence)"
               >
@@ -202,7 +202,7 @@
               <label for="inv_date">开票日期</label>
               <DatePicker id="inv_date" v-model="uploadOcrForm.invoice_date" :manualInput="false" dateFormat="yy-mm-dd" :placeholder="'开票日期'" />
               <small
-                v-if="uploadOcrResult?.invoice_date_source || uploadOcrResult?.invoice_date_confidence"
+                v-if="isAdmin && (uploadOcrResult?.invoice_date_source || uploadOcrResult?.invoice_date_confidence)"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.invoice_date_confidence)"
               >
@@ -215,7 +215,7 @@
               <label for="inv_amount">价税合计</label>
               <InputNumber id="inv_amount" v-model="uploadOcrForm.amount" :minFractionDigits="2" :maxFractionDigits="2" :min="0" :useGrouping="false" />
               <small
-                v-if="uploadOcrResult?.amount_source || uploadOcrResult?.amount_confidence"
+                v-if="isAdmin && (uploadOcrResult?.amount_source || uploadOcrResult?.amount_confidence)"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.amount_confidence)"
               >
@@ -227,7 +227,7 @@
               <label for="inv_seller">销售方</label>
               <InputText id="inv_seller" v-model.trim="uploadOcrForm.seller_name" />
               <small
-                v-if="uploadOcrResult?.seller_name_source || uploadOcrResult?.seller_name_confidence"
+                v-if="isAdmin && (uploadOcrResult?.seller_name_source || uploadOcrResult?.seller_name_confidence)"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.seller_name_confidence)"
               >
@@ -239,7 +239,7 @@
               <label for="inv_buyer">购买方</label>
               <InputText id="inv_buyer" v-model.trim="uploadOcrForm.buyer_name" />
               <small
-                v-if="uploadOcrResult?.buyer_name_source || uploadOcrResult?.buyer_name_confidence"
+                v-if="isAdmin && (uploadOcrResult?.buyer_name_source || uploadOcrResult?.buyer_name_confidence)"
                 class="ocr-hint"
                 :class="confidenceClass(uploadOcrResult?.buyer_name_confidence)"
               >
@@ -250,7 +250,7 @@
           </div>
         </form>
 
-        <div v-if="uploadedInvoice && (getInvoiceRawText(uploadedInvoice) || getInvoicePrettyText(uploadedInvoice))" class="raw-section">
+        <div v-if="isAdmin && uploadedInvoice && (getInvoiceRawText(uploadedInvoice) || getInvoicePrettyText(uploadedInvoice))" class="raw-section">
           <div class="raw-title">OCR 文本</div>
           <Accordion>
             <AccordionTab v-if="getInvoicePrettyText(uploadedInvoice)" :header="'点击查看 OCR 整理版文本'">

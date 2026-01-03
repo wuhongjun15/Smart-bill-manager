@@ -199,7 +199,7 @@
                 :useGrouping="false"
               />
               <small
-                v-if="ocrResult?.amount_source || ocrResult?.amount_confidence"
+                v-if="isAdmin && (ocrResult?.amount_source || ocrResult?.amount_confidence)"
                 class="sbm-ocr-hint"
                 :class="confidenceClass(ocrResult?.amount_confidence)"
               >
@@ -213,7 +213,7 @@
               <label for="ocr_merchant">&#21830;&#23478;</label>
               <InputText id="ocr_merchant" v-model.trim="ocrForm.merchant" />
               <small
-                v-if="ocrResult?.merchant_source || ocrResult?.merchant_confidence"
+                v-if="isAdmin && (ocrResult?.merchant_source || ocrResult?.merchant_confidence)"
                 class="sbm-ocr-hint"
                 :class="confidenceClass(ocrResult?.merchant_confidence)"
               >
@@ -226,7 +226,7 @@
               <label for="ocr_method">&#25903;&#20184;&#26041;&#24335;</label>
               <InputText id="ocr_method" v-model.trim="ocrForm.payment_method" />
               <small
-                v-if="ocrResult?.payment_method_source || ocrResult?.payment_method_confidence"
+                v-if="isAdmin && (ocrResult?.payment_method_source || ocrResult?.payment_method_confidence)"
                 class="sbm-ocr-hint"
                 :class="confidenceClass(ocrResult?.payment_method_confidence)"
               >
@@ -240,7 +240,7 @@
               <DatePicker id="ocr_time" v-model="ocrForm.transaction_time" showTime :manualInput="false" />
               <small v-if="ocrErrors.transaction_time" class="p-error">{{ ocrErrors.transaction_time }}</small>
               <small
-                v-if="ocrResult?.transaction_time_source || ocrResult?.transaction_time_confidence"
+                v-if="isAdmin && (ocrResult?.transaction_time_source || ocrResult?.transaction_time_confidence)"
                 class="sbm-ocr-hint"
                 :class="confidenceClass(ocrResult?.transaction_time_confidence)"
               >
@@ -256,7 +256,19 @@
           </div>
         </form>
 
-        <div v-if="ocrResult?.raw_text || ocrResult?.pretty_text" class="raw">
+        <div v-if="uploadedScreenshotPath" class="raw">
+          <div class="raw-title">支付截图</div>
+          <div class="screenshot-wrap">
+            <Image
+              class="screenshot"
+              :src="`${FILE_BASE_URL}/${uploadedScreenshotPath}`"
+              preview
+              :imageStyle="{ width: '100%', maxWidth: '100%', height: 'auto' }"
+            />
+          </div>
+        </div>
+
+        <div v-if="isAdmin && (ocrResult?.raw_text || ocrResult?.pretty_text)" class="raw">
           <div class="raw-title">OCR &#25991;&#26412;</div>
           <Accordion>
             <AccordionTab v-if="ocrResult?.pretty_text" :header="'\u70B9\u51FB\u67E5\u770B OCR \u6574\u7406\u7248\u6587\u672C'">
