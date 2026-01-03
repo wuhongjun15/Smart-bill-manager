@@ -1522,6 +1522,50 @@ onMounted(async () => {
   text-overflow: ellipsis;
 }
 
+.calendar-table :deep(.p-datatable-thead > tr > th),
+.calendar-table :deep(.p-datatable-tbody > tr > td) {
+  padding: 10px 12px;
+}
+
+/* Calendar tab (3 columns when filtering by trip, 4 columns otherwise). */
+.calendar-table :deep(.p-datatable-thead > tr > th:nth-child(1)),
+.calendar-table :deep(.p-datatable-tbody > tr > td:nth-child(1)) {
+  width: 18% !important;
+  text-align: right;
+}
+
+.calendar-table :deep(.p-datatable-thead > tr > th:nth-child(2)),
+.calendar-table :deep(.p-datatable-tbody > tr > td:nth-child(2)) {
+  width: 34% !important;
+}
+
+.calendar-table :deep(.p-datatable-thead > tr > th:nth-child(3)),
+.calendar-table :deep(.p-datatable-tbody > tr > td:nth-child(3)) {
+  width: 24% !important;
+  text-align: right;
+}
+
+.calendar-table :deep(.p-datatable-thead > tr > th:nth-child(4)),
+.calendar-table :deep(.p-datatable-tbody > tr > td:nth-child(4)) {
+  width: 24% !important;
+}
+
+/* When a trip is selected (3 columns), rebalance widths for better density. */
+.calendar-table :deep(.p-datatable-thead > tr:has(> th:nth-child(3):last-child) > th:nth-child(1)),
+.calendar-table :deep(.p-datatable-tbody > tr:has(> td:nth-child(3):last-child) > td:nth-child(1)) {
+  width: 22% !important;
+}
+
+.calendar-table :deep(.p-datatable-thead > tr:has(> th:nth-child(3):last-child) > th:nth-child(2)),
+.calendar-table :deep(.p-datatable-tbody > tr:has(> td:nth-child(3):last-child) > td:nth-child(2)) {
+  width: 38% !important;
+}
+
+.calendar-table :deep(.p-datatable-thead > tr:has(> th:nth-child(3):last-child) > th:nth-child(3)),
+.calendar-table :deep(.p-datatable-tbody > tr:has(> td:nth-child(3):last-child) > td:nth-child(3)) {
+  width: 40% !important;
+}
+
 @media (max-width: 1100px) {
   .trip-table :deep(.p-datatable-table),
   .pending-table :deep(.p-datatable-table),
