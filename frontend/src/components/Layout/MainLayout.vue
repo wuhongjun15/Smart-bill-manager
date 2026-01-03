@@ -157,9 +157,8 @@ const navItemsWithAdmin = computed(() => {
   return items
 })
 
-const isCollapsed = ref(true)
-const lastUserCollapsed = ref(true)
-const autoCollapseActive = ref(false)
+const SIDEBAR_COLLAPSED_KEY = 'sbm_sidebar_collapsed'
+const isCollapsed = ref(false)
 const showChangePasswordDialog = ref(false)
 const userMenu = ref<InstanceType<typeof Menu> | null>(null)
 const mobileNavVisible = ref(false)
@@ -176,24 +175,14 @@ const updateLayoutMode = () => {
 
   isMobile.value = isSmallWidth && (isCoarsePointer || isHoverNone)
   if (!isMobile.value) mobileNavVisible.value = false
-
-  const shouldAutoCollapse = !isMobile.value && window.matchMedia('(max-width: 1100px)').matches
-  if (shouldAutoCollapse) {
-    if (!autoCollapseActive.value) {
-      lastUserCollapsed.value = isCollapsed.value
-      autoCollapseActive.value = true
-    }
-    isCollapsed.value = true
-    return
-  }
-
-  if (autoCollapseActive.value) {
-    autoCollapseActive.value = false
-    isCollapsed.value = lastUserCollapsed.value
-  }
 }
 
 onMounted(() => {
+  if (typeof window !== 'undefined') {
+    const stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY)
+    if (stored === '1' || stored === 'true') isCollapsed.value = true
+    if (stored === '0' || stored === 'false') isCollapsed.value = false
+  }
   updateLayoutMode()
   if (typeof window === 'undefined') return
   window.addEventListener('resize', updateLayoutMode, { passive: true })
@@ -257,8 +246,9 @@ const toggleUserMenu = (event: MouseEvent) => {
 const toggleCollapsed = () => {
   const next = !isCollapsed.value
   isCollapsed.value = next
-  lastUserCollapsed.value = next
-  autoCollapseActive.value = false
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0')
+  }
 }
 
 const go = (path: string) => {
