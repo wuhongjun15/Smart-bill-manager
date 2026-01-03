@@ -433,7 +433,7 @@
                           <Column
                             header="商家"
                             :style="{
-                              width: calendarTripFilter ? '52%' : '34%',
+                              width: calendarTripFilter ? '42%' : '34%',
                             }"
                           >
                             <template #body="{ data: row }">
@@ -448,7 +448,7 @@
                             field="transaction_time"
                             header="时间"
                             :style="{
-                              width: calendarTripFilter ? '30%' : '26%',
+                              width: calendarTripFilter ? '40%' : '26%',
                             }"
                           >
                             <template #body="{ data: row }">{{
@@ -1861,10 +1861,6 @@ onMounted(async () => {
 .calendar-table :deep(.p-datatable-table) {
   width: 100%;
   table-layout: fixed;
-}
-
-.calendar-table :deep(.p-datatable-table) {
-  table-layout: auto;
 }
 
 .trip-table :deep(.p-datatable-thead > tr > th),
