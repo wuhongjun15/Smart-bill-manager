@@ -251,6 +251,7 @@
                     <Button label="本月" icon="pi pi-calendar" class="p-button-outlined" @click="goToThisMonth" />
                   </div>
                   <DatePicker
+                    :key="calendarPickerKey"
                     v-model="calendarSelectedDate"
                     inline
                     :manualInput="false"
@@ -271,7 +272,10 @@
                   <Card class="sbm-surface">
                     <template #title>
                       <div class="panel-title">
-                        <span>{{ calendarRightTitle }}</span>
+                        <div class="panel-title-text">
+                          <span>{{ calendarRightTitle }}</span>
+                          <small v-if="calendarRightRangeLabel" class="panel-title-sub">{{ calendarRightRangeLabel }}</small>
+                        </div>
                       </div>
                     </template>
                     <template #content>
@@ -1143,6 +1147,7 @@ const calendarMonth = ref<{ year: number; month: number }>({ year: dayjs().year(
 const calendarMonthPayments = ref<Payment[]>([])
 const calendarTripFilter = ref<string | null>(null)
 const calendarMonthBase = ref<'zero' | 'one' | null>(null)
+const calendarPickerKey = ref(0)
 
 const calendarActiveTrip = computed(() => {
   const id = calendarTripFilter.value
@@ -1268,6 +1273,12 @@ const calendarRightTitle = computed(() => {
   return dayjs(calendarSelectedDate.value).format('YYYY-MM-DD')
 })
 
+const calendarRightRangeLabel = computed(() => {
+  const range = calendarTripRange.value
+  if (!range) return ''
+  return `${range.start.format('YYYY-MM-DD')} ~ ${range.end.format('YYYY-MM-DD')}`
+})
+
 const calendarDisplayPayments = computed(() => {
   const tripId = calendarTripFilter.value
   if (!tripId) return calendarSelectedPayments.value
@@ -1297,6 +1308,7 @@ watch(
         const t = dayjs(target)
         calendarSelectedDate.value = target
         calendarMonth.value = { year: t.year(), month: t.month() }
+        calendarPickerKey.value += 1
       }
     }
 
@@ -1615,9 +1627,22 @@ onMounted(async () => {
 
 .calendar-right .panel-title {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
+}
+
+.panel-title-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.panel-title-sub {
+  color: var(--p-text-muted-color);
+  font-weight: 700;
+  font-size: 12px;
 }
 
 .date-cell {
