@@ -421,8 +421,7 @@
                             field="amount"
                             header="金额"
                             :style="{
-                              width: calendarTripFilter ? '20%' : '14%',
-                              textAlign: 'right',
+                              width: calendarTripFilter ? '18%' : '14%',
                             }"
                           >
                             <template #body="{ data: row }">
@@ -434,7 +433,7 @@
                           <Column
                             header="商家"
                             :style="{
-                              width: calendarTripFilter ? '44%' : '34%',
+                              width: calendarTripFilter ? '52%' : '34%',
                             }"
                           >
                             <template #body="{ data: row }">
@@ -449,7 +448,7 @@
                             field="transaction_time"
                             header="时间"
                             :style="{
-                              width: calendarTripFilter ? '36%' : '26%',
+                              width: calendarTripFilter ? '30%' : '26%',
                             }"
                           >
                             <template #body="{ data: row }">{{
@@ -1864,6 +1863,10 @@ onMounted(async () => {
   table-layout: fixed;
 }
 
+.calendar-table :deep(.p-datatable-table) {
+  table-layout: auto;
+}
+
 .trip-table :deep(.p-datatable-thead > tr > th),
 .trip-table :deep(.p-datatable-tbody > tr > td),
 .pending-table :deep(.p-datatable-thead > tr > th),
@@ -1878,6 +1881,18 @@ onMounted(async () => {
 .calendar-table :deep(.p-datatable-thead > tr > th),
 .calendar-table :deep(.p-datatable-tbody > tr > td) {
   padding: 10px 12px;
+}
+
+.calendar-table :deep(.p-datatable-thead > tr > th) {
+  text-align: left;
+}
+
+.calendar-table :deep(.p-datatable-tbody > tr > td) {
+  text-align: left;
+}
+
+.calendar-table :deep(.p-datatable-thead > tr > th .p-column-header-content) {
+  justify-content: flex-start;
 }
 
 @media (max-width: 1100px) {
