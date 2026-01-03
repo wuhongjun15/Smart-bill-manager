@@ -1496,7 +1496,7 @@ const calendarMaxDate = computed(() => {
 });
 
 const calendarTripOptions = computed(() => [
-  { label: "全部支付", value: null },
+  { label: "全部行程", value: null },
   ...trips.value.map((t) => ({ label: t.name, value: t.id })),
 ]);
 
