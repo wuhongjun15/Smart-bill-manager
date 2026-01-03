@@ -323,15 +323,28 @@ func (r *InvoiceRepository) SuggestPayments(invoice *models.Invoice, limit int) 
 func (r *InvoiceRepository) SuggestInvoices(payment *models.Payment, limit int) ([]models.Invoice, error) {
 	var invoices []models.Invoice
 
-	query := database.GetDB().Model(&models.Invoice{}).Where("is_draft = 0")
+	// Suggest only invoices that are not linked to any non-draft payment.
+	// This keeps suggestions actionable and avoids recommending already-linked invoices.
+	query := database.GetDB().
+		Model(&models.Invoice{}).
+		Where("is_draft = 0").
+		Where(`
+			NOT EXISTS (
+				SELECT 1
+				FROM invoice_payment_links AS l
+				JOIN payments AS p ON p.id = l.payment_id AND p.is_draft = 0
+				WHERE l.invoice_id = invoices.id
+			)
+		`)
 	absAmount := 0.0
 	hasAmount := false
 
 	if payment != nil && payment.Amount != 0 {
 		absAmount = math.Abs(payment.Amount)
 		hasAmount = absAmount > 0
-		minAmount := absAmount * 0.8
-		maxAmount := absAmount * 1.2
+		// Keep suggestions conservative: default to ±10% around payment amount.
+		minAmount := absAmount * 0.9
+		maxAmount := absAmount * 1.1
 		query = query.Where("amount >= ? AND amount <= ?", minAmount, maxAmount)
 	}
 

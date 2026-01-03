@@ -59,11 +59,11 @@ func (s *PaymentService) CreateDraftFromScreenshotUpload(screenshotPath string, 
 }
 
 type paymentOCRTaskResult struct {
-	Payment       *models.Payment       `json:"payment"`
-	Extracted     *PaymentExtractedData `json:"extracted"`
-	ScreenshotPath string               `json:"screenshot_path"`
-	OCRError      string               `json:"ocr_error,omitempty"`
-	Dedup         any                  `json:"dedup,omitempty"`
+	Payment        *models.Payment       `json:"payment"`
+	Extracted      *PaymentExtractedData `json:"extracted"`
+	ScreenshotPath string                `json:"screenshot_path"`
+	OCRError       string                `json:"ocr_error,omitempty"`
+	Dedup          any                   `json:"dedup,omitempty"`
 }
 
 func (s *PaymentService) ProcessPaymentOCRTask(paymentID string) (any, error) {
@@ -160,11 +160,11 @@ func (s *PaymentService) ProcessPaymentOCRTask(paymentID string) (any, error) {
 	}
 
 	out := &paymentOCRTaskResult{
-		Payment:       updated,
-		Extracted:     extracted,
+		Payment:        updated,
+		Extracted:      extracted,
 		ScreenshotPath: strings.TrimSpace(*payment.ScreenshotPath),
-		OCRError:      warn,
-		Dedup:         dedup,
+		OCRError:       warn,
+		Dedup:          dedup,
 	}
 	if warn == "" {
 		out.OCRError = ""
@@ -699,6 +699,53 @@ func (s *PaymentService) GetLinkedInvoices(paymentID string) ([]models.Invoice, 
 	return s.repo.GetLinkedInvoices(paymentID)
 }
 
+type scoredInvoiceCandidate struct {
+	invoice models.Invoice
+	score   float64
+	aScore  float64
+	dScore  float64
+	mScore  float64
+}
+
+func scoreInvoiceCandidates(payment *models.Payment, candidates []models.Invoice, linkedIDs map[string]struct{}) []scoredInvoiceCandidate {
+	scoredAll := make([]scoredInvoiceCandidate, 0, len(candidates))
+	for _, inv := range candidates {
+		if _, ok := linkedIDs[inv.ID]; ok {
+			continue
+		}
+		score, aScore, dScore, mScore := computeInvoicePaymentScoreBreakdown(&inv, payment)
+		scoredAll = append(scoredAll, scoredInvoiceCandidate{invoice: inv, score: score, aScore: aScore, dScore: dScore, mScore: mScore})
+	}
+
+	sort.Slice(scoredAll, func(i, j int) bool {
+		if scoredAll[i].score == scoredAll[j].score {
+			return scoredAll[i].invoice.CreatedAt.After(scoredAll[j].invoice.CreatedAt)
+		}
+		return scoredAll[i].score > scoredAll[j].score
+	})
+
+	return scoredAll
+}
+
+func pickSuggestedInvoices(payment *models.Payment, scoredAll []scoredInvoiceCandidate, limit int) []models.Invoice {
+	minScore := 0.15
+	if payment != nil && payment.Amount == 0 {
+		minScore = 0.05
+	}
+
+	out := make([]models.Invoice, 0, limit)
+	for _, s := range scoredAll {
+		if s.score < minScore {
+			continue
+		}
+		out = append(out, s.invoice)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
 // SuggestInvoices suggests invoices that might match this payment using amount/seller/date signals.
 func (s *PaymentService) SuggestInvoices(paymentID string, limit int, debug bool) ([]models.Invoice, error) {
 	payment, err := s.repo.FindByID(paymentID)
@@ -736,31 +783,20 @@ func (s *PaymentService) SuggestInvoices(paymentID string, limit int, debug bool
 	}
 
 	if len(candidates) == 0 {
-		var total int64
-		_ = database.GetDB().Model(&models.Invoice{}).Where("is_draft = 0").Count(&total).Error
-		if debug {
-			log.Printf("[MATCH] payment=%s repo candidates=0, fallback to recent invoices (total=%d)", paymentID, total)
-		}
-		if total > 0 {
-			var recent []models.Invoice
-			_ = database.GetDB().
-				Model(&models.Invoice{}).
-				Where("is_draft = 0").
-				Order("created_at DESC").
-				Limit(maxCandidates).
-				Find(&recent).Error
-			candidates = recent
-
+		// When payment amount is available, prefer returning empty rather than guessing from unrelated recent invoices.
+		// Users can still manually pick from the "unlinked invoices" list in the UI.
+		if payment.Amount > 0 {
 			if debug {
-				sampleN := 5
-				if len(recent) < sampleN {
-					sampleN = len(recent)
-				}
-				for i := 0; i < sampleN; i++ {
-					inv := recent[i]
-					log.Printf("[MATCH] payment=%s recent invoice sample=%d id=%s amount=%v seller=%v invoice_date=%v",
-						paymentID, i+1, inv.ID, valueOrNil(inv.Amount), strValueOrNil(inv.SellerName), strValueOrNil(inv.InvoiceDate))
-				}
+				log.Printf("[MATCH] payment=%s repo candidates=0 (amount=%.2f), return empty suggestions", paymentID, payment.Amount)
+			}
+			return []models.Invoice{}, nil
+		}
+
+		// If amount is missing (0), we can fallback to recent unlinked invoices so merchant/date signals still work.
+		if recent, _, err := s.invoiceRepo.FindUnlinked(maxCandidates, 0); err == nil {
+			candidates = recent
+			if debug {
+				log.Printf("[MATCH] payment=%s repo candidates=0 (amount=0), fallback to recent unlinked invoices=%d", paymentID, len(recent))
 			}
 		}
 	}
@@ -769,53 +805,8 @@ func (s *PaymentService) SuggestInvoices(paymentID string, limit int, debug bool
 		log.Printf("[MATCH] payment=%s linked=%d candidates=%d", paymentID, len(linkedIDs), len(candidates))
 	}
 
-	type scored struct {
-		invoice models.Invoice
-		score   float64
-		aScore  float64
-		dScore  float64
-		mScore  float64
-	}
-	scoredAll := make([]scored, 0, len(candidates))
-	for _, inv := range candidates {
-		if _, ok := linkedIDs[inv.ID]; ok {
-			continue
-		}
-		score, aScore, dScore, mScore := computeInvoicePaymentScoreBreakdown(&inv, payment)
-		scoredAll = append(scoredAll, scored{invoice: inv, score: score, aScore: aScore, dScore: dScore, mScore: mScore})
-	}
-
-	sort.Slice(scoredAll, func(i, j int) bool {
-		if scoredAll[i].score == scoredAll[j].score {
-			return scoredAll[i].invoice.CreatedAt.After(scoredAll[j].invoice.CreatedAt)
-		}
-		return scoredAll[i].score > scoredAll[j].score
-	})
-
-	minScore := 0.15
-	if payment.Amount == 0 {
-		minScore = 0.05
-	}
-
-	out := make([]models.Invoice, 0, limit)
-	for _, s := range scoredAll {
-		if s.score < minScore {
-			continue
-		}
-		out = append(out, s.invoice)
-		if len(out) >= limit {
-			break
-		}
-	}
-
-	if len(out) == 0 {
-		for _, s := range scoredAll {
-			out = append(out, s.invoice)
-			if len(out) >= limit {
-				break
-			}
-		}
-	}
+	scoredAll := scoreInvoiceCandidates(payment, candidates, linkedIDs)
+	out := pickSuggestedInvoices(payment, scoredAll, limit)
 
 	if debug {
 		top := 10
