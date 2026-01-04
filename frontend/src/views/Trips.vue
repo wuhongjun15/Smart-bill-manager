@@ -551,13 +551,12 @@
             }}</small>
           </div>
           <div class="col-12 md:col-6 field">
-            <label for="trip_start">开始时间</label>
+            <label for="trip_start">开始日期</label>
             <DatePicker
               id="trip_start"
               ref="tripStartPicker"
               v-model="tripForm.start"
-              showTime
-              showSeconds
+              dateFormat="yy-mm-dd"
               :manualInput="false"
               @show="() => onPickerShow(tripStartPicker)"
               @hide="() => onPickerHide(tripStartPicker)"
@@ -578,13 +577,12 @@
             }}</small>
           </div>
           <div class="col-12 md:col-6 field">
-            <label for="trip_end">结束时间</label>
+            <label for="trip_end">结束日期</label>
             <DatePicker
               id="trip_end"
               ref="tripEndPicker"
               v-model="tripForm.end"
-              showTime
-              showSeconds
+              dateFormat="yy-mm-dd"
               :manualInput="false"
               @show="() => onPickerShow(tripEndPicker)"
               @hide="() => onPickerHide(tripEndPicker)"
@@ -1088,8 +1086,7 @@ const tripNameById = computed<Record<string, string>>(() => {
   return m;
 });
 
-const formatDateTime = (date: string) =>
-  dayjs(date).format("YYYY-MM-DD HH:mm:ss");
+const formatDateTime = (date: string) => dayjs(date).format("YYYY-MM-DD");
 const formatMoney = (amount: number) => `¥${Number(amount || 0).toFixed(2)}`;
 
 const validateTripForm = () => {
@@ -1208,15 +1205,20 @@ const handleSaveTrip = async () => {
   if (!validateTripForm()) return;
   savingTrip.value = true;
   try {
+    const startLocal = new Date(tripForm.start!);
+    startLocal.setHours(0, 0, 0, 0);
+    const endLocal = new Date(tripForm.end!);
+    endLocal.setHours(23, 59, 59, 0);
+
     const startIso = await toUtcIsoWithDstConfirm(
-      tripForm.start!,
+      startLocal,
       tripForm.timezone,
-      "开始时间",
+      "开始日期",
     );
     const endIso = await toUtcIsoWithDstConfirm(
-      tripForm.end!,
+      endLocal,
       tripForm.timezone,
-      "结束时间",
+      "结束日期",
     );
 
     const payload = {
