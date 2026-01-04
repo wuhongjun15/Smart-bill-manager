@@ -45,8 +45,12 @@ import axios from 'axios'
 import Button from 'primevue/button'
 import Message from 'primevue/message'
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist'
+import PdfJsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?worker'
 
-GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString()
+// Use Vite's worker bundling so we don't rely on serving `.mjs` assets with a strict module MIME type.
+if (!(GlobalWorkerOptions as any).workerPort) {
+  ;(GlobalWorkerOptions as any).workerPort = new (PdfJsWorker as any)()
+}
 
 const props = withDefaults(
   defineProps<{
