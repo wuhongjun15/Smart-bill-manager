@@ -86,9 +86,51 @@ func (s *InvoiceService) CreateDraftFromUpload(input CreateInvoiceInput) (*model
 	return inv, nil
 }
 
+func (s *InvoiceService) UpdateDraftFileMeta(invoiceID string, filename string, originalName string, filePath string, fileSize int64, fileSHA256 *string) (*models.Invoice, error) {
+	invoiceID = strings.TrimSpace(invoiceID)
+	filename = strings.TrimSpace(filename)
+	originalName = strings.TrimSpace(originalName)
+	filePath = strings.TrimSpace(filePath)
+
+	if invoiceID == "" {
+		return nil, fmt.Errorf("missing invoice id")
+	}
+	if filename == "" {
+		return nil, fmt.Errorf("missing filename")
+	}
+	if originalName == "" {
+		return nil, fmt.Errorf("missing original name")
+	}
+	if filePath == "" {
+		return nil, fmt.Errorf("missing file path")
+	}
+
+	update := map[string]any{
+		"filename":      filename,
+		"original_name": originalName,
+		"file_path":     filePath,
+		"file_size":     fileSize,
+	}
+
+	if fileSHA256 != nil {
+		h := strings.TrimSpace(*fileSHA256)
+		if h != "" {
+			update["file_sha256"] = h
+		}
+	}
+
+	if err := database.GetDB().
+		Model(&models.Invoice{}).
+		Where("id = ? AND is_draft = 1", invoiceID).
+		Updates(update).Error; err != nil {
+		return nil, err
+	}
+	return s.repo.FindByID(invoiceID)
+}
+
 type invoiceOCRTaskResult struct {
 	Invoice *models.Invoice `json:"invoice"`
-	Dedup   any            `json:"dedup,omitempty"`
+	Dedup   any             `json:"dedup,omitempty"`
 }
 
 func (s *InvoiceService) ProcessInvoiceOCRTask(invoiceID string) (any, error) {
@@ -115,9 +157,9 @@ func (s *InvoiceService) ProcessInvoiceOCRTask(invoiceID string) (any, error) {
 		parseStatus, parseError := s.parseInvoiceFile(filePath, inv.Filename)
 
 	updateData := map[string]any{
-		"parse_status": parseStatus,
-		"parse_error":  parseError,
-		"raw_text":     rawText,
+		"parse_status":   parseStatus,
+		"parse_error":    parseError,
+		"raw_text":       rawText,
 		"extracted_data": extractedData,
 	}
 	if invoiceNumber != nil {

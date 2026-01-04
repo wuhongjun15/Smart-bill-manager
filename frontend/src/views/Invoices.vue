@@ -137,7 +137,7 @@
       v-model:visible="uploadModalVisible"
       modal
       :header="'\u4E0A\u4F20\u53D1\u7968'"
-      :style="{ width: '880px', maxWidth: '96vw' }"
+      :style="{ width: uploadedInvoiceId ? '1060px' : '880px', maxWidth: '96vw' }"
       :closable="!uploading && !savingUploadOcr"
     >
       <div class="upload-screenshot-layout">
@@ -184,91 +184,100 @@
           检测到疑似重复发票（发票号码重复）。如果确认需要保留，可点击保存后选择“仍然保存”。
         </Message>
 
-        <div v-if="uploadedInvoice?.file_path" class="invoice-file-preview">
-          <div class="raw-title">发票预览</div>
-          <div class="invoice-file-box">
-            <Image
-              v-if="isInvoiceImageFile(uploadedInvoice.file_path)"
-              class="invoice-image"
-              :src="invoiceFileUrl(uploadedInvoice.file_path)"
-              preview
-              :imageStyle="{ width: '100%', maxWidth: '100%', height: 'auto' }"
-            />
-            <iframe
-              v-else-if="isInvoicePdfFile(uploadedInvoice.file_path)"
-              class="invoice-pdf"
-              :src="invoiceFileUrl(uploadedInvoice.file_path)"
-              title="Invoice PDF Preview"
-            />
-            <Message v-else severity="secondary" :closable="false">该文件暂不支持预览，请点击“查看原文件”。</Message>
+        <div v-if="uploadedInvoiceId" class="upload-invoice-layout">
+          <div class="upload-invoice-left">
+            <div class="invoice-file-preview">
+              <div class="raw-title">发票预览</div>
+              <div class="invoice-file-box">
+                <template v-if="uploadedInvoice?.file_path">
+                  <Image
+                    v-if="isInvoiceImageFile(uploadedInvoice.file_path)"
+                    class="invoice-image"
+                    :src="invoiceFileUrl(uploadedInvoice.file_path)"
+                    preview
+                    :imageStyle="{ width: '100%', maxWidth: '100%', height: 'auto' }"
+                  />
+                  <iframe
+                    v-else-if="isInvoicePdfFile(uploadedInvoice.file_path)"
+                    class="invoice-pdf"
+                    :src="invoiceFileUrl(uploadedInvoice.file_path)"
+                    title="Invoice PDF Preview"
+                  />
+                  <Message v-else severity="secondary" :closable="false">该文件暂不支持预览，请点击“查看原文件”。</Message>
+                </template>
+                <Message v-else severity="secondary" :closable="false">暂无可预览的发票文件。</Message>
+              </div>
+            </div>
+          </div>
+
+          <div class="upload-invoice-right">
+            <form class="p-fluid ocr-form" @submit.prevent="handleSaveUploadedInvoice">
+              <div class="grid">
+                <div class="col-12 md:col-6 field">
+                  <label for="inv_num">发票号码</label>
+                  <InputText id="inv_num" v-model.trim="uploadOcrForm.invoice_number" />
+                  <small
+                    v-if="isAdmin && (uploadOcrResult?.invoice_number_source || uploadOcrResult?.invoice_number_confidence)"
+                    class="ocr-hint"
+                    :class="confidenceClass(uploadOcrResult?.invoice_number_confidence)"
+                  >
+                    来源：{{ formatSourceLabel(uploadOcrResult?.invoice_number_source) || '\u672a\u8bc6\u522b' }}
+                    <span v-if="uploadOcrResult?.invoice_number_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.invoice_number_confidence) }}）</span>
+                  </small>
+                </div>
+                <div class="col-12 md:col-6 field">
+                  <label for="inv_date">开票日期</label>
+                  <DatePicker id="inv_date" v-model="uploadOcrForm.invoice_date" :manualInput="false" dateFormat="yy-mm-dd" :placeholder="'开票日期'" />
+                  <small
+                    v-if="isAdmin && (uploadOcrResult?.invoice_date_source || uploadOcrResult?.invoice_date_confidence)"
+                    class="ocr-hint"
+                    :class="confidenceClass(uploadOcrResult?.invoice_date_confidence)"
+                  >
+                    来源：{{ formatSourceLabel(uploadOcrResult?.invoice_date_source) || '\u672a\u8bc6\u522b' }}
+                    <span v-if="uploadOcrResult?.invoice_date_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.invoice_date_confidence) }}）</span>
+                  </small>
+                </div>
+
+                <div class="col-12 md:col-6 field">
+                  <label for="inv_amount">价税合计</label>
+                  <InputNumber id="inv_amount" v-model="uploadOcrForm.amount" :minFractionDigits="2" :maxFractionDigits="2" :min="0" :useGrouping="false" />
+                  <small
+                    v-if="isAdmin && (uploadOcrResult?.amount_source || uploadOcrResult?.amount_confidence)"
+                    class="ocr-hint"
+                    :class="confidenceClass(uploadOcrResult?.amount_confidence)"
+                  >
+                    来源：{{ formatSourceLabel(uploadOcrResult?.amount_source) || '\u672a\u8bc6\u522b' }}
+                    <span v-if="uploadOcrResult?.amount_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.amount_confidence) }}）</span>
+                  </small>
+                </div>
+                <div class="col-12 md:col-6 field">
+                  <label for="inv_seller">销售方</label>
+                  <InputText id="inv_seller" v-model.trim="uploadOcrForm.seller_name" />
+                  <small
+                    v-if="isAdmin && (uploadOcrResult?.seller_name_source || uploadOcrResult?.seller_name_confidence)"
+                    class="ocr-hint"
+                    :class="confidenceClass(uploadOcrResult?.seller_name_confidence)"
+                  >
+                    来源：{{ formatSourceLabel(uploadOcrResult?.seller_name_source) || '\u672a\u8bc6\u522b' }}
+                    <span v-if="uploadOcrResult?.seller_name_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.seller_name_confidence) }}）</span>
+                  </small>
+                </div>
+                <div class="col-12 md:col-6 field">
+                  <label for="inv_buyer">购买方</label>
+                  <InputText id="inv_buyer" v-model.trim="uploadOcrForm.buyer_name" />
+                  <small
+                    v-if="isAdmin && (uploadOcrResult?.buyer_name_source || uploadOcrResult?.buyer_name_confidence)"
+                    class="ocr-hint"
+                    :class="confidenceClass(uploadOcrResult?.buyer_name_confidence)"
+                  >
+                    来源：{{ formatSourceLabel(uploadOcrResult?.buyer_name_source) || '\u672a\u8bc6\u522b' }}
+                    <span v-if="uploadOcrResult?.buyer_name_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.buyer_name_confidence) }}）</span>
+                  </small>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
-
-        <form v-if="uploadedInvoiceId" class="p-fluid ocr-form" @submit.prevent="handleSaveUploadedInvoice">
-          <div class="grid">
-            <div class="col-12 md:col-6 field">
-              <label for="inv_num">发票号码</label>
-              <InputText id="inv_num" v-model.trim="uploadOcrForm.invoice_number" />
-              <small
-                v-if="isAdmin && (uploadOcrResult?.invoice_number_source || uploadOcrResult?.invoice_number_confidence)"
-                class="ocr-hint"
-                :class="confidenceClass(uploadOcrResult?.invoice_number_confidence)"
-              >
-                来源：{{ formatSourceLabel(uploadOcrResult?.invoice_number_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.invoice_number_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.invoice_number_confidence) }}）</span>
-              </small>
-            </div>
-            <div class="col-12 md:col-6 field">
-              <label for="inv_date">开票日期</label>
-              <DatePicker id="inv_date" v-model="uploadOcrForm.invoice_date" :manualInput="false" dateFormat="yy-mm-dd" :placeholder="'开票日期'" />
-              <small
-                v-if="isAdmin && (uploadOcrResult?.invoice_date_source || uploadOcrResult?.invoice_date_confidence)"
-                class="ocr-hint"
-                :class="confidenceClass(uploadOcrResult?.invoice_date_confidence)"
-              >
-                来源：{{ formatSourceLabel(uploadOcrResult?.invoice_date_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.invoice_date_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.invoice_date_confidence) }}）</span>
-              </small>
-            </div>
-
-            <div class="col-12 md:col-6 field">
-              <label for="inv_amount">价税合计</label>
-              <InputNumber id="inv_amount" v-model="uploadOcrForm.amount" :minFractionDigits="2" :maxFractionDigits="2" :min="0" :useGrouping="false" />
-              <small
-                v-if="isAdmin && (uploadOcrResult?.amount_source || uploadOcrResult?.amount_confidence)"
-                class="ocr-hint"
-                :class="confidenceClass(uploadOcrResult?.amount_confidence)"
-              >
-                来源：{{ formatSourceLabel(uploadOcrResult?.amount_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.amount_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.amount_confidence) }}）</span>
-              </small>
-            </div>
-            <div class="col-12 md:col-6 field">
-              <label for="inv_seller">销售方</label>
-              <InputText id="inv_seller" v-model.trim="uploadOcrForm.seller_name" />
-              <small
-                v-if="isAdmin && (uploadOcrResult?.seller_name_source || uploadOcrResult?.seller_name_confidence)"
-                class="ocr-hint"
-                :class="confidenceClass(uploadOcrResult?.seller_name_confidence)"
-              >
-                来源：{{ formatSourceLabel(uploadOcrResult?.seller_name_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.seller_name_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.seller_name_confidence) }}）</span>
-              </small>
-            </div>
-            <div class="col-12 md:col-6 field">
-              <label for="inv_buyer">购买方</label>
-              <InputText id="inv_buyer" v-model.trim="uploadOcrForm.buyer_name" />
-              <small
-                v-if="isAdmin && (uploadOcrResult?.buyer_name_source || uploadOcrResult?.buyer_name_confidence)"
-                class="ocr-hint"
-                :class="confidenceClass(uploadOcrResult?.buyer_name_confidence)"
-              >
-                来源：{{ formatSourceLabel(uploadOcrResult?.buyer_name_source) || '\u672a\u8bc6\u522b' }}
-                <span v-if="uploadOcrResult?.buyer_name_confidence">（置信度：{{ confidenceLabel(uploadOcrResult?.buyer_name_confidence) }}）</span>
-              </small>
-            </div>
-          </div>
-        </form>
 
         <div v-if="isAdmin && uploadedInvoice && (getInvoiceRawText(uploadedInvoice) || getInvoicePrettyText(uploadedInvoice))" class="raw-section">
           <div class="raw-title">OCR 文本</div>
@@ -1695,6 +1704,28 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.upload-invoice-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.upload-invoice-left,
+.upload-invoice-right {
+  min-width: 0;
+}
+
+.upload-invoice-left .invoice-file-preview {
+  margin-top: 0;
+}
+
+@media (max-width: 960px) {
+  .upload-invoice-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sbm-dropzone {

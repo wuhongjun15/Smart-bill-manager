@@ -326,6 +326,54 @@ func (h *InvoiceHandler) UploadAsync(c *gin.Context) {
 		utils.Error(c, 500, "重复检查失败", err)
 		return
 	} else if existing != nil {
+		// If the duplicate is only a draft, reuse it instead of hard-failing (common after container restarts).
+		if existing.IsDraft {
+			relPath := "uploads/" + filename
+			usedPath := relPath
+
+			// Prefer keeping the existing file if it's still present; otherwise update the draft to point to the new upload.
+			if strings.TrimSpace(existing.FilePath) != "" {
+				existingPath := strings.TrimSpace(existing.FilePath)
+				if abs, err := resolveUploadsFilePath(h.uploadsDir, existingPath); err == nil {
+					if st, err := os.Stat(abs); err == nil && !st.IsDir() {
+						usedPath = existingPath
+						_ = os.Remove(filePath)
+					}
+				}
+			}
+
+			if usedPath == relPath {
+				updated, uerr := h.invoiceService.UpdateDraftFileMeta(existing.ID, filename, file.Filename, relPath, file.Size, &fileSHA)
+				if uerr != nil {
+					_ = os.Remove(filePath)
+					utils.Error(c, 500, "更新草稿失败", uerr)
+					return
+				}
+				existing = updated
+			}
+
+			userID := middleware.GetUserID(c)
+			if userID == "" {
+				_ = os.Remove(filePath)
+				utils.Error(c, 401, "未授权，请先登录", nil)
+				return
+			}
+
+			task, err := h.taskService.CreateTask(services.TaskTypeInvoiceOCR, userID, existing.ID, &fileSHA)
+			if err != nil {
+				utils.Error(c, 500, "创建识别任务失败", err)
+				return
+			}
+
+			utils.Success(c, 201, "发票上传成功，正在识别…", gin.H{
+				"taskId":       task.ID,
+				"invoice":      existing,
+				"file_path":    usedPath,
+				"reused_draft": true,
+			})
+			return
+		}
+
 		_ = os.Remove(filePath)
 		utils.ErrorData(c, 409, "文件内容重复，已存在记录", gin.H{
 			"kind":              "hash_duplicate",
@@ -547,6 +595,44 @@ func (h *InvoiceHandler) UploadMultipleAsync(c *gin.Context) {
 			_ = os.Remove(filePath)
 			continue
 		} else if existing != nil {
+			// If the duplicate is only a draft, reuse it (common after container restarts); otherwise skip.
+			if existing.IsDraft {
+				relPath := "uploads/" + filename
+				usedPath := relPath
+
+				if strings.TrimSpace(existing.FilePath) != "" {
+					existingPath := strings.TrimSpace(existing.FilePath)
+					if abs, err := resolveUploadsFilePath(h.uploadsDir, existingPath); err == nil {
+						if st, err := os.Stat(abs); err == nil && !st.IsDir() {
+							usedPath = existingPath
+							_ = os.Remove(filePath)
+						}
+					}
+				}
+
+				if usedPath == relPath {
+					updated, uerr := h.invoiceService.UpdateDraftFileMeta(existing.ID, filename, file.Filename, relPath, file.Size, &fileSHA)
+					if uerr != nil {
+						_ = os.Remove(filePath)
+						continue
+					}
+					existing = updated
+				}
+
+				task, err := h.taskService.CreateTask(services.TaskTypeInvoiceOCR, userID, existing.ID, &fileSHA)
+				if err != nil {
+					continue
+				}
+
+				out = append(out, gin.H{
+					"taskId":       task.ID,
+					"invoice":      existing,
+					"file_path":    usedPath,
+					"reused_draft": true,
+				})
+				continue
+			}
+
 			_ = os.Remove(filePath)
 			skippedDuplicates++
 			continue
