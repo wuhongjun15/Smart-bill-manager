@@ -200,7 +200,8 @@
                   <iframe
                     v-else-if="isInvoicePdfFile(uploadedInvoice.file_path)"
                     class="invoice-pdf"
-                    :src="invoiceFileUrl(uploadedInvoice.file_path)"
+                    :src="invoicePreviewUrl(uploadedInvoice.file_path)"
+                    loading="lazy"
                     title="Invoice PDF Preview"
                   />
                   <Message v-else severity="secondary" :closable="false">该文件暂不支持预览，请点击“查看原文件”。</Message>
@@ -376,7 +377,8 @@
             <iframe
               v-else-if="isInvoicePdfFile(previewInvoice.file_path)"
               class="invoice-pdf"
-              :src="invoiceFileUrl(previewInvoice.file_path)"
+              :src="invoicePreviewUrl(previewInvoice.file_path)"
+              loading="lazy"
               title="Invoice PDF Preview"
             />
             <Message v-else severity="secondary" :closable="false">该文件暂不支持预览，请点击“查看原文件”。</Message>
@@ -699,6 +701,15 @@ const invoiceFileUrl = (p?: string) => {
   const path = String(p || '').trim()
   if (!path) return ''
   return `${FILE_BASE_URL}/${path}`
+}
+const invoicePreviewUrl = (p?: string) => {
+  const url = invoiceFileUrl(p)
+  if (!url) return ''
+  if (!isInvoicePdfFile(p)) return url
+
+  // Best-effort: hide built-in PDF viewer chrome where supported.
+  const flags = 'toolbar=0&navpanes=0&scrollbar=0'
+  return url.includes('#') ? `${url}&${flags}` : `${url}#${flags}`
 }
 
 const toast = useToast()
