@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"smart-bill-manager/internal/middleware"
 	"smart-bill-manager/internal/services"
 	"smart-bill-manager/internal/utils"
 )
@@ -23,6 +24,7 @@ func (h *EmailHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.DELETE("/configs/:id", h.DeleteConfig)
 	r.POST("/test", h.TestConnection)
 	r.GET("/logs", h.GetLogs)
+	r.POST("/logs/:id/parse", middleware.RequireAdmin(), h.ParseLog)
 	r.POST("/monitor/start/:id", h.StartMonitoring)
 	r.POST("/monitor/stop/:id", h.StopMonitoring)
 	r.GET("/monitor/status", h.GetMonitoringStatus)
@@ -131,6 +133,16 @@ func (h *EmailHandler) GetLogs(c *gin.Context) {
 	}
 
 	utils.SuccessData(c, logs)
+}
+
+func (h *EmailHandler) ParseLog(c *gin.Context) {
+	id := c.Param("id")
+	invoice, err := h.emailService.ParseEmailLog(id)
+	if err != nil {
+		utils.Error(c, 500, "解析邮件发票失败", err)
+		return
+	}
+	utils.Success(c, 200, "解析成功", invoice)
 }
 
 func (h *EmailHandler) StartMonitoring(c *gin.Context) {

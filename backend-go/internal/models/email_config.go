@@ -49,12 +49,18 @@ func (e *EmailConfig) ToResponse() EmailConfigResponse {
 type EmailLog struct {
 	ID              string    `json:"id" gorm:"primaryKey"`
 	EmailConfigID   string    `json:"email_config_id" gorm:"not null;index"`
+	Mailbox         string    `json:"mailbox" gorm:"not null;default:INBOX"`
+	MessageUID      uint32    `json:"message_uid" gorm:"not null;default:0;index"`
 	Subject         *string   `json:"subject"`
 	FromAddress     *string   `json:"from_address"`
 	ReceivedDate    *string   `json:"received_date"`
 	HasAttachment   int       `json:"has_attachment" gorm:"default:0"`
 	AttachmentCount int       `json:"attachment_count" gorm:"default:0"`
-	Status          string    `json:"status" gorm:"default:processed"`
+	InvoiceXMLURL   *string   `json:"invoice_xml_url"`
+	InvoicePDFURL   *string   `json:"invoice_pdf_url"`
+	ParsedInvoiceID *string   `json:"parsed_invoice_id" gorm:"index"`
+	ParseError      *string   `json:"parse_error"`
+	Status          string    `json:"status" gorm:"default:received"` // received/parsed/error
 	CreatedAt       time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
 

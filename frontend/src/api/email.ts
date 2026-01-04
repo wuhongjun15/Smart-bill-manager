@@ -1,5 +1,5 @@
 import api from './auth'
-import type { EmailConfig, EmailLog, ApiResponse } from '@/types'
+import type { EmailConfig, EmailLog, ApiResponse, Invoice } from '@/types'
 
 export const emailApi = {
   getConfigs: () =>
@@ -19,6 +19,9 @@ export const emailApi = {
   
   getLogs: (configId?: string, limit?: number) =>
     api.get<ApiResponse<EmailLog[]>>('/email/logs', { params: { configId, limit } }),
+
+  parseLog: (id: string) =>
+    api.post<ApiResponse<Invoice>>(`/email/logs/${id}/parse`),
   
   startMonitoring: (id: string) =>
     api.post<ApiResponse<void>>(`/email/monitor/start/${id}`),

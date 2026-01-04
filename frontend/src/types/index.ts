@@ -146,11 +146,17 @@ export interface EmailConfig {
 export interface EmailLog {
   id: string;
   email_config_id: string;
+  mailbox?: string;
+  message_uid?: number;
   subject?: string;
   from_address?: string;
   received_date?: string;
   has_attachment: number;
   attachment_count: number;
+  invoice_xml_url?: string;
+  invoice_pdf_url?: string;
+  parsed_invoice_id?: string;
+  parse_error?: string;
   status: string;
   created_at?: string;
 }

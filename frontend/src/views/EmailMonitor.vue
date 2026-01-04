@@ -122,12 +122,36 @@
               {{ row.received_date ? formatDateTime(row.received_date) : '-' }}
             </template>
           </Column>
-          <Column :header="'\u72B6\u6001'" :style="{ width: '120px' }">
+          <Column :header="'\u72B6\u6001'" :style="{ width: '200px' }">
             <template #body="{ data: row }">
-              <Tag
-                :severity="row.status === 'processed' ? 'success' : 'warning'"
-                :value="row.status === 'processed' ? '\u5DF2\u5904\u7406' : row.status"
-              />
+              <div class="log-status">
+                <Tag :severity="getLogStatusSeverity(row.status)" :value="getLogStatusLabel(row.status)" />
+                <small v-if="row.parse_error" class="p-error">{{ row.parse_error }}</small>
+                <small v-else-if="row.parsed_invoice_id" class="muted">发票ID：{{ row.parsed_invoice_id }}</small>
+              </div>
+            </template>
+          </Column>
+          <Column :header="'\u64CD\u4F5C'" :style="{ width: '220px' }">
+            <template #body="{ data: row }">
+              <div class="actions">
+                <Button
+                  size="small"
+                  class="p-button-outlined"
+                  icon="pi pi-cog"
+                  :label="'\u89E3\u6790'"
+                  :loading="parseLoading === row.id"
+                  :disabled="row.status === 'parsing' || row.status === 'parsed'"
+                  @click="handleParseLog(row.id)"
+                />
+                <Button
+                  v-if="row.parsed_invoice_id"
+                  size="small"
+                  class="p-button-text"
+                  icon="pi pi-copy"
+                  :label="'\u590D\u5236\u53D1\u7968ID'"
+                  @click="copyText(row.parsed_invoice_id)"
+                />
+              </div>
             </template>
           </Column>
         </DataTable>
@@ -202,7 +226,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import Card from 'primevue/card'
 import Button from 'primevue/button'
 import Column from 'primevue/column'
@@ -264,7 +288,9 @@ const monitorStatus = ref<Record<string, string>>({})
 const modalVisible = ref(false)
 const testLoading = ref(false)
 const checkLoading = ref<string | null>(null)
+const parseLoading = ref<string | null>(null)
 const selectedPreset = ref<string | null>(null)
+const pollTimer = ref<number | null>(null)
 
 const form = reactive({
   email: '',
@@ -374,6 +400,66 @@ const loadMonitorStatus = async () => {
 
 const loadAll = async () => {
   await Promise.all([loadConfigs(), loadLogs(), loadMonitorStatus()])
+}
+
+const getLogStatusSeverity = (status: string) => {
+  switch (status) {
+    case 'parsed':
+      return 'success'
+    case 'parsing':
+      return 'info'
+    case 'error':
+      return 'danger'
+    case 'received':
+      return 'warning'
+    default:
+      return 'secondary'
+  }
+}
+
+const getLogStatusLabel = (status: string) => {
+  switch (status) {
+    case 'parsed':
+      return '已解析'
+    case 'parsing':
+      return '解析中'
+    case 'error':
+      return '解析失败'
+    case 'received':
+      return '待解析'
+    default:
+      return status || '-'
+  }
+}
+
+const copyText = async (text: string) => {
+  const value = String(text || '').trim()
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    toast.add({ severity: 'success', summary: '已复制', life: 1500 })
+  } catch {
+    toast.add({ severity: 'warn', summary: '复制失败（浏览器限制）', life: 2200 })
+  }
+}
+
+const handleParseLog = async (id: string) => {
+  parseLoading.value = id
+  try {
+    const res = await emailApi.parseLog(id)
+    if (res.data.success && res.data.data) {
+      toast.add({ severity: 'success', summary: '解析成功', life: 2200 })
+      notifications.add({ severity: 'success', title: '邮件已解析为发票', detail: res.data.data.id })
+      await loadLogs()
+    } else {
+      toast.add({ severity: 'error', summary: res.data.message || '解析失败', life: 3500 })
+    }
+  } catch (error: unknown) {
+    const err = error as { response?: { data?: { message?: string } } }
+    toast.add({ severity: 'error', summary: err.response?.data?.message || '解析失败', life: 3500 })
+  } finally {
+    parseLoading.value = null
+  }
 }
 
 const openModal = () => {
@@ -525,8 +611,24 @@ const handleManualCheck = async (id: string) => {
 
 const formatDateTime = (date: string) => dayjs(date).format('MM-DD HH:mm')
 
+const pollTick = async () => {
+  if (document.visibilityState !== 'visible') return
+  await Promise.all([loadLogs(), loadMonitorStatus()])
+}
+
 onMounted(() => {
   loadAll()
+  pollTick()
+  pollTimer.value = window.setInterval(pollTick, 4000)
+  document.addEventListener('visibilitychange', pollTick)
+})
+
+onBeforeUnmount(() => {
+  if (pollTimer.value) {
+    window.clearInterval(pollTimer.value)
+    pollTimer.value = null
+  }
+  document.removeEventListener('visibilitychange', pollTick)
 })
 </script>
 
@@ -609,6 +711,17 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.log-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.muted {
+  color: var(--p-text-muted-color);
 }
 
 .grid-form {

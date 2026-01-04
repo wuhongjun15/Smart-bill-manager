@@ -80,3 +80,19 @@ func (r *EmailRepository) FindLogs(configID string, limit int) ([]models.EmailLo
 	err := query.Find(&logs).Error
 	return logs, err
 }
+
+func (r *EmailRepository) FindLogByID(id string) (*models.EmailLog, error) {
+	var logRow models.EmailLog
+	if err := database.GetDB().Where("id = ?", id).First(&logRow).Error; err != nil {
+		return nil, err
+	}
+	return &logRow, nil
+}
+
+func (r *EmailRepository) UpdateLog(id string, data map[string]interface{}) error {
+	result := database.GetDB().Model(&models.EmailLog{}).Where("id = ?", id).Updates(data)
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return result.Error
+}

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -26,6 +27,131 @@ type EmailService struct {
 	uploadsDir        string
 	activeConnections map[string]*client.Client
 	mu                sync.RWMutex
+}
+
+func formatIMAPAddress(a *imap.Address) string {
+	if a == nil {
+		return ""
+	}
+	addr := strings.TrimSpace(a.Address())
+	name := strings.TrimSpace(a.PersonalName)
+	if name == "" {
+		return addr
+	}
+	return fmt.Sprintf("%s <%s>", name, addr)
+}
+
+func countPDFAttachments(bs *imap.BodyStructure) (hasAttachment int, attachmentCount int) {
+	if bs == nil {
+		return 0, 0
+	}
+
+	var walk func(part *imap.BodyStructure)
+	walk = func(part *imap.BodyStructure) {
+		if part == nil {
+			return
+		}
+		if strings.EqualFold(part.MIMEType, "multipart") {
+			for _, child := range part.Parts {
+				walk(child)
+			}
+			return
+		}
+		if strings.EqualFold(part.MIMEType, "message") && strings.EqualFold(part.MIMESubType, "rfc822") && part.BodyStructure != nil {
+			walk(part.BodyStructure)
+			return
+		}
+
+		filename := ""
+		if part.DispositionParams != nil {
+			if v := strings.TrimSpace(part.DispositionParams["filename"]); v != "" {
+				filename = v
+			}
+		}
+		if filename == "" && part.Params != nil {
+			if v := strings.TrimSpace(part.Params["name"]); v != "" {
+				filename = v
+			}
+		}
+
+		filenameLower := strings.ToLower(filename)
+		mime := strings.ToLower(strings.TrimSpace(part.MIMEType + "/" + part.MIMESubType))
+		isPDF := mime == "application/pdf" || strings.HasSuffix(filenameLower, ".pdf") || strings.Contains(filenameLower, ".pdf?")
+		if !isPDF {
+			return
+		}
+
+		attachmentCount++
+		hasAttachment = 1
+	}
+
+	walk(bs)
+	return hasAttachment, attachmentCount
+}
+
+func readIMAPBodyWithLimit(r io.Reader, maxBytes int64) (string, error) {
+	if r == nil || maxBytes <= 0 {
+		return "", nil
+	}
+	b, err := io.ReadAll(io.LimitReader(r, maxBytes))
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+var urlRegex = regexp.MustCompile(`https?://[^\s"'<>]+`)
+
+func extractInvoiceLinksFromText(body string) (xmlURL *string, pdfURL *string) {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return nil, nil
+	}
+
+	// Decode common HTML escaping from text parts.
+	body = strings.ReplaceAll(body, "&amp;", "&")
+
+	urls := urlRegex.FindAllString(body, -1)
+	if len(urls) == 0 {
+		return nil, nil
+	}
+
+	cleanURL := func(s string) string {
+		s = strings.TrimSpace(s)
+		s = strings.TrimRight(s, ">)].,;\"'")
+		return s
+	}
+
+	for _, raw := range urls {
+		u := cleanURL(raw)
+		if u == "" {
+			continue
+		}
+		l := strings.ToLower(u)
+		if xmlURL == nil {
+			if strings.Contains(l, ".xml") || strings.Contains(l, "xml") {
+				xmlURL = ptrString(u)
+			}
+		}
+		if pdfURL == nil {
+			if strings.Contains(l, ".pdf") || strings.Contains(l, "pdf") {
+				pdfURL = ptrString(u)
+			}
+		}
+		if xmlURL != nil && pdfURL != nil {
+			return xmlURL, pdfURL
+		}
+	}
+
+	return xmlURL, pdfURL
+}
+
+func ptrString(s string) *string {
+	v := strings.TrimSpace(s)
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 func NewEmailService(uploadsDir string, invoiceService *InvoiceService) *EmailService {
@@ -242,8 +368,11 @@ func (s *EmailService) fetchUnreadEmails(configID string, c *client.Client) {
 	seqSet.AddNum(uids...)
 
 	messages := make(chan *imap.Message, len(uids))
-	section := &imap.BodySectionName{}
-	items := []imap.FetchItem{section.FetchItem(), imap.FetchEnvelope}
+	textSection := &imap.BodySectionName{
+		BodyPartName: imap.BodyPartName{Specifier: imap.TextSpecifier},
+		Peek:         true,
+	}
+	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, imap.FetchBodyStructure, textSection.FetchItem()}
 
 	go func() {
 		if err := c.Fetch(seqSet, items, messages); err != nil {
@@ -252,7 +381,7 @@ func (s *EmailService) fetchUnreadEmails(configID string, c *client.Client) {
 	}()
 
 	for msg := range messages {
-		s.processMessage(configID, msg, section)
+		s.processMessage(configID, msg, textSection)
 
 		// Mark as seen
 		seenSet := new(imap.SeqSet)
@@ -271,6 +400,54 @@ func (s *EmailService) fetchUnreadEmails(configID string, c *client.Client) {
 
 func (s *EmailService) processMessage(configID string, msg *imap.Message, section *imap.BodySectionName) {
 	if msg == nil {
+		return
+	}
+
+	// New behavior: only log metadata + (optional) URLs, do not download PDF attachments or create invoices automatically.
+	envelope := msg.Envelope
+	if envelope != nil {
+		subject := strings.TrimSpace(envelope.Subject)
+		if subject == "" {
+			subject = "(无主题)"
+		}
+
+		from := ""
+		if len(envelope.From) > 0 {
+			from = formatIMAPAddress(envelope.From[0])
+		}
+
+		receivedDate := envelope.Date
+		dateStr := receivedDate.Format(time.RFC3339)
+
+		hasAttachment, attachmentCount := countPDFAttachments(msg.BodyStructure)
+
+		var bodyText string
+		if section != nil {
+			if r := msg.GetBody(section); r != nil {
+				if s, err := readIMAPBodyWithLimit(r, 256*1024); err == nil {
+					bodyText = s
+				}
+			}
+		}
+		xmlURL, pdfURL := extractInvoiceLinksFromText(bodyText)
+
+		emailLog := &models.EmailLog{
+			ID:              utils.GenerateUUID(),
+			EmailConfigID:   configID,
+			Mailbox:         "INBOX",
+			MessageUID:      msg.Uid,
+			Subject:         &subject,
+			FromAddress:     &from,
+			ReceivedDate:    &dateStr,
+			HasAttachment:   hasAttachment,
+			AttachmentCount: attachmentCount,
+			InvoiceXMLURL:   xmlURL,
+			InvoicePDFURL:   pdfURL,
+			Status:          "received",
+		}
+		_ = s.repo.CreateLog(emailLog)
+
+		log.Printf("[Email Monitor] Email logged: %s", subject)
 		return
 	}
 
@@ -364,19 +541,6 @@ func (s *EmailService) saveAttachment(filename string, content []byte, _ string)
 	}
 
 	log.Printf("[Email Monitor] Saved attachment: %s", safeFilename)
-
-	// Create invoice record
-	size := int64(len(content))
-	_, err := s.invoiceService.Create(CreateInvoiceInput{
-		Filename:     safeFilename,
-		OriginalName: filename,
-		FilePath:     "uploads/" + safeFilename,
-		FileSize:     size,
-		Source:       "email",
-	})
-	if err != nil {
-		log.Printf("[Email Monitor] Error creating invoice: %v", err)
-	}
 }
 
 func sanitizeFilename(filename string) string {
@@ -470,8 +634,11 @@ func (s *EmailService) ManualCheck(configID string) (bool, string, int) {
 	seqSet.AddNum(uids...)
 
 	messages := make(chan *imap.Message, len(uids))
-	section := &imap.BodySectionName{}
-	items := []imap.FetchItem{section.FetchItem(), imap.FetchEnvelope}
+	textSection := &imap.BodySectionName{
+		BodyPartName: imap.BodyPartName{Specifier: imap.TextSpecifier},
+		Peek:         true,
+	}
+	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, imap.FetchBodyStructure, textSection.FetchItem()}
 
 	go func() {
 		if err := c.Fetch(seqSet, items, messages); err != nil {
@@ -481,7 +648,7 @@ func (s *EmailService) ManualCheck(configID string) (bool, string, int) {
 
 	count := 0
 	for msg := range messages {
-		s.processMessage(configID, msg, section)
+		s.processMessage(configID, msg, textSection)
 
 		// Mark as seen
 		seenSet := new(imap.SeqSet)
