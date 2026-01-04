@@ -139,55 +139,66 @@
       v-model:visible="uploadScreenshotModalVisible"
       modal
       :header="'\u4E0A\u4F20\u652F\u4ED8\u622A\u56FE'"
-      :style="{ width: '880px', maxWidth: '96vw' }"
+      :style="{ width: '1060px', maxWidth: '96vw' }"
       :closable="!uploadingScreenshot && !savingOcrResult"
       @hide="cancelScreenshotUpload"
     >
-      <div class="upload-screenshot-layout">
-        <div
-          class="upload-box sbm-dropzone"
-          @click="triggerScreenshotChoose"
-          @dragenter.prevent
-          @dragover.prevent
-          @drop.prevent="onScreenshotDrop"
-        >
-          <div class="sbm-dropzone-hero">
-            <i class="pi pi-cloud-upload" />
-            <div class="sbm-dropzone-title">&#25299;&#25321;&#22270;&#29255;&#21040;&#27492;&#22788;&#65292;&#25110;&#28857;&#20987;&#36873;&#25321;</div>
-            <div class="sbm-dropzone-sub">&#25903;&#25345; PNG/JPG&#65292;&#26368;&#22823; 10MB</div>
-            <Button type="button" icon="pi pi-plus" :label="'\u9009\u62E9\u622A\u56FE'" @click.stop="chooseScreenshotFile" />
+      <div class="upload-screenshot-body">
+        <div class="upload-screenshot-layout">
+          <div class="upload-screenshot-left">
+            <div
+              class="upload-box sbm-dropzone"
+              @click="triggerScreenshotChoose"
+              @dragenter.prevent
+              @dragover.prevent
+              @drop.prevent="onScreenshotDrop"
+            >
+              <div class="sbm-dropzone-hero">
+                <i class="pi pi-cloud-upload" />
+                <div class="sbm-dropzone-title">&#25299;&#25321;&#22270;&#29255;&#21040;&#27492;&#22788;&#65292;&#25110;&#28857;&#20987;&#36873;&#25321;</div>
+                <div class="sbm-dropzone-sub">&#25903;&#25345; PNG/JPG&#65292;&#26368;&#22823; 10MB</div>
+                <Button type="button" icon="pi pi-plus" :label="'\u9009\u62E9\u622A\u56FE'" @click.stop="chooseScreenshotFile" />
+              </div>
+
+              <input
+                ref="screenshotInput"
+                class="sbm-file-input-hidden"
+                type="file"
+                accept="image/png,image/jpeg"
+                @change="onScreenshotInputChange"
+              />
+
+              <div v-if="selectedScreenshotName" class="file-row" @click.stop>
+                <span class="file-row-name" :title="selectedScreenshotName">{{ selectedScreenshotName }}</span>
+                <Button
+                  class="file-row-remove p-button-text"
+                  severity="secondary"
+                  icon="pi pi-times"
+                  aria-label="Remove"
+                  @click="clearSelectedScreenshot"
+                />
+              </div>
+              <small v-if="screenshotError" class="p-error">{{ screenshotError }}</small>
+            </div>
+
+            <div v-if="screenshotPreviewSrc" class="raw raw-screenshot">
+              <div class="raw-title">支付截图</div>
+              <div class="screenshot-wrap">
+                <Image class="screenshot" :src="screenshotPreviewSrc" preview :imageStyle="{ width: '100%', maxWidth: '100%', height: 'auto' }" />
+              </div>
+            </div>
           </div>
 
-          <input
-            ref="screenshotInput"
-            class="sbm-file-input-hidden"
-            type="file"
-            accept="image/png,image/jpeg"
-            @change="onScreenshotInputChange"
-          />
-
-          <div v-if="selectedScreenshotName" class="file-row" @click.stop>
-            <span class="file-row-name" :title="selectedScreenshotName">{{ selectedScreenshotName }}</span>
-            <Button
-              class="file-row-remove p-button-text"
-              severity="secondary"
-              icon="pi pi-times"
-              aria-label="Remove"
-              @click="clearSelectedScreenshot"
-            />
-          </div>
-          <small v-if="screenshotError" class="p-error">{{ screenshotError }}</small>
-        </div>
-
-        <Message v-if="!ocrResult" severity="info" :closable="false">
-          &#35831;&#36873;&#25321;&#25130;&#22270;&#65292;&#28857;&#20987;&#8220;&#35782;&#21035;&#8221;&#29983;&#25104;&#24405;&#20837;&#24314;&#35758;&#12290;
-        </Message>
-
-                <form v-else class="p-fluid" @submit.prevent="handleSaveOcrResult">
-            <Message v-if="uploadDedup?.kind === 'suspected_duplicate'" severity="warn" :closable="false">
-              检测到疑似重复支付记录（金额 + 时间接近）。如果确认需要保留，可点击保存后选择“仍然保存”。
+          <div class="upload-screenshot-right">
+            <Message v-if="!ocrResult" severity="info" :closable="false">
+              &#35831;&#36873;&#25321;&#25130;&#22270;&#65292;&#28857;&#20987;&#8220;&#35782;&#21035;&#8221;&#29983;&#25104;&#24405;&#20837;&#24314;&#35758;&#12290;
             </Message>
-	          <div class="grid">
+
+            <form v-else class="p-fluid" @submit.prevent="handleSaveOcrResult">
+              <Message v-if="uploadDedup?.kind === 'suspected_duplicate'" severity="warn" :closable="false">
+                检测到疑似重复支付记录（金额 + 时间接近）。如果确认需要保留，可点击保存后选择“仍然保存”。
+              </Message>
+              <div class="grid">
             <div class="col-12 md:col-6 field">
               <label for="ocr_amount">&#37329;&#39069;</label>
               <InputNumber
@@ -254,17 +265,7 @@
               <Textarea id="ocr_desc" v-model="ocrForm.description" autoResize rows="3" />
             </div>
           </div>
-        </form>
-
-        <div v-if="uploadedScreenshotPath" class="raw">
-          <div class="raw-title">支付截图</div>
-          <div class="screenshot-wrap">
-            <Image
-              class="screenshot"
-              :src="`${FILE_BASE_URL}/${uploadedScreenshotPath}`"
-              preview
-              :imageStyle="{ width: '100%', maxWidth: '100%', height: 'auto' }"
-            />
+            </form>
           </div>
         </div>
 
@@ -737,6 +738,36 @@ const uploadedScreenshotPath = ref<string | null>(null)
 const ocrTaskId = ref<string | null>(null)
 const screenshotInput = ref<HTMLInputElement | null>(null)
 const screenshotUploadAttempt = ref(0)
+const selectedScreenshotPreviewUrl = ref<string | null>(null)
+
+const screenshotPreviewSrc = computed(() => {
+  if (uploadedScreenshotPath.value) return `${FILE_BASE_URL}/${uploadedScreenshotPath.value}`
+  return selectedScreenshotPreviewUrl.value
+})
+
+watch(
+  selectedScreenshotFile,
+  (file) => {
+    if (typeof window === 'undefined') return
+    if (selectedScreenshotPreviewUrl.value) {
+      URL.revokeObjectURL(selectedScreenshotPreviewUrl.value)
+      selectedScreenshotPreviewUrl.value = null
+    }
+    if (file) {
+      selectedScreenshotPreviewUrl.value = URL.createObjectURL(file)
+    }
+  },
+  { immediate: true },
+)
+
+watch(uploadedScreenshotPath, (path) => {
+  if (!path) return
+  if (typeof window === 'undefined') return
+  if (selectedScreenshotPreviewUrl.value) {
+    URL.revokeObjectURL(selectedScreenshotPreviewUrl.value)
+    selectedScreenshotPreviewUrl.value = null
+  }
+})
 
 const PENDING_PAYMENT_DRAFT_KEY = 'sbm_pending_payment_upload_draft'
 
@@ -1787,6 +1818,10 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (typeof window !== 'undefined' && selectedScreenshotPreviewUrl.value) {
+    URL.revokeObjectURL(selectedScreenshotPreviewUrl.value)
+    selectedScreenshotPreviewUrl.value = null
+  }
   if (typeof window === 'undefined') return
   window.removeEventListener('resize', handlePaymentTimeViewportChange as any)
   window.removeEventListener('orientationchange', handlePaymentTimeViewportChange as any)
@@ -1968,9 +2003,31 @@ watch(
 }
 
 .upload-screenshot-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 38%) 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.upload-screenshot-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.upload-screenshot-left,
+.upload-screenshot-right {
+  min-width: 0;
+}
+
+.raw-screenshot .raw-title {
+  margin-top: 10px;
+}
+
+@media (max-width: 900px) {
+  .upload-screenshot-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sbm-dropzone {
