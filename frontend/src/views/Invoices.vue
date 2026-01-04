@@ -197,13 +197,7 @@
                     preview
                     :imageStyle="{ width: '100%', maxWidth: '100%', height: 'auto' }"
                   />
-                  <iframe
-                    v-else-if="isInvoicePdfFile(uploadedInvoice.file_path)"
-                    class="invoice-pdf"
-                    :src="invoicePreviewUrl(uploadedInvoice.file_path)"
-                    loading="lazy"
-                    title="Invoice PDF Preview"
-                  />
+                  <PdfPreview v-else-if="isInvoicePdfFile(uploadedInvoice.file_path)" :src="invoiceFileUrl(uploadedInvoice.file_path)" />
                   <Message v-else severity="secondary" :closable="false">该文件暂不支持预览，请点击“查看原文件”。</Message>
                 </template>
                 <Message v-else severity="secondary" :closable="false">暂无可预览的发票文件。</Message>
@@ -374,13 +368,7 @@
               preview
               :imageStyle="{ width: '100%', maxWidth: '100%', height: 'auto' }"
             />
-            <iframe
-              v-else-if="isInvoicePdfFile(previewInvoice.file_path)"
-              class="invoice-pdf"
-              :src="invoicePreviewUrl(previewInvoice.file_path)"
-              loading="lazy"
-              title="Invoice PDF Preview"
-            />
+            <PdfPreview v-else-if="isInvoicePdfFile(previewInvoice.file_path)" :src="invoiceFileUrl(previewInvoice.file_path)" />
             <Message v-else severity="secondary" :closable="false">该文件暂不支持预览，请点击“查看原文件”。</Message>
           </div>
         </div>
@@ -634,6 +622,7 @@ import Message from 'primevue/message'
 import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
+import PdfPreview from '@/components/PdfPreview.vue'
 import { invoiceApi, tasksApi, FILE_BASE_URL, regressionSamplesApi } from '@/api'
 import { useNotificationStore } from '@/stores/notifications'
 import { useAuthStore } from '@/stores/auth'
@@ -701,15 +690,6 @@ const invoiceFileUrl = (p?: string) => {
   const path = String(p || '').trim()
   if (!path) return ''
   return `${FILE_BASE_URL}/${path}`
-}
-const invoicePreviewUrl = (p?: string) => {
-  const url = invoiceFileUrl(p)
-  if (!url) return ''
-  if (!isInvoicePdfFile(p)) return url
-
-  // Best-effort: hide built-in PDF viewer chrome where supported.
-  const flags = 'toolbar=0&navpanes=0&scrollbar=0'
-  return url.includes('#') ? `${url}&${flags}` : `${url}#${flags}`
 }
 
 const toast = useToast()
