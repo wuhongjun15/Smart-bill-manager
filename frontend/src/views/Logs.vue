@@ -32,7 +32,7 @@
               <InputSwitch v-model="autoScroll" />
             </div>
             <Button :label="'\u6E05\u7A7A'" class="p-button-outlined" severity="secondary" @click="clearLogs" />
-            <Button :label="'\u91CD\u8FDE'" icon="pi pi-refresh" :loading="connecting" @click="reconnect" />
+            <Button :label="'\u91CD\u8FDE'" icon="pi pi-refresh" :loading="connecting" :disabled="connecting" @click="reconnect" />
           </div>
         </div>
       </template>
@@ -78,6 +78,7 @@ const autoScroll = ref(true)
 const logContainer = ref<HTMLDivElement | null>(null)
 
 let abortController: AbortController | null = null
+let streamAttempt = 0
 
 const sourceOptions = computed(() =>
   sources.value.map((s) => ({
@@ -124,9 +125,11 @@ const appendLog = (evt: LogEvent) => {
 }
 
 const stopStream = () => {
+  streamAttempt++
   abortController?.abort()
   abortController = null
   connected.value = false
+  connecting.value = false
 }
 
 const loadSources = async () => {
@@ -155,6 +158,7 @@ const loadTail = async () => {
 
 const startStream = async () => {
   stopStream()
+  const attempt = ++streamAttempt
 
   if (selectedSources.value.length === 0) {
     toast.add({ severity: 'warn', summary: '\u8BF7\u9009\u62E9\u81F3\u5C11\u4E00\u4E2A\u65E5\u5FD7\u6E90', life: 2500 })
@@ -167,16 +171,22 @@ const startStream = async () => {
     return
   }
 
+  const isCurrent = (ctrl?: AbortController | null) => attempt === streamAttempt && (!ctrl || abortController === ctrl)
+
   connecting.value = true
-  abortController = new AbortController()
+  const controller = new AbortController()
+  abortController = controller
 
   try {
     const url = `${API_BASE_URL}/logs/stream?sources=${encodeURIComponent(selectedSources.value.join(','))}`
+    // Avoid getting stuck in a perpetual "connecting" state when the network silently hangs.
+    const timeoutMs = 12000
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs)
     const res = await fetch(url, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
-      signal: abortController.signal,
-    })
+      signal: controller.signal,
+    }).finally(() => window.clearTimeout(timeout))
 
     if (!res.ok) {
       const text = await res.text()
@@ -186,13 +196,16 @@ const startStream = async () => {
       throw new Error('\u6D4F\u89C8\u5668\u4E0D\u652F\u6301\u6D41\u5F0F\u8BFB\u53D6')
     }
 
-    connected.value = true
-    connecting.value = false
+    if (isCurrent(controller)) {
+      connected.value = true
+      connecting.value = false
+    }
     const reader = res.body.getReader()
     const decoder = new TextDecoder('utf-8')
     let buffer = ''
 
     while (true) {
+      if (!isCurrent(controller)) break
       const { value, done } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
@@ -217,8 +230,11 @@ const startStream = async () => {
       toast.add({ severity: 'error', summary: `\u65E5\u5FD7\u8FDE\u63A5\u5931\u8D25\uFF1A${msg}`, life: 3500 })
     }
   } finally {
-    connecting.value = false
-    connected.value = false
+    if (isCurrent(controller)) {
+      connecting.value = false
+      connected.value = false
+      abortController = null
+    }
   }
 }
 
