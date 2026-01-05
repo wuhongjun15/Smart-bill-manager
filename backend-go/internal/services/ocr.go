@@ -921,9 +921,10 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 			needROI = true
 		case "auto":
 			buyer, seller := s.extractBuyerAndSellerByPosition(text)
-			needROI = buyer == nil || seller == nil ||
-				(buyer != nil && isBadPartyNameCandidate(*buyer)) ||
-				(seller != nil && isBadPartyNameCandidate(*seller))
+			needROI = buyer == nil || seller == nil
+			if !needROI {
+				needROI = isBadPartyNameCandidate(*buyer) || isBadPartyNameCandidate(*seller)
+			}
 		}
 		if needROI {
 			partyInjected, _, _ := s.injectInvoicePartiesFromRegions(tempDir, imgPath)
