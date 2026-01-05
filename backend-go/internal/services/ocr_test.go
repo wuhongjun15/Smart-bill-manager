@@ -461,6 +461,62 @@ func TestParseInvoiceData_PyMuPDFZoned_SellerAndItemUnitQty(t *testing.T) {
 	}
 }
 
+func TestParseInvoiceData_PyMuPDFZoned_MergedBuyerSellerAndPackedItemRow(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `【第1页-分区】
+【发票信息】
+发票号码： 25312000000341067672
+开票日期： 2025年10月24日
+电子发票（普通发票）
+【购买方】
+购买方信息统一社会信用代码/纳税人识别号： 名称： 个人销售方信息名称：
+项目名称规格型号单位数量
+【密码区】
+统一社会信用代码/纳税人识别号： 单价上海市虹口区鹏侠百货商店1683.17金额92310109MA1KMFLM1K 税率/征收率1% 税额16.83下载次数：1
+【明细】
+*酒*白酒汾酒30 53°*500ml 瓶2 841.584158415842
+价税合计（大写） 合计壹仟柒佰圆整 ￥ 1683.17 （小写） ￥ 1700.00 ￥ 16.83
+【备注/其他】
+开票人： 江祜璆`
+
+	data, err := service.ParseInvoiceData(sampleText)
+	if err != nil {
+		t.Fatalf("ParseInvoiceData returned error: %v", err)
+	}
+
+	if data.BuyerName == nil || *data.BuyerName != "个人" {
+		t.Fatalf("Expected buyer %q, got %+v (source=%q conf=%v)", "个人", data.BuyerName, data.BuyerNameSource, data.BuyerNameConfidence)
+	}
+	if data.SellerName == nil {
+		t.Fatalf("Expected seller %q, got nil", "上海市虹口区鹏侠百货商店")
+	}
+	if *data.SellerName != "上海市虹口区鹏侠百货商店" {
+		t.Fatalf("Expected seller %q, got %q (source=%q conf=%v)", "上海市虹口区鹏侠百货商店", *data.SellerName, data.SellerNameSource, data.SellerNameConfidence)
+	}
+
+	if len(data.Items) != 1 {
+		t.Fatalf("Expected 1 item, got %d: %+v", len(data.Items), data.Items)
+	}
+	it := data.Items[0]
+	if !strings.Contains(it.Name, "白酒") || !strings.Contains(it.Name, "汾酒") {
+		t.Fatalf("Unexpected item name: %+v", it)
+	}
+	if it.Spec != "53°×500ml" {
+		t.Fatalf("Expected spec %q, got %q", "53°×500ml", it.Spec)
+	}
+	if it.Unit != "瓶" {
+		t.Fatalf("Expected unit %q, got %q", "瓶", it.Unit)
+	}
+	if it.Quantity == nil || *it.Quantity != 2 {
+		t.Fatalf("Expected quantity 2, got %+v", it.Quantity)
+	}
+
+	if data.PrettyText == "" || !strings.Contains(data.PrettyText, "【购买方】") || !strings.Contains(data.PrettyText, "【明细】") {
+		t.Fatalf("Expected PrettyText to preserve zoned section headers, got: %q", data.PrettyText)
+	}
+}
+
 func TestParseInvoiceData_ItemsExtraction_PDFTextStopsBeforePartyInfo(t *testing.T) {
 	service := NewOCRService()
 

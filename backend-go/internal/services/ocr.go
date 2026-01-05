@@ -4101,6 +4101,13 @@ func cleanupName(name string) string {
 	if m := regexp.MustCompile(`^([\p{Han}]{2,20})\s*\d{11}\b`).FindStringSubmatch(name); len(m) > 1 {
 		name = strings.TrimSpace(m[1])
 	}
+	// Masked phone patterns like "135******11" sometimes appear in redacted regression samples.
+	if m := regexp.MustCompile(`^([\p{Han}]{2,20})\s*\d{3}\*+\d{2,8}\b`).FindStringSubmatch(name); len(m) > 1 {
+		name = strings.TrimSpace(m[1])
+	}
+	if m := regexp.MustCompile(`^([\p{Han}]{2,20})\d{3}\*+\d{2,8}\b`).FindStringSubmatch(name); len(m) > 1 {
+		name = strings.TrimSpace(m[1])
+	}
 
 	// Remove trailing single characters that are likely markers
 	trailingPatterns := []string{"销", "售", "购", "买", "方", "信", "息", "密", "码", "区"}
@@ -4113,6 +4120,108 @@ func cleanupName(name string) string {
 	name = strings.TrimRight(name, " \t\n\r")
 
 	return name
+}
+
+func isGarbagePartyName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return true
+	}
+	// Common merged-label artifacts in PDF text extraction.
+	if strings.Contains(name, "销售方信息") || strings.Contains(name, "购买方信息") {
+		return true
+	}
+	if strings.Contains(name, "信息名称") || strings.Contains(name, "名称：") || strings.Contains(name, "名称:") {
+		return true
+	}
+	// Mojibake/replacement characters.
+	if strings.ContainsRune(name, '\uFFFD') {
+		return true
+	}
+	return false
+}
+
+func ptrToString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return strings.TrimSpace(*p)
+}
+
+func cleanPartyNameFromInlineValue(val string) string {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return ""
+	}
+	// Strip replacement characters that sometimes appear in PDF->text.
+	val = strings.ReplaceAll(val, "\uFFFD", "")
+	val = strings.TrimSpace(val)
+
+	// Cut at common labels that may be merged into the same line.
+	cutMarkers := []string{
+		"销售方信息", "销售方", "购买方信息", "购买方",
+		"统一社会信用代码", "纳税人识别号",
+		"地址", "电话", "开户地址", "开户行", "开户行及账号", "账号",
+		"项目名称", "规格型号", "单位", "数量", "单价", "金额", "税率", "税额",
+		"下载次数",
+	}
+	for _, m := range cutMarkers {
+		if idx := strings.Index(val, m); idx > 0 {
+			val = strings.TrimSpace(val[:idx])
+		}
+	}
+	val = cleanupName(val)
+	if val == "" {
+		return ""
+	}
+	if isBadPartyNameCandidate(val) {
+		return ""
+	}
+	return val
+}
+
+func extractCompanyNameNearTaxID(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+
+	// We intentionally do not use word boundaries here because PDF text may glue tokens together.
+	taxLoose := regexp.MustCompile(taxIDPattern)
+	companyLike := regexp.MustCompile(`([\p{Han}（）()·]{2,80}(?:有限责任公司|有限公司|公司|集团|银行|商店|企业|中心|厂|店|行|社|院|局)[\p{Han}（）()·]{0,30})`)
+
+	best := ""
+	bestLen := 0
+	for _, loc := range taxLoose.FindAllStringIndex(text, -1) {
+		if len(loc) < 2 {
+			continue
+		}
+		// Look back a bit; seller name is usually close to the tax-id.
+		start := loc[0] - 220
+		if start < 0 {
+			start = 0
+		}
+		window := text[start:loc[0]]
+
+		matches := companyLike.FindAllStringSubmatch(window, -1)
+		if len(matches) == 0 {
+			continue
+		}
+		// Prefer the last occurrence within the window (closest to the tax-id).
+		cand := cleanupName(strings.TrimSpace(matches[len(matches)-1][1]))
+		// Strip common table/header prefixes that may be adjacent in PDF text.
+		cand = regexp.MustCompile(`^(?:单价|金额|税率/征收率|税率|税额|下载次数)+`).ReplaceAllString(cand, "")
+		cand = strings.TrimSpace(cand)
+		if cand == "" || cand == "个人" || isBadPartyNameCandidate(cand) {
+			continue
+		}
+		l := len([]rune(cand))
+		if l > bestLen {
+			best = cand
+			bestLen = l
+		}
+	}
+	return best
 }
 
 func extractNameFromTaxIDLabelLine(line string) string {
@@ -4143,6 +4252,20 @@ func extractNameFromTaxIDLabelLine(line string) string {
 	// Or cut at a phone number.
 	if m := regexp.MustCompile(`^([\p{Han}]{2,20})\s*\d{11}\b`).FindStringSubmatch(val); len(m) > 1 {
 		val = strings.TrimSpace(m[1])
+	}
+	// Or cut at masked phones like "135******11".
+	if m := regexp.MustCompile(`^([\p{Han}]{2,20})\s*\d{3}\*+\d{2,8}\b`).FindStringSubmatch(val); len(m) > 1 {
+		val = strings.TrimSpace(m[1])
+	}
+	if m := regexp.MustCompile(`^([\p{Han}]{2,20})\d{3}\*+\d{2,8}\b`).FindStringSubmatch(val); len(m) > 1 {
+		val = strings.TrimSpace(m[1])
+	}
+	// Cut at merged table header fragments if present.
+	if idx := strings.Index(val, "数量"); idx > 0 {
+		val = strings.TrimSpace(val[:idx])
+	}
+	if idx := strings.Index(val, "单价"); idx > 0 {
+		val = strings.TrimSpace(val[:idx])
 	}
 	// If still contains long digit runs (accounts/phones), cut before them.
 	if loc := regexp.MustCompile(`\d{6,}`).FindStringIndex(val); loc != nil && loc[0] > 0 {
@@ -4724,7 +4847,7 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	// - 410g×3
 	// - 750ml×6
 	// - 53°×6
-	specTokenRe := regexp.MustCompile(`(?i)^(?:\d+\s*[x×]\s*\d+(?:\.\d+)?\s*(?:g|kg|ml|l)?|\d+(?:\.\d+)?\s*(?:g|kg|ml|l)?\s*[x×]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?[a-z]{1,4}\s*[x×]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*°\s*[x×]\s*\d+)$`)
+	specTokenRe := regexp.MustCompile(`(?i)^(?:\d+\s*[x×]\s*\d+(?:\.\d+)?\s*(?:g|kg|ml|l)?|\d+(?:\.\d+)?\s*(?:g|kg|ml|l)?\s*[x×]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?[a-z]{1,4}\s*[x×]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*°\s*[x×]\s*\d+(?:\.\d+)?\s*(?:kg|ml|mm|cm|m|g|l)?)$`)
 	labelLineRe := regexp.MustCompile(`^(?:名称|名\s*称|纳税人识别号|地址|地址、电话|地址,电话|电话|开户行|开户行及账号|账号)[:：]?$`)
 	// Some OCR results merge labels and values on the same line (e.g. "名称：沃尔玛…").
 	labelPrefixRe := regexp.MustCompile(`^(?:名称|名\s*称|纳税人识别号|统一社会信用代码/纳税人识别号|地址|地址、电话|地址,电话|电话|开户行|开户行及账号|开户行|账号)\s*[:：]\s*\S+`)
@@ -4814,8 +4937,80 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	// Some PDF text extractions merge unit+qty into the same token as the item name,
 	// e.g. "*电信服务*话费充值元1" or "... 元 1". Peel them off early so we don't lose them.
 	unitQtySuffixRe := regexp.MustCompile(`^(.*?)(元|件|个|箱|袋|包|瓶|罐|盒|组|台|次|张|套|份|支|双|只|米|公斤|千克|克)\s*(\d+(?:\.\d+)?)$`)
+	unitQtyInlineRe := regexp.MustCompile(`(元|件|个|箱|袋|包|瓶|罐|盒|组|台|次|张|套|份|支|双|只|米|公斤|千克|克)\s*(\d+(?:\.\d+)?)`)
+	specInlineRe := regexp.MustCompile(`\d+(?:\.\d+)?\s*°\s*(?:[×x\*])\s*\d+(?:\.\d+)?\s*(?:kg|ml|mm|cm|m|g|l)?`)
 
 	var parseQuantityWithUnit func(s, unit string) *float64
+
+	parsePackedRow := func(line string) (name, spec, unit string, qty *float64, ok bool) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			return "", "", "", nil, false
+		}
+
+		// Keep category prefix like "*酒*" if present so normalizeName can format it.
+		cat := ""
+		rest := line
+		if loc := categoryPrefixRe.FindStringSubmatchIndex(line); len(loc) >= 2 {
+			// Group 1: category text.
+			if len(loc) >= 4 && loc[2] >= 0 && loc[3] > loc[2] {
+				cat = strings.TrimSpace(line[loc[2]:loc[3]])
+			}
+			rest = strings.TrimSpace(line[loc[1]:])
+		}
+
+		// Drop trailing long-decimal prices (common in PDF text) so they don't pollute the name.
+		fields := strings.Fields(rest)
+		if len(fields) > 0 {
+			last := fields[len(fields)-1]
+			if decimalLikeRe.MatchString(last) {
+				if parts := strings.SplitN(last, ".", 2); len(parts) == 2 && len(parts[1]) > 3 {
+					fields = fields[:len(fields)-1]
+				}
+			}
+			if len(fields) > 0 && moneyLikeRe.MatchString(fields[len(fields)-1]) {
+				fields = fields[:len(fields)-1]
+			}
+		}
+		rest = strings.TrimSpace(strings.Join(fields, " "))
+
+		// Extract inline spec like "53°*500ml" and normalize separator to "×".
+		if loc := specInlineRe.FindStringIndex(rest); loc != nil && loc[0] >= 0 && loc[1] > loc[0] {
+			rawSpec := rest[loc[0]:loc[1]]
+			spec = strings.NewReplacer("*", "×", "x", "×", "X", "×").Replace(rawSpec)
+			rest = strings.TrimSpace(rest[:loc[0]] + " " + rest[loc[1]:])
+		}
+
+		// Extract inline unit+quantity like "瓶2" or "瓶 2".
+		if ms := unitQtyInlineRe.FindAllStringSubmatchIndex(rest, -1); len(ms) > 0 {
+			m := ms[len(ms)-1]
+			if len(m) >= 6 {
+				unit = strings.TrimSpace(rest[m[2]:m[3]])
+				q := parseQuantityWithUnit(rest[m[4]:m[5]], unit)
+				if q != nil {
+					qty = q
+					rest = strings.TrimSpace(rest[:m[0]] + " " + rest[m[1]:])
+				}
+			}
+		}
+
+		rest = strings.TrimSpace(rest)
+		if rest == "" {
+			return "", "", "", nil, false
+		}
+		// Only treat as "packed row" if we managed to extract at least one structured field.
+		if spec == "" && (unit == "" || qty == nil) {
+			return "", "", "", nil, false
+		}
+
+		if cat != "" {
+			name = "*" + cat + "*" + rest
+		} else {
+			name = rest
+		}
+		return name, spec, unit, qty, true
+	}
+
 	parseQuantityWithUnit = func(s, unit string) *float64 {
 		s = strings.TrimSpace(s)
 		if s == "" {
@@ -5121,6 +5316,15 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 			if currentName != "" {
 				flush()
 			}
+			// Packed single-line rows (common in PDF text): name/spec/unit/qty may be in one line.
+			if n, sp, un, q, ok := parsePackedRow(s); ok {
+				currentName = n
+				currentSpec = sp
+				currentUnit = un
+				currentQty = q
+				currentSawMoney = false
+				continue
+			}
 			// If unit+qty is attached to the name, split them here.
 			if m := unitQtySuffixRe.FindStringSubmatch(s); len(m) > 3 {
 				namePart := strings.TrimSpace(m[1])
@@ -5222,10 +5426,23 @@ func (s *OCRService) extractBuyerAndSellerByPosition(text string) (buyer, seller
 	// Find "销" marker (销售方)
 	sellerPatterns := []string{"销售方", "销方"}
 	for _, pattern := range sellerPatterns {
-		if idx := strings.Index(text, pattern); idx != -1 {
+		searchFrom := 0
+		for {
+			idx := strings.Index(text[searchFrom:], pattern)
+			if idx == -1 {
+				break
+			}
+			idx += searchFrom
+			after := idx + len(pattern)
+			// Ignore merged-label fragments like "销售方信息" that appear inside buyer lines.
+			if after < len(text) && strings.HasPrefix(text[after:], "信息") {
+				searchFrom = after
+				continue
+			}
 			if sellerMarkerIndex == -1 || idx < sellerMarkerIndex {
 				sellerMarkerIndex = idx
 			}
+			break
 		}
 	}
 	if sellerMarkerIndex == -1 {
@@ -5626,7 +5843,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		}
 		for _, re := range buyerRegexes {
 			if match := re.FindStringSubmatch(parsedText); len(match) > 1 {
-				val := cleanupName(strings.TrimSpace(match[1]))
+				val := cleanPartyNameFromInlineValue(match[1])
 				if val != "" && val != "信息" && val != "名称" && !isBadPartyNameCandidate(val) {
 					setStringWithSourceAndConfidence(&data.BuyerName, &data.BuyerNameSource, &data.BuyerNameConfidence, val, "buyer_label", 0.8)
 					break
@@ -5657,7 +5874,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		}
 		for _, re := range sellerRegexes {
 			if match := re.FindStringSubmatch(parsedText); len(match) > 1 {
-				val := cleanupName(strings.TrimSpace(match[1]))
+				val := cleanPartyNameFromInlineValue(match[1])
 				if val != "" && val != "信息" && val != "名称" && val != "个人" && !isBadPartyNameCandidate(val) {
 					setStringWithSourceAndConfidence(&data.SellerName, &data.SellerNameSource, &data.SellerNameConfidence, val, "seller_label", 0.8)
 					break
@@ -5685,10 +5902,49 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		if data.SellerName == nil {
 			companyBeforeTaxID := regexp.MustCompile(fmt.Sprintf(`([^\n\r]*(?:公司|商店|企业|中心|厂|店|行|社|院|局)[^\n\r]*)[\s\n\r]+(%s)`, taxIDPattern))
 			if match := companyBeforeTaxID.FindStringSubmatch(parsedText); len(match) > 2 {
-				val := cleanupName(strings.TrimSpace(match[1]))
+				val := cleanPartyNameFromInlineValue(match[1])
 				if val != "" && val != "个人" && len(val) > 3 && !isBadPartyNameCandidate(val) {
 					setStringWithSourceAndConfidence(&data.SellerName, &data.SellerNameSource, &data.SellerNameConfidence, val, "seller_company_before_taxid", 0.6)
 				}
+			}
+		}
+	}
+
+	// Recover buyer/seller names from merged-label PDF text (e.g. "名称：个人 销售方信息 名称：").
+	// This happens with PyMuPDF text extraction where buyer/seller blocks are on the same line.
+	{
+		// Buyer: find the first "名称：" inside the buyer block and cut before any merged labels.
+		needBuyerFix := data.BuyerName == nil || isGarbagePartyName(ptrToString(data.BuyerName)) || isBadPartyNameCandidate(ptrToString(data.BuyerName))
+		if needBuyerFix {
+			buyerText := parsedText
+			if loc := regexp.MustCompile(`(?m)^购买方\s*$`).FindStringIndex(parsedText); loc != nil {
+				buyerText = parsedText[loc[0]:]
+			}
+			// Stop at later sections if present.
+			for _, stop := range []string{"密码区", "明细", "销售方"} {
+				if idx := strings.Index(buyerText, stop); idx > 0 {
+					buyerText = buyerText[:idx]
+				}
+			}
+			if m := regexp.MustCompile(`名称\s*[:：]\s*([^\n\r]{1,80})`).FindStringSubmatch(buyerText); len(m) > 1 {
+				val := cleanPartyNameFromInlineValue(m[1])
+				if val != "" && val != "个人销售方信息名称" && !isBadPartyNameCandidate(val) {
+					v := val
+					data.BuyerName = &v
+					data.BuyerNameSource = "buyer_name_inline_block"
+					data.BuyerNameConfidence = 0.85
+				}
+			}
+		}
+
+		// Seller: try to recover company name near tax-id (even if there are numbers/amounts between them).
+		needSellerFix := data.SellerName == nil || isGarbagePartyName(ptrToString(data.SellerName)) || isBadPartyNameCandidate(ptrToString(data.SellerName)) || ptrToString(data.SellerName) == ptrToString(data.BuyerName)
+		if needSellerFix {
+			if cand := extractCompanyNameNearTaxID(parsedText); cand != "" && cand != "个人" && !isBadPartyNameCandidate(cand) {
+				v := cand
+				data.SellerName = &v
+				data.SellerNameSource = "seller_company_taxid_context"
+				data.SellerNameConfidence = 0.9
 			}
 		}
 	}
@@ -5734,8 +5990,9 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 				old := strings.TrimSpace(*data.SellerName)
 				oldLen := len([]rune(old))
 				newLen := len([]rune(best))
-				// Override short/low-confidence positional picks when we find a longer company name tied to a tax ID.
+				// Override short/low-confidence positional picks or garbage merged-label picks when we find a company name tied to a tax ID.
 				if (data.SellerNameSource == "position" && data.SellerNameConfidence <= 0.75 && newLen > oldLen+1) ||
+					isGarbagePartyName(old) ||
 					(newLen > oldLen+4) {
 					shouldOverride = true
 				}
