@@ -4177,6 +4177,7 @@ func cleanPartyNameFromInlineValue(val string) string {
 	cutMarkers := []string{
 		"销售方信息", "销售方", "购买方信息", "购买方",
 		"统一社会信用代码", "纳税人识别号",
+		"货物或应税劳务", "服务名称",
 		"地址", "电话", "开户地址", "开户行", "开户行及账号", "账号",
 		"项目名称", "规格型号", "单位", "数量", "单价", "金额", "税率", "税额",
 		"下载次数",
@@ -4489,6 +4490,10 @@ func normalizeInvoiceTextForParsing(text string) string {
 	text = regexp.MustCompile(`(?m)^【第\d+页-分区】\s*$`).ReplaceAllString(text, "")
 	text = regexp.MustCompile(`(?m)^【购买方】\s*$`).ReplaceAllString(text, "购买方")
 	text = regexp.MustCompile(`(?m)^【销售方】\s*$`).ReplaceAllString(text, "销售方")
+	// Keep a few important section markers as plain tokens for parsing.
+	text = regexp.MustCompile(`(?m)^【密码区】\s*$`).ReplaceAllString(text, "密码区")
+	text = regexp.MustCompile(`(?m)^【明细】\s*$`).ReplaceAllString(text, "明细")
+	text = regexp.MustCompile(`(?m)^【备注/其他】\s*$`).ReplaceAllString(text, "备注")
 	text = regexp.MustCompile(`(?m)^【[^】]{1,20}】\s*$`).ReplaceAllString(text, "")
 
 	// Normalize "vertical" or whitespace-separated section markers often found in PDF text extraction.
@@ -4906,6 +4911,10 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		if s == "" || isHeaderLine(s) || isStopLine(s) {
 			return false
 		}
+		// Password area is never a line item; it often contains dense symbols like "<>".
+		if strings.Contains(s, "密码区") || strings.ContainsAny(s, "<>") {
+			return false
+		}
 		if labelLineRe.MatchString(s) || labelPrefixRe.MatchString(s) {
 			return false
 		}
@@ -5229,6 +5238,18 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		return nil
 	}
 
+	// If the OCR output has an explicit "明细" section marker, prefer it over header heuristics.
+	// This avoids treating "密码区" rows (which contain lots of "*" and numbers) as line items.
+	forcedStart := -1
+	for i, s := range block {
+		if strings.TrimSpace(s) == "明细" {
+			if i+1 < len(block) {
+				forcedStart = i + 1
+			}
+			break
+		}
+	}
+
 	rowScore := func(s string) int {
 		s = strings.TrimSpace(s)
 		if s == "" {
@@ -5301,45 +5322,49 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	// and the first real line item. Anchor on the first tax-rate row, then backtrack to
 	// the nearest likely name row to avoid treating invoice meta (e.g. "增值税电子普通发票")
 	// as a line item.
-	firstTaxRate := -1
-	for i, s := range block {
-		if taxRateRe.MatchString(strings.TrimSpace(s)) {
-			firstTaxRate = i
-			break
-		}
-	}
-	if firstTaxRate >= 0 {
-		start := firstTaxRate
-		low := firstTaxRate - 18
-		if low < 0 {
-			low = 0
-		}
-		starStart := -1
-		nameStart := -1
-		for j := firstTaxRate; j >= low; j-- {
-			cand := strings.TrimSpace(block[j])
-			if cand == "" || isHeaderLine(cand) || isStopLine(cand) {
-				continue
-			}
-			// Prefer category-prefixed rows as they are the most stable OCR signal.
-			if strings.HasPrefix(cand, "*") {
-				starStart = j
+	if forcedStart >= 0 {
+		startIdx = forcedStart
+	} else {
+		firstTaxRate := -1
+		for i, s := range block {
+			if taxRateRe.MatchString(strings.TrimSpace(s)) {
+				firstTaxRate = i
 				break
 			}
-			if nameStart == -1 && isLikelyItemNameLine(cand) {
-				nameStart = j
+		}
+		if firstTaxRate >= 0 {
+			start := firstTaxRate
+			low := firstTaxRate - 18
+			if low < 0 {
+				low = 0
 			}
-		}
-		if starStart >= 0 {
-			start = starStart
-		} else if nameStart >= 0 {
-			start = nameStart
-		}
-		// Override window-based start when we managed to anchor to a likely name line.
-		if start >= 0 && start < len(block) {
-			cand := strings.TrimSpace(block[start])
-			if strings.HasPrefix(cand, "*") || isLikelyItemNameLine(cand) {
-				startIdx = start
+			starStart := -1
+			nameStart := -1
+			for j := firstTaxRate; j >= low; j-- {
+				cand := strings.TrimSpace(block[j])
+				if cand == "" || isHeaderLine(cand) || isStopLine(cand) {
+					continue
+				}
+				// Prefer category-prefixed rows as they are the most stable OCR signal.
+				if strings.HasPrefix(cand, "*") {
+					starStart = j
+					break
+				}
+				if nameStart == -1 && isLikelyItemNameLine(cand) {
+					nameStart = j
+				}
+			}
+			if starStart >= 0 {
+				start = starStart
+			} else if nameStart >= 0 {
+				start = nameStart
+			}
+			// Override window-based start when we managed to anchor to a likely name line.
+			if start >= 0 && start < len(block) {
+				cand := strings.TrimSpace(block[start])
+				if strings.HasPrefix(cand, "*") || isLikelyItemNameLine(cand) {
+					startIdx = start
+				}
 			}
 		}
 	}
@@ -5504,6 +5529,34 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 				currentQty = q
 				currentSawMoney = false
 				continue
+			}
+			// Category-prefixed rows sometimes end with a bare quantity without a unit
+			// (e.g. "*日用杂品*包装费配送费1"). Only apply when the name part contains no other digits.
+			if strings.HasPrefix(s, "*") {
+				trimmed := strings.TrimSpace(s)
+				cat := ""
+				rest := trimmed
+				if loc := categoryPrefixRe.FindStringSubmatchIndex(trimmed); len(loc) >= 2 {
+					if len(loc) >= 4 && loc[2] >= 0 && loc[3] > loc[2] {
+						cat = strings.TrimSpace(trimmed[loc[2]:loc[3]])
+					}
+					rest = strings.TrimSpace(trimmed[loc[1]:])
+				}
+				// Only accept single-digit suffix quantities to avoid corrupting product names like "青花30".
+				if m := regexp.MustCompile(`^([^\d]{2,200})(\d)$`).FindStringSubmatch(rest); len(m) > 2 {
+					if q := parseAmount(m[2]); q != nil {
+						namePart := strings.TrimSpace(m[1])
+						if cat != "" {
+							namePart = "*" + cat + "*" + namePart
+						}
+						currentName = namePart
+						currentSpec = ""
+						currentUnit = ""
+						currentQty = q
+						currentSawMoney = false
+						continue
+					}
+				}
 			}
 			// If unit+qty is attached to the name, split them here.
 			if m := unitQtySuffixRe.FindStringSubmatch(s); len(m) > 3 {
@@ -6290,9 +6343,18 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		if m := regexp.MustCompile(`名称\s*[:：]\s*([^\n\r]{1,80})`).FindStringSubmatch(buyerText); len(m) > 1 {
 			val = cleanPartyNameFromInlineValue(m[1])
 		}
-		if val == "" || isGarbagePartyName(val) || isBadPartyNameCandidate(val) {
+		if val == "" || len([]rune(val)) <= 1 || isGarbagePartyName(val) || isBadPartyNameCandidate(val) {
 			if mm := regexp.MustCompile(`电话\s*[:：]\s*([^\s\n\r]{1,20})`).FindStringSubmatch(buyerText); len(mm) > 1 {
 				val = cleanPartyNameFromInlineValue(mm[1])
+			}
+		}
+		// Some buyer blocks are columnar: "名称:" is empty, and the actual name may appear after "开户行及账号:".
+		if val == "" || len([]rune(val)) <= 1 || isGarbagePartyName(val) || isBadPartyNameCandidate(val) {
+			if ms := regexp.MustCompile(`(?m)开户行及账号\s*[:：]\s*([^\n\r]{1,60})`).FindAllStringSubmatch(buyerText, -1); len(ms) > 0 {
+				cand := cleanPartyNameFromInlineValue(ms[len(ms)-1][1])
+				if cand != "" && len([]rune(cand)) > 1 && !isBadPartyNameCandidate(cand) {
+					val = cand
+				}
 			}
 		}
 		if val == "" || isGarbagePartyName(val) || isBadPartyNameCandidate(val) {

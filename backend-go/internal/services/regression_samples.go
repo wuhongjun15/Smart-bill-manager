@@ -476,6 +476,7 @@ func (s *RegressionSampleService) CreateOrUpdateFromPayment(paymentID string, cr
 func (s *RegressionSampleService) CreateOrUpdateFromInvoice(invoiceID string, createdBy string, name string, force bool) (*models.RegressionSample, []SampleQualityIssue, error) {
 	invoiceID = strings.TrimSpace(invoiceID)
 	createdBy = strings.TrimSpace(createdBy)
+	nameProvided := strings.TrimSpace(name) != ""
 	name = normalizeSampleName(name)
 	if invoiceID == "" || createdBy == "" {
 		return nil, nil, fmt.Errorf("missing fields")
@@ -543,6 +544,41 @@ func (s *RegressionSampleService) CreateOrUpdateFromInvoice(invoiceID string, cr
 		RawText:      raw,
 		RawHash:      sha256Hex(raw),
 		ExpectedJSON: string(expB),
+	}
+
+	// Prefer upserting by (kind, raw_hash) so already-synced "云端" samples (origin=repo)
+	// can be updated from the UI without needing the original source_id/path.
+	{
+		var byHash models.RegressionSample
+		hashRes := db.Where("kind = ? AND raw_hash = ?", sample.Kind, sample.RawHash).Limit(1).Find(&byHash)
+		if hashRes.Error != nil {
+			return nil, nil, hashRes.Error
+		}
+		if hashRes.RowsAffected > 0 {
+			updateName := sample.Name
+			if !nameProvided && strings.TrimSpace(byHash.Name) != "" {
+				updateName = byHash.Name
+			}
+			update := map[string]any{
+				"name":          updateName,
+				"raw_text":      sample.RawText,
+				"raw_hash":      sample.RawHash,
+				"expected_json": sample.ExpectedJSON,
+				"created_by":    sample.CreatedBy,
+				"updated_at":    time.Now(),
+			}
+			if err := db.Model(&models.RegressionSample{}).Where("id = ?", byHash.ID).Updates(update).Error; err != nil {
+				return nil, nil, err
+			}
+			out := byHash
+			out.Name = updateName
+			out.RawText = sample.RawText
+			out.RawHash = sample.RawHash
+			out.ExpectedJSON = sample.ExpectedJSON
+			out.CreatedBy = sample.CreatedBy
+			out.UpdatedAt = time.Now()
+			return &out, issues, nil
+		}
 	}
 
 	var existing models.RegressionSample
