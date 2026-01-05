@@ -1565,6 +1565,75 @@ func TestParseInvoiceData_JDModelCodeMergedIntoName_PyMuPDFZoned(t *testing.T) {
 	}
 }
 
+func TestParseInvoiceData_JDItemNamePrefixLeakedIntoBuyer_PyMuPDFZoned(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `【第1页-分区】
+【发票信息】
+开票日期: 发票号码: 25327000001739485410 2025年12月29日
+电子发票(普通发票)
+【购买方】
+*制冷空调设备*格力空调云锦Ⅲ 1.5匹新一级能效变频纯铜管购买方信息名统一社会信用代码称项目名称 : 乌洪军 / 纳税人识别号规格型号 : 单位数量销售方信息名称 :
+【密码区】
+昆山京东尚信贸易有限公司
+统一社会信用代码 / 纳税人识别号 : 913205830880018839
+2919.47单价5838.94金  额   税率/征收率13% 759.06税  额
+【明细】
+省电舒适风搭载冷酷外机挂机国家补贴 KFR-35GW/NhAe1BAj KFR-35GW/NhAe1BAj 套2
+合计 ￥5838.94 ￥759.06
+价税合计(大写) 陆仟伍佰玖拾捌圆整 (小写) ￥6598.00
+【销售方】
+备订单号:3359217008438740
+注
+开票人: 王梅`
+
+	data, err := service.ParseInvoiceData(sampleText)
+	if err != nil {
+		t.Fatalf("ParseInvoiceData returned error: %v", err)
+	}
+	if data.InvoiceNumber == nil || *data.InvoiceNumber != "25327000001739485410" {
+		t.Fatalf("Expected InvoiceNumber '25327000001739485410', got %+v (src=%q)", data.InvoiceNumber, data.InvoiceNumberSource)
+	}
+	gotDate := "<nil>"
+	if data.InvoiceDate != nil {
+		gotDate = *data.InvoiceDate
+	}
+	normalizedDate := gotDate
+	if gotDate != "<nil>" {
+		if d, err := normalizeAnyInvoiceDate(gotDate); err == nil {
+			normalizedDate = d
+		}
+	}
+	if normalizedDate != "2025-12-29" {
+		t.Fatalf("Expected InvoiceDate normalized to '2025-12-29', got %q (raw=%q src=%q)", normalizedDate, gotDate, data.InvoiceDateSource)
+	}
+	if data.BuyerName == nil || *data.BuyerName != "乌洪军" {
+		t.Fatalf("Expected BuyerName '乌洪军', got %+v (src=%q)", data.BuyerName, data.BuyerNameSource)
+	}
+	if data.SellerName == nil || *data.SellerName != "昆山京东尚信贸易有限公司" {
+		t.Fatalf("Expected SellerName '昆山京东尚信贸易有限公司', got %+v (src=%q)", data.SellerName, data.SellerNameSource)
+	}
+	if data.Amount == nil || *data.Amount != 6598.00 {
+		t.Fatalf("Expected Amount 6598.00, got %+v (src=%q)", data.Amount, data.AmountSource)
+	}
+	if data.TaxAmount == nil || *data.TaxAmount != 759.06 {
+		t.Fatalf("Expected TaxAmount 759.06, got %+v (src=%q)", data.TaxAmount, data.TaxAmountSource)
+	}
+
+	if len(data.Items) != 1 {
+		t.Fatalf("Expected 1 item, got %d: %+v", len(data.Items), data.Items)
+	}
+	if data.Items[0].Spec != "KFR-35GW/NhAe1BAj" || data.Items[0].Unit != "套" || data.Items[0].Quantity == nil || *data.Items[0].Quantity != 2 {
+		t.Fatalf("Unexpected item parsed: %+v", data.Items[0])
+	}
+	if !strings.Contains(data.Items[0].Name, "格力空调云锦Ⅲ") || !strings.Contains(data.Items[0].Name, "省电舒适风") {
+		t.Fatalf("Expected item name to include leaked prefix + tail, got %+v", data.Items[0])
+	}
+	if strings.Contains(data.Items[0].Name, "购买方信息") {
+		t.Fatalf("Expected buyer header fragments removed from item name, got %+v", data.Items[0])
+	}
+}
+
 func TestParseInvoiceData_SpaceSeparatedDate(t *testing.T) {
 	service := NewOCRService()
 

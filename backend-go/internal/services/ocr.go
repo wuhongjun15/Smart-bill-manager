@@ -5364,6 +5364,98 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		}
 	}
 
+	// Some PyMuPDF zoned extractions leak the left-most "项目名称" column into the buyer block
+	// (before "【明细】"), while the actual "【明细】" row only contains the tail part + model code.
+	// Capture the last category-prefixed product prefix above "明细" so we can merge it into the
+	// first line item name later.
+	pendingFirstItemPrefix := ""
+	if forcedStart > 0 {
+		cleanPrefixLine := func(s string) string {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				return ""
+			}
+			stops := []string{
+				"购买方信息", "购买方", "销售方信息", "销售方",
+				"统一社会信用代码", "纳税人识别号",
+				"项目名称", "规格型号", "单位", "数量",
+			}
+			for _, stop := range stops {
+				if idx := strings.Index(s, stop); idx > 0 {
+					s = strings.TrimSpace(s[:idx])
+				}
+			}
+			return strings.TrimSpace(s)
+		}
+
+		// Prefer scanning the full text (not just the post-header block), since the leaked prefix may be
+		// on the same physical line as the table header and thus excluded from "block".
+		{
+			marker := strings.TrimSpace(block[forcedStart-1])
+			detailIdx := -1
+			if marker != "" {
+				for i, s := range lines {
+					if strings.TrimSpace(normLine(s)) == marker {
+						detailIdx = i
+						break
+					}
+				}
+			}
+			if detailIdx > 0 {
+				low := detailIdx - 30
+				if low < 0 {
+					low = 0
+				}
+				for i := detailIdx - 1; i >= low; i-- {
+					cand := cleanPrefixLine(normLine(lines[i]))
+					if cand == "" || !strings.HasPrefix(cand, "*") {
+						continue
+					}
+					han := 0
+					for _, r := range cand {
+						if unicode.Is(unicode.Han, r) {
+							han++
+						}
+					}
+					if han < 6 || len([]rune(cand)) < 12 {
+						continue
+					}
+					if isStopLine(cand) {
+						continue
+					}
+					pendingFirstItemPrefix = cand
+					break
+				}
+			}
+		}
+
+		if pendingFirstItemPrefix == "" {
+			for i := forcedStart - 1; i >= 0; i-- {
+				cand := cleanPrefixLine(block[i])
+				if cand == "" {
+					continue
+				}
+				if !strings.HasPrefix(cand, "*") {
+					continue
+				}
+				han := 0
+				for _, r := range cand {
+					if unicode.Is(unicode.Han, r) {
+						han++
+					}
+				}
+				if han < 6 || len([]rune(cand)) < 12 {
+					continue
+				}
+				if isHeaderLine(cand) || isStopLine(cand) {
+					continue
+				}
+				pendingFirstItemPrefix = cand
+				break
+			}
+		}
+	}
+
 	rowScore := func(s string) int {
 		s = strings.TrimSpace(s)
 		if s == "" {
@@ -5496,6 +5588,20 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		preserveDup     bool
 	)
 	flush := func() {
+		if pendingFirstItemPrefix != "" && len(items) == 0 && strings.TrimSpace(currentName) != "" {
+			cur := strings.TrimSpace(currentName)
+			if !strings.HasPrefix(cur, "*") {
+				prefixNorm := normalizeName(pendingFirstItemPrefix)
+				curNorm := normalizeName(cur)
+				if prefixNorm != "" && curNorm != "" &&
+					len([]rune(prefixNorm)) > len([]rune(curNorm))+3 &&
+					!strings.Contains(curNorm, strings.TrimSpace(prefixNorm)) &&
+					!strings.Contains(prefixNorm, strings.TrimSpace(curNorm)) {
+					currentName = strings.TrimSpace(pendingFirstItemPrefix + " " + cur)
+					pendingFirstItemPrefix = ""
+				}
+			}
+		}
 		name := normalizeName(currentName)
 		if name == "" {
 			currentName = ""
