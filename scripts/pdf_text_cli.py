@@ -74,7 +74,7 @@ def main():
             if layout_mode not in ("zones", "ordered", "raw"):
                 layout_mode = "zones"
 
-            def iter_page_lines(page):
+            def iter_page_spans(page):
                 try:
                     d = page.get_text("dict") or {}
                 except Exception:
@@ -89,26 +89,30 @@ def main():
                         bbox = ln.get("bbox")
                         if not bbox or len(bbox) < 4:
                             continue
-                        spans = ln.get("spans", []) or []
-                        txt = "".join(str(s.get("text", "")) for s in spans if isinstance(s, dict))
-                        txt = str(txt or "").replace("\r", "\n").strip()
-                        if not txt:
-                            continue
-                        x0, y0, x1, y1 = bbox[0], bbox[1], bbox[2], bbox[3]
-                        try:
-                            h = float(y1) - float(y0)
-                        except Exception:
-                            h = 0.0
-                        out.append(
-                            {
-                                "x0": float(x0),
-                                "y0": float(y0),
-                                "x1": float(x1),
-                                "y1": float(y1),
-                                "h": max(h, 1.0),
-                                "t": txt,
-                            }
-                        )
+                        for s in ln.get("spans", []) or []:
+                            if not isinstance(s, dict):
+                                continue
+                            sb = s.get("bbox")
+                            if not sb or len(sb) < 4:
+                                continue
+                            txt = str(s.get("text", "") or "").replace("\r", "\n").strip()
+                            if not txt:
+                                continue
+                            x0, y0, x1, y1 = sb[0], sb[1], sb[2], sb[3]
+                            try:
+                                h = float(y1) - float(y0)
+                            except Exception:
+                                h = 0.0
+                            out.append(
+                                {
+                                    "x0": float(x0),
+                                    "y0": float(y0),
+                                    "x1": float(x1),
+                                    "y1": float(y1),
+                                    "h": max(h, 1.0),
+                                    "t": txt,
+                                }
+                            )
                 return out
 
             def cluster_rows(items):
@@ -137,11 +141,16 @@ def main():
 
             def region_for(cx, cy):
                 # Heuristic zones for A4 Chinese VAT invoices.
-                if cy < 0.25:
+                if cy < 0.22:
                     return "header_right" if cx >= 0.55 else "header_left"
-                if cy < 0.56:
-                    return "buyer" if cx < 0.58 else "password"
-                if cy < 0.80:
+                # Password area is a right-side block that extends longer than buyer info.
+                if cx >= 0.58 and cy < 0.56:
+                    return "password"
+                # Buyer block (left) is usually above the items table.
+                if cy < 0.40:
+                    return "buyer"
+                # Items table occupies the middle section.
+                if cy < 0.72:
                     return "items"
                 if cy < 0.93:
                     return "seller" if cx < 0.58 else "remarks"
@@ -150,8 +159,8 @@ def main():
             def build_zoned_text(page, page_no):
                 w = float(page.rect.width or 1.0)
                 h = float(page.rect.height or 1.0)
-                lines = iter_page_lines(page)
-                if not lines:
+                spans = iter_page_spans(page)
+                if not spans:
                     return ""
 
                 buckets = {
@@ -164,7 +173,7 @@ def main():
                     "remarks": [],
                     "footer": [],
                 }
-                for it in lines:
+                for it in spans:
                     cx = ((it["x0"] + it["x1"]) / 2.0) / w
                     cy = ((it["y0"] + it["y1"]) / 2.0) / h
                     buckets[region_for(cx, cy)].append(it)
@@ -186,9 +195,8 @@ def main():
                 buyer = rows_to_lines(buckets["buyer"])
                 pwd = rows_to_lines(buckets["password"])
                 items = rows_to_lines(buckets["items"])
-                totals = []  # keep under remarks/footer; parsing will handle amounts anyway
                 seller = rows_to_lines(buckets["seller"])
-                other = rows_to_lines(buckets["remarks"] + buckets["footer"])
+                other = rows_to_lines(buckets["remarks"]) + rows_to_lines(buckets["footer"])
 
                 sections = [
                     ("发票信息", hdr),
@@ -196,7 +204,7 @@ def main():
                     ("密码区", pwd),
                     ("明细", items),
                     ("销售方", seller),
-                    ("备注/其他", totals + other),
+                    ("备注/其他", other),
                 ]
 
                 out = [f"【第{page_no}页-分区】"]

@@ -118,6 +118,7 @@ docker run -d --name smart-bill-manager -p 80:80 \
 - `SBM_OCR_WORKER=1`（推荐：保持常驻 worker，避免每次启动 Python）
 - `SBM_OCR_DATA_DIR=/app/backend/data`（推荐：持久化 RapidOCR 模型缓存到 `$SBM_OCR_DATA_DIR/rapidocr-models/`）
 - `SBM_PDF_TEXT_EXTRACTOR=pymupdf|off`（默认 `pymupdf`）
+- `SBM_PDF_TEXT_LAYOUT=zones|ordered|raw`（默认 `zones`，仅对 PyMuPDF 提取生效）
 - `SBM_PDF_OCR_DPI=220`（可选，建议 `120-450`）
 - `SBM_INVOICE_PARTY_ROI=auto|true|false`（默认 `auto`）
 - `SBM_INVOICE_TOTAL_ROI=auto|true|false`（默认 `auto`，仅当价税合计/税额缺失时做 ROI 补充识别）

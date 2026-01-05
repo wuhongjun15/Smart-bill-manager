@@ -4282,6 +4282,13 @@ func normalizeInvoiceTextForParsing(text string) string {
 	text = strings.ReplaceAll(text, "\r", "\n")
 	text = removeChineseInlineSpaces(text)
 
+	// If PyMuPDF zoned layout is used, keep buyer/seller markers but drop other section titles.
+	// This prevents section headers like "【明细】" from polluting line-item parsing.
+	text = regexp.MustCompile(`(?m)^【第\d+页-分区】\s*$`).ReplaceAllString(text, "")
+	text = regexp.MustCompile(`(?m)^【购买方】\s*$`).ReplaceAllString(text, "购买方")
+	text = regexp.MustCompile(`(?m)^【销售方】\s*$`).ReplaceAllString(text, "销售方")
+	text = regexp.MustCompile(`(?m)^【[^】]{1,20}】\s*$`).ReplaceAllString(text, "")
+
 	// Normalize "vertical" or whitespace-separated section markers often found in PDF text extraction.
 	replacements := []struct {
 		re   *regexp.Regexp
