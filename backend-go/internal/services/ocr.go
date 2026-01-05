@@ -4931,6 +4931,11 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	// - 750ml×6
 	// - 53°×6
 	specTokenRe := regexp.MustCompile(`(?i)^(?:\d+\s*[x×]\s*\d+(?:\.\d+)?\s*(?:g|kg|ml|l)?|\d+(?:\.\d+)?\s*(?:g|kg|ml|l)?\s*[x×]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?[a-z]{1,4}\s*[x×]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*°\s*[x×]\s*\d+(?:\.\d+)?\s*(?:kg|ml|mm|cm|m|g|l)?)$`)
+	// Simple measure specs that often appear as the right-most token in the item name when the
+	// "规格型号" column is missing, e.g. "500ml", "1.23kg", "190mm".
+	simpleMeasureSpecRe := regexp.MustCompile(`(?i)^\d+(?:\.\d+)?(?:ml|l|g|kg|mm|cm|m)$`)
+	simpleMeasureSpecSplitRe := regexp.MustCompile(`(?i)^(\d+(?:\.\d+)?)(ml|l|g|kg|mm|cm|m)$`)
+	simpleMeasureUnitRe := regexp.MustCompile(`(?i)^(ml|l|g|kg|mm|cm|m)$`)
 	labelLineRe := regexp.MustCompile(`^(?:名称|名\s*称|纳税人识别号|地址|地址、电话|地址,电话|电话|开户行|开户行及账号|账号)[:：]?$`)
 	// Some OCR results merge labels and values on the same line (e.g. "名称：沃尔玛…").
 	labelPrefixRe := regexp.MustCompile(`^(?:名称|名\s*称|纳税人识别号|统一社会信用代码/纳税人识别号|地址|地址、电话|地址,电话|电话|开户行|开户行及账号|开户行|账号)\s*[:：]\s*\S+`)
@@ -5330,6 +5335,27 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 				if q != nil {
 					qty = q
 					rest = strings.TrimSpace(rest[:m[0]] + " " + rest[m[1]:])
+				}
+			}
+		}
+
+		// Extract a simple measure spec like "500ml" / "1.23kg" that sits at the end of the name
+		// when PDF text extraction does not include the spec column.
+		if spec == "" {
+			fields := strings.Fields(rest)
+			if len(fields) >= 2 && simpleMeasureUnitRe.MatchString(fields[len(fields)-1]) && numOnlyRe.MatchString(fields[len(fields)-2]) {
+				spec = fields[len(fields)-2] + strings.ToLower(fields[len(fields)-1])
+				fields = fields[:len(fields)-2]
+				rest = strings.TrimSpace(strings.Join(fields, " "))
+			} else if len(fields) >= 1 {
+				last := strings.TrimSpace(fields[len(fields)-1])
+				last = strings.ReplaceAll(last, " ", "")
+				if simpleMeasureSpecRe.MatchString(last) {
+					if m := simpleMeasureSpecSplitRe.FindStringSubmatch(last); len(m) == 3 {
+						spec = m[1] + strings.ToLower(m[2])
+						fields = fields[:len(fields)-1]
+						rest = strings.TrimSpace(strings.Join(fields, " "))
+					}
 				}
 			}
 		}

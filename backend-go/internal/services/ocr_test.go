@@ -1727,6 +1727,41 @@ func TestParseInvoiceData_OneItemWithDimensionSpecAndUnit_PyMuPDFZoned(t *testin
 	}
 }
 
+func TestParseInvoiceData_OneItemWithSimpleMLSpec_PyMuPDFZoned(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `【第1页-分区】
+【发票信息】
+发票号码： 25312000000411964864
+开票日期： 2025年12月13日
+电子发票（普通发票）
+【购买方】
+购买方信息统一社会信用代码/纳税人识别号： 名称： 个人销售方信息名称：
+项目名称规格型号单位数量
+【密码区】
+统一社会信用代码/纳税人识别号： 单价上海鑫之河商贸有限公司3026.55金额91310112MA1GC07H2C 税率/征收率13% 税额393.45下载次数：1
+【明细】
+*酒*酒53度汾25 500ml 瓶6 504.424778761062
+价税合计（大写） 合计叁仟肆佰贰拾圆整 ￥ 3026.55 （小写） ￥ 3420.00 ￥ 393.45
+【销售方】
+上海鑫之河商贸有限公司`
+
+	data, err := service.ParseInvoiceData(sampleText)
+	if err != nil {
+		t.Fatalf("ParseInvoiceData returned error: %v", err)
+	}
+	if len(data.Items) != 1 {
+		t.Fatalf("Expected 1 item, got %d: %+v", len(data.Items), data.Items)
+	}
+	it := data.Items[0]
+	if it.Spec != "500ml" {
+		t.Fatalf("Expected spec '500ml', got %+v", it)
+	}
+	if it.Unit != "瓶" || it.Quantity == nil || *it.Quantity != 6 {
+		t.Fatalf("Unexpected unit/qty: %+v", it)
+	}
+}
+
 func TestParseInvoiceData_SpaceSeparatedDate(t *testing.T) {
 	service := NewOCRService()
 
