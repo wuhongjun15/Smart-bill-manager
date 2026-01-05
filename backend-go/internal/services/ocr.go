@@ -4921,6 +4921,7 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 	moneyLikeRe := regexp.MustCompile(`^\d+\.\d{2}$`)
 	decimalLikeRe := regexp.MustCompile(`^\d+\.\d+$`)
 	dimensionLikeRe := regexp.MustCompile(`(?i)^\d+(?:\.\d+)?\s*[x\x{00d7}]\s*\d+(?:\.\d+)?(?:\s*[x\x{00d7}]\s*\d+(?:\.\d+)?)?\s*(?:mm|cm|m|g|kg|ml|l)?$`)
+	spacedDim2Re := regexp.MustCompile(`(?i)^(\d{2,4})\s+(\d{2,4})(mm|cm|m)$`)
 	integerOnlyRe := regexp.MustCompile(`^\d+$`)
 	taxRateRe := regexp.MustCompile(`^\d{1,2}%$`)
 	quantityLabelRe := regexp.MustCompile(`数量\s*[:：]?\s*(\d+(?:\.\d+)?)`)
@@ -5039,7 +5040,9 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		if isUnitToken(s) {
 			return false
 		}
-		if specTokenRe.MatchString(strings.ReplaceAll(s, "*", "\u00d7")) || dimensionLikeRe.MatchString(strings.ReplaceAll(s, "*", "\u00d7")) {
+		tn := strings.ReplaceAll(s, "*", "\u00d7")
+		tnCompact := strings.ReplaceAll(tn, " ", "")
+		if specTokenRe.MatchString(tnCompact) || dimensionLikeRe.MatchString(tnCompact) || spacedDim2Re.MatchString(strings.TrimSpace(s)) {
 			return false
 		}
 		if strings.Contains(s, "价税合计") || strings.Contains(s, "合计") {
@@ -5098,6 +5101,41 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		cats := categoryAnyRe.FindAllStringIndex(line, -1)
 		if len(cats) < 2 {
 			return nil
+		}
+		// Filter out false "*...*" matches caused by dimension specs like "360*380*190mm" (e.g. "*380*").
+		// Keep only markers that look like real categories (contain Han or at least 2 ASCII letters).
+		{
+			onlyDigits := regexp.MustCompile(`^\d+$`)
+			dimUnit := regexp.MustCompile(`(?i)^\d+(?:mm|cm|m|g|kg|ml|l)$`)
+			filtered := make([][]int, 0, len(cats))
+			for _, c := range cats {
+				if len(c) != 2 || c[1]-c[0] < 3 {
+					continue
+				}
+				token := strings.TrimSpace(line[c[0]+1 : c[1]-1])
+				if token == "" || onlyDigits.MatchString(token) || dimUnit.MatchString(token) {
+					continue
+				}
+				hasHan := false
+				asciiLetters := 0
+				for _, r := range token {
+					if unicode.Is(unicode.Han, r) {
+						hasHan = true
+						break
+					}
+					if r < 128 && unicode.IsLetter(r) {
+						asciiLetters++
+					}
+				}
+				if !hasHan && asciiLetters < 2 {
+					continue
+				}
+				filtered = append(filtered, c)
+			}
+			cats = filtered
+			if len(cats) < 2 {
+				return nil
+			}
 		}
 
 		// Split into [namesPart | tailPart] at the first spec occurrence.
@@ -5292,6 +5330,20 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 				if q != nil {
 					qty = q
 					rest = strings.TrimSpace(rest[:m[0]] + " " + rest[m[1]:])
+				}
+			}
+		}
+
+		// Extract trailing dimension specs like "360*380*190mm" when spec column is missing.
+		if spec == "" {
+			dimTailRe := regexp.MustCompile(`(?i)(\d+(?:\.\d+)?(?:\s*[*x×]\s*\d+(?:\.\d+)?){1,2}\s*(?:mm|cm|m|g|kg|ml|l)?)$`)
+			if loc := dimTailRe.FindStringSubmatchIndex(rest); len(loc) >= 4 {
+				raw := strings.TrimSpace(rest[loc[2]:loc[3]])
+				raw = strings.NewReplacer("*", "×", "x", "×", "X", "×").Replace(raw)
+				raw = strings.ReplaceAll(raw, " ", "")
+				if raw != "" && dimensionLikeRe.MatchString(raw) {
+					spec = raw
+					rest = strings.TrimSpace(rest[:loc[0]])
 				}
 			}
 		}
@@ -5717,17 +5769,27 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		// Within an active row, absorb spec/unit/qty tokens as we see them (PDF text often wraps names).
 		if currentName != "" && currentQty == nil {
 			tn := strings.TrimSpace(strings.ReplaceAll(s, "*", "\u00d7"))
-			if currentSpec == "" && (specTokenRe.MatchString(tn) || dimensionLikeRe.MatchString(tn)) {
-				currentSpec = strings.TrimSpace(s)
-				continue
+			tnCompact := strings.ReplaceAll(tn, " ", "")
+			if currentSpec == "" {
+				if m := spacedDim2Re.FindStringSubmatch(strings.TrimSpace(s)); len(m) > 3 {
+					currentSpec = fmt.Sprintf("%s×%s%s", m[1], m[2], m[3])
+					continue
+				}
+				if specTokenRe.MatchString(tnCompact) || dimensionLikeRe.MatchString(tnCompact) {
+					currentSpec = tnCompact
+					continue
+				}
 			}
 			if currentUnit == "" && isUnitToken(s) {
 				currentUnit = s
 				continue
 			}
-			if q := parseQuantityWithUnit(s, currentUnit); q != nil {
-				currentQty = q
-				continue
+			// Only parse quantity once we have a unit (prevents misclassifying dimension numbers as qty).
+			if currentUnit != "" {
+				if q := parseQuantityWithUnit(s, currentUnit); q != nil {
+					currentQty = q
+					continue
+				}
 			}
 			if moneyLikeRe.MatchString(s) || strings.ContainsRune(s, '\uFFE5') {
 				currentSawMoney = true
@@ -5853,7 +5915,61 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		// Merge continuation lines for long item names (before quantity is found).
 		if currentName != "" && currentQty == nil {
 			tn := strings.TrimSpace(strings.ReplaceAll(s, "*", "\u00d7"))
-			if isUnitToken(s) || taxRateRe.MatchString(s) || numOnlyRe.MatchString(s) || moneyLikeRe.MatchString(s) || specTokenRe.MatchString(tn) || dimensionLikeRe.MatchString(tn) {
+			tnCompact := strings.ReplaceAll(tn, " ", "")
+
+			// If unit and quantity are split across lines (common in PDF text), capture them.
+			if isUnitToken(strings.TrimSpace(s)) {
+				if currentUnit == "" {
+					currentUnit = strings.TrimSpace(s)
+				}
+				continue
+			}
+			if currentUnit != "" && integerOnlyRe.MatchString(strings.TrimSpace(s)) {
+				if q := parseQuantityWithUnit(strings.TrimSpace(s), currentUnit); q != nil {
+					currentQty = q
+					currentSawMoney = false
+					continue
+				}
+			}
+
+			// Capture dimension/spec fragments instead of dropping them or treating as a new item.
+			if m := spacedDim2Re.FindStringSubmatch(strings.TrimSpace(s)); len(m) > 3 {
+				part := fmt.Sprintf("%s×%s%s", m[1], m[2], m[3])
+				part = strings.ReplaceAll(part, " ", "")
+				if currentSpec == "" {
+					currentSpec = part
+				} else if !strings.Contains(currentSpec, part) {
+					currentSpec = strings.TrimSpace(currentSpec + "×" + part)
+				}
+				continue
+			}
+			if dimensionLikeRe.MatchString(tnCompact) {
+				if currentSpec == "" {
+					currentSpec = tnCompact
+				} else if !strings.Contains(currentSpec, tnCompact) {
+					currentSpec = strings.TrimSpace(currentSpec + "×" + tnCompact)
+				}
+				continue
+			}
+			if specTokenRe.MatchString(tnCompact) {
+				// Treat as spec token, not a name continuation.
+				if currentSpec == "" {
+					currentSpec = tnCompact
+				}
+				continue
+			}
+			if numOnlyRe.MatchString(strings.TrimSpace(s)) {
+				// A standalone number (e.g. "360") is often a spec fragment when followed by dimension units.
+				if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && v >= 10 && v <= 9999 {
+					if currentSpec == "" {
+						currentSpec = fmt.Sprintf("%d", v)
+					} else if regexp.MustCompile(`^\\d{2,4}$`).MatchString(currentSpec) {
+						currentSpec = strings.TrimSpace(currentSpec + "×" + fmt.Sprintf("%d", v))
+					}
+				}
+				continue
+			}
+			if taxRateRe.MatchString(s) || moneyLikeRe.MatchString(s) {
 				continue
 			}
 			if len([]rune(s)) >= 2 && len([]rune(s)) <= 80 {

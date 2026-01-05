@@ -1680,6 +1680,53 @@ func TestParseInvoiceData_TobaccoTwoItemsAndGrossTotal_PyMuPDFZoned(t *testing.T
 	}
 }
 
+func TestParseInvoiceData_OneItemWithDimensionSpecAndUnit_PyMuPDFZoned(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `【第1页-分区】
+【发票信息】
+发票号码： 25312000000396949692
+开票日期： 2025年12月03日
+电子发票（普通发票）
+【购买方】
+购买方信息统一社会信用代码/纳税人识别号： 名称： 个人销售方信息名称：
+项目名称规格型号单位数量
+【密码区】
+统一社会信用代码/纳税人识别号： 单价上海形章文化传媒有限公司3982.30金额91310118MA1JN11M0Q 税率/征收率13% 税额517.70下载次数：1
+【明细】
+*工艺品*《日照金山》文具套装（钢笔组合、笔记本、帆布袋、咖啡礼盒） 360*380*190mm 套4 995.575221238938
+价税合计（大写） 合计肆仟伍佰圆整 ￥ 3982.30 （小写） ￥ 4500.00 ￥ 517.70
+【销售方】
+上海形章文化传媒有限公司`
+
+	data, err := service.ParseInvoiceData(sampleText)
+	if err != nil {
+		t.Fatalf("ParseInvoiceData returned error: %v", err)
+	}
+	if data.InvoiceNumber == nil || *data.InvoiceNumber != "25312000000396949692" {
+		t.Fatalf("Expected InvoiceNumber '25312000000396949692', got %+v (src=%q)", data.InvoiceNumber, data.InvoiceNumberSource)
+	}
+	if data.Amount == nil || *data.Amount != 4500.00 {
+		t.Fatalf("Expected Amount 4500.00, got %+v (src=%q)", data.Amount, data.AmountSource)
+	}
+	if data.TaxAmount == nil || *data.TaxAmount != 517.70 {
+		t.Fatalf("Expected TaxAmount 517.70, got %+v (src=%q)", data.TaxAmount, data.TaxAmountSource)
+	}
+	if len(data.Items) != 1 {
+		t.Fatalf("Expected 1 item, got %d: %+v", len(data.Items), data.Items)
+	}
+	it := data.Items[0]
+	if !strings.Contains(it.Name, "日照金山") || !strings.Contains(it.Name, "文具套装") {
+		t.Fatalf("Unexpected item name: %+v", it)
+	}
+	if it.Spec != "360×380×190mm" {
+		t.Fatalf("Expected spec '360×380×190mm', got %+v", it)
+	}
+	if it.Unit != "套" || it.Quantity == nil || *it.Quantity != 4 {
+		t.Fatalf("Unexpected unit/qty: %+v", it)
+	}
+}
+
 func TestParseInvoiceData_SpaceSeparatedDate(t *testing.T) {
 	service := NewOCRService()
 
