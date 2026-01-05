@@ -1513,6 +1513,58 @@ func TestParseInvoiceData_WalmartXiamen_BuyerAndItems_PyMuPDFZoned(t *testing.T)
 	}
 }
 
+func TestParseInvoiceData_JDModelCodeMergedIntoName_PyMuPDFZoned(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `【第1页-分区】
+【发票信息】
+开票日期: 发票号码: 25327000001734142366 2025年12月29日
+电子发票(普通发票)
+【购买方】
+购买方信息名统一社会信用代码称项目名称 : 乌洪军 / 纳税人识别号规格型号 : 单位数量销售方信息名称 :
+【密码区】
+南京京东朝禾贸易有限公司
+统一社会信用代码 / 纳税人识别号 : 91320117MA20DA7DX5
+6459.29单价6459.29金  额   税率/征收率13% 839.71税  额
+【明细】
+*空调*格力空调云锦Ⅲ 3匹新一级能效变频纯铜管冷酷外机节能省电客厅柜机国家补贴 KFR-72LW/NhBa1BAj KFR-72LW/NhBa1BAj 套1
+合计 ￥6459.29 ￥839.71
+价税合计(大写) 柒仟贰佰玖拾玖圆整 (小写) ￥7299.00
+【销售方】
+备订单号:3359217008454242
+注
+开票人: 王梅`
+
+	data, err := service.ParseInvoiceData(sampleText)
+	if err != nil {
+		t.Fatalf("ParseInvoiceData returned error: %v", err)
+	}
+	if data.BuyerName == nil || *data.BuyerName != "乌洪军" {
+		t.Fatalf("Expected BuyerName '乌洪军', got %+v (src=%q)", data.BuyerName, data.BuyerNameSource)
+	}
+	if data.SellerName == nil || *data.SellerName != "南京京东朝禾贸易有限公司" {
+		t.Fatalf("Expected SellerName '南京京东朝禾贸易有限公司', got %+v (src=%q)", data.SellerName, data.SellerNameSource)
+	}
+	if data.Amount == nil || *data.Amount != 7299.00 {
+		t.Fatalf("Expected Amount 7299.00, got %+v (src=%q)", data.Amount, data.AmountSource)
+	}
+	if data.TaxAmount == nil || *data.TaxAmount != 839.71 {
+		t.Fatalf("Expected TaxAmount 839.71, got %+v (src=%q)", data.TaxAmount, data.TaxAmountSource)
+	}
+	if len(data.Items) != 1 {
+		t.Fatalf("Expected 1 item, got %d: %+v", len(data.Items), data.Items)
+	}
+	if data.Items[0].Spec == "" || data.Items[0].Spec != "KFR-72LW/NhBa1BAj" {
+		t.Fatalf("Expected item spec 'KFR-72LW/NhBa1BAj', got %+v", data.Items[0])
+	}
+	if strings.Contains(data.Items[0].Name, "KFR-72LW") {
+		t.Fatalf("Expected model code peeled from item name, got %+v", data.Items[0])
+	}
+	if data.Items[0].Unit != "套" || data.Items[0].Quantity == nil || *data.Items[0].Quantity != 1 {
+		t.Fatalf("Unexpected item parsed: %+v", data.Items[0])
+	}
+}
+
 func TestParseInvoiceData_SpaceSeparatedDate(t *testing.T) {
 	service := NewOCRService()
 

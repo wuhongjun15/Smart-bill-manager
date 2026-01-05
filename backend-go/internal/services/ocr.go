@@ -4135,6 +4135,12 @@ func cleanupName(name string) string {
 	// Remove trailing whitespace and newlines
 	name = strings.TrimRight(name, " \t\n\r")
 
+	// Trim common trailing separators that appear in OCR (e.g. "乌洪军 /").
+	name = strings.TrimRightFunc(name, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '/' || r == '／' || r == '|' || r == '｜'
+	})
+	name = strings.TrimSpace(name)
+
 	return name
 }
 
@@ -4213,16 +4219,19 @@ func extractCompanyNameNearTaxID(text string) string {
 
 	best := ""
 	bestLen := 0
+	bestTaxPos := -1
 	for _, loc := range taxLoose.FindAllStringIndex(text, -1) {
 		if len(loc) < 2 {
 			continue
 		}
 		// Look back a bit; seller name is usually close to the tax-id.
-		start := loc[0] - 220
-		if start < 0 {
-			start = 0
+		// Use a rune-based window to avoid cutting multi-byte runes mid-sequence.
+		prefix := text[:loc[0]]
+		runes := []rune(prefix)
+		if len(runes) > 520 {
+			runes = runes[len(runes)-520:]
 		}
-		window := text[start:loc[0]]
+		window := string(runes)
 
 		matches := companyLike.FindAllStringSubmatch(window, -1)
 		if len(matches) == 0 {
@@ -4237,12 +4246,46 @@ func extractCompanyNameNearTaxID(text string) string {
 			continue
 		}
 		l := len([]rune(cand))
-		if l > bestLen {
+		// Prefer the company name near the later tax-id (seller is usually later in the document),
+		// then prefer longer names.
+		if loc[0] > bestTaxPos || (loc[0] == bestTaxPos && l > bestLen) {
 			best = cand
 			bestLen = l
+			bestTaxPos = loc[0]
 		}
 	}
-	return best
+	if best != "" {
+		return best
+	}
+
+	// Fallback: line-based search (more robust for heavily segmented/zoned text).
+	// Walk from bottom to top so we prefer seller-side tax IDs that usually appear later.
+	lines := strings.Split(text, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if !taxLoose.MatchString(line) {
+			continue
+		}
+		for j := i - 1; j >= 0 && j >= i-8; j-- {
+			candLine := strings.TrimSpace(lines[j])
+			if candLine == "" {
+				continue
+			}
+			if strings.Contains(candLine, "密码区") || strings.Contains(candLine, "明细") || strings.Contains(candLine, "购买方") || strings.Contains(candLine, "销售方") {
+				continue
+			}
+			if m := companyLike.FindStringSubmatch(candLine); len(m) > 1 {
+				cand := cleanupName(strings.TrimSpace(m[1]))
+				if cand != "" && cand != "个人" && !isBadPartyNameCandidate(cand) {
+					return cand
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func extractNameFromTaxIDLabelLine(line string) string {
@@ -4388,6 +4431,10 @@ func isBadPartyNameCandidate(name string) bool {
 	}
 	// Any embedded buyer/seller labels indicate this isn't a pure party name.
 	if strings.Contains(name, "销售方") || strings.Contains(name, "购买方") {
+		return true
+	}
+	// Truncated label fragments (OCR may drop the last character like "统一社会信用代").
+	if strings.Contains(name, "统一社会信用") || strings.Contains(name, "纳税人识别") {
 		return true
 	}
 	// Pure punctuation/ellipsis-like placeholders.
@@ -4907,6 +4954,63 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		return strings.TrimSpace(s)
 	}
 
+	// Peel trailing model codes from an item name, e.g.:
+	// "... KFR-72LW/NhBa1BAj KFR-72LW/NhBa1BAj" -> (name="...", spec="KFR-72LW/NhBa1BAj").
+	peelTrailingModelCodes := func(name string) (cleanName, spec string) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return "", ""
+		}
+		// Match codes that contain both letters+digits and a separator (- or /), like "KFR-72LW/NhBa1BAj".
+		// Some OCR split the tail code into multiple tokens, e.g. "KFR-72LW/Nh Ba1BAj", so we also
+		// try concatenating the last two tokens.
+		modelRe := regexp.MustCompile(`(?i)^[A-Z]{2,}[A-Z0-9]*[-/][A-Z0-9][A-Z0-9/.-]{3,}$`)
+		digitRe := regexp.MustCompile(`\d`)
+		trimModelToken := func(s string) string {
+			return strings.TrimRight(strings.TrimSpace(s), "，,.;。:：")
+		}
+		parts := strings.Fields(name)
+		if len(parts) == 0 {
+			return name, ""
+		}
+		var models []string
+		for len(parts) > 0 {
+			last := trimModelToken(parts[len(parts)-1])
+			// 1-token model
+			if modelRe.MatchString(last) && digitRe.MatchString(last) {
+				models = append(models, last)
+				parts = parts[:len(parts)-1]
+				continue
+			}
+			// 2-token model (OCR split inside code)
+			if len(parts) >= 2 {
+				combined := trimModelToken(parts[len(parts)-2] + parts[len(parts)-1])
+				if modelRe.MatchString(combined) && digitRe.MatchString(combined) {
+					models = append(models, combined)
+					parts = parts[:len(parts)-2]
+					continue
+				}
+			}
+			break
+		}
+		if len(models) == 0 {
+			return name, ""
+		}
+		// Keep only the first unique model (these often repeat twice).
+		uniq := make(map[string]struct{}, len(models))
+		out := make([]string, 0, 2)
+		for i := len(models) - 1; i >= 0; i-- {
+			m := models[i]
+			if _, ok := uniq[m]; ok {
+				continue
+			}
+			uniq[m] = struct{}{}
+			out = append(out, m)
+		}
+		clean := strings.TrimSpace(strings.Join(parts, " "))
+		return clean, strings.TrimSpace(strings.Join(out, " "))
+	}
+
 	isLikelyItemNameLine := func(s string) bool {
 		if s == "" || isHeaderLine(s) || isStopLine(s) {
 			return false
@@ -5164,6 +5268,16 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 			name = "*" + cat + "*" + rest
 		} else {
 			name = rest
+		}
+
+		// If the OCR merged a trailing model code into the name (common when spec column is missing),
+		// peel it out so it doesn't pollute the human-readable item name.
+		if spec == "" {
+			clean, model := peelTrailingModelCodes(name)
+			if strings.TrimSpace(clean) != "" && model != "" {
+				name = clean
+				spec = model
+			}
 		}
 		return name, spec, unit, qty, true
 	}
@@ -5564,8 +5678,16 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 				unitPart := strings.TrimSpace(m[2])
 				if namePart != "" {
 					if q := parseQuantityWithUnit(m[3], unitPart); q != nil {
+						// If model codes were merged into the name, peel them into spec.
+						cleanName, model := peelTrailingModelCodes(namePart)
 						currentName = namePart
+						if strings.TrimSpace(cleanName) != "" {
+							currentName = cleanName
+						}
 						currentSpec = ""
+						if model != "" {
+							currentSpec = model
+						}
 						currentUnit = unitPart
 						currentQty = q
 						currentSawMoney = false
