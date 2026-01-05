@@ -281,7 +281,10 @@
         </div>
 
         <div v-if="isAdmin && uploadedInvoice && (getInvoiceRawText(uploadedInvoice) || getInvoicePrettyText(uploadedInvoice))" class="raw-section">
-          <div class="raw-title">OCR 文本</div>
+          <div class="raw-title">
+            OCR 文本
+            <span v-if="getInvoiceRawTextSource(uploadedInvoice)" class="raw-source">（来源：{{ getInvoiceRawTextSource(uploadedInvoice) }}）</span>
+          </div>
           <Accordion>
             <AccordionTab v-if="getInvoicePrettyText(uploadedInvoice)" :header="'点击查看 OCR 整理版文本'">
               <pre class="raw-text">{{ getInvoicePrettyText(uploadedInvoice) }}</pre>
@@ -601,7 +604,10 @@
         </Accordion>
 
         <div v-if="getInvoiceRawText(previewInvoice) || getInvoicePrettyText(previewInvoice)" class="raw-section">
-          <div class="raw-title">OCR &#25991;&#26412;</div>
+          <div class="raw-title">
+            OCR &#25991;&#26412;
+            <span v-if="getInvoiceRawTextSource(previewInvoice)" class="raw-source">（&#26469;&#28304;&#65306;{{ getInvoiceRawTextSource(previewInvoice) }}）</span>
+          </div>
           <Accordion>
             <AccordionTab v-if="getInvoicePrettyText(previewInvoice)" :header="'\u70B9\u51FB\u67E5\u770B OCR \u6574\u7406\u7248\u6587\u672C'">
               <pre class="raw-text">{{ getInvoicePrettyText(previewInvoice) }}</pre>
@@ -667,6 +673,9 @@ interface InvoiceExtractedData {
   buyer_name?: string
   buyer_name_source?: string
   buyer_name_confidence?: number
+  raw_text?: string
+  raw_text_source?: string
+  pretty_text?: string
 }
 
 const formatSourceLabel = (src?: string) => {
@@ -1534,6 +1543,20 @@ const getInvoiceRawText = (invoice: Invoice | null) => {
   }
 }
 
+const rawTextSourceLabel = (src?: string) => {
+  const s = String(src || '').trim().toLowerCase()
+  if (!s) return ''
+  if (s === 'pymupdf') return 'PyMuPDF'
+  if (s === 'rapidocr') return 'RapidOCR'
+  if (s === 'merged') return 'Merged'
+  return src || ''
+}
+
+const getInvoiceRawTextSource = (invoice: Invoice | null) => {
+  const extracted = getInvoiceExtracted(invoice)
+  return rawTextSourceLabel(extracted?.raw_text_source)
+}
+
 const getInvoicePrettyText = (invoice: Invoice | null) => {
   if (!invoice) return ''
   if (!invoice.extracted_data) return ''
@@ -2033,6 +2056,13 @@ onMounted(() => {
   font-weight: 900;
   color: var(--color-text-primary);
   margin-bottom: 8px;
+}
+
+.raw-source {
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-left: 8px;
+  font-size: 12px;
 }
 
 .invoice-file-preview {

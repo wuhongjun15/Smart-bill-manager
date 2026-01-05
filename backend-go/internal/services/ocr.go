@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"os"
 	"os/exec"
@@ -188,6 +189,7 @@ type InvoiceExtractedData struct {
 	BuyerNameConfidence     float64           `json:"buyer_name_confidence,omitempty"`
 	Items                   []InvoiceLineItem `json:"items,omitempty"`
 	RawText                 string            `json:"raw_text"`
+	RawTextSource           string            `json:"raw_text_source,omitempty"` // pymupdf/rapidocr
 	PrettyText              string            `json:"pretty_text,omitempty"`
 }
 
@@ -691,19 +693,26 @@ func (s *OCRService) extractTextWithPdftotext(pdfPath string) (string, error) {
 
 // RecognizePDF extracts invoice text from PDF with PyMuPDF as a fast pre-step, falling back to RapidOCR.
 func (s *OCRService) RecognizePDF(pdfPath string) (string, error) {
+	text, _, err := s.RecognizePDFWithSource(pdfPath)
+	return text, err
+}
+
+// RecognizePDFWithSource is like RecognizePDF but also returns the text source.
+// source values: "pymupdf" | "rapidocr".
+func (s *OCRService) RecognizePDFWithSource(pdfPath string) (text string, source string, err error) {
 	fmt.Printf("[OCR] Starting PDF recognition for: %s\n", pdfPath)
 
 	if strings.TrimSpace(pdfPath) == "" {
-		return "", fmt.Errorf("empty PDF path")
+		return "", "", fmt.Errorf("empty PDF path")
 	}
 
 	// Validate PDF file exists and is a regular file
 	fileInfo, err := os.Stat(pdfPath)
 	if err != nil {
-		return "", fmt.Errorf("failed to access PDF file: %w", err)
+		return "", "", fmt.Errorf("failed to access PDF file: %w", err)
 	}
 	if !fileInfo.Mode().IsRegular() {
-		return "", fmt.Errorf("PDF path is not a regular file")
+		return "", "", fmt.Errorf("PDF path is not a regular file")
 	}
 
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("SBM_PDF_TEXT_EXTRACTOR")))
@@ -714,7 +723,7 @@ func (s *OCRService) RecognizePDF(pdfPath string) (string, error) {
 	if mode != "off" && mode != "false" && mode != "0" {
 		if text, err := s.extractTextWithPyMuPDF(pdfPath); err == nil {
 			if s.isLikelyUsefulInvoicePDFText(text) {
-				return text, nil
+				return text, "pymupdf", nil
 			}
 			fmt.Printf("[OCR] PyMuPDF text looks incomplete; falling back to RapidOCR image OCR\n")
 		} else {
@@ -723,7 +732,11 @@ func (s *OCRService) RecognizePDF(pdfPath string) (string, error) {
 	}
 
 	fmt.Printf("[OCR] Using OCR CLI for PDF pages\n")
-	return s.pdfToImageOCR(pdfPath)
+	text, err = s.pdfToImageOCR(pdfPath)
+	if err != nil {
+		return "", "", err
+	}
+	return text, "rapidocr", nil
 }
 
 // getChineseCharRatio calculates the ratio of Chinese characters in the text
@@ -908,7 +921,9 @@ func (s *OCRService) pdfToImageOCR(pdfPath string) (string, error) {
 			needROI = true
 		case "auto":
 			buyer, seller := s.extractBuyerAndSellerByPosition(text)
-			needROI = buyer == nil || seller == nil
+			needROI = buyer == nil || seller == nil ||
+				(buyer != nil && isBadPartyNameCandidate(*buyer)) ||
+				(seller != nil && isBadPartyNameCandidate(*seller))
 		}
 		if needROI {
 			partyInjected, _, _ := s.injectInvoicePartiesFromRegions(tempDir, imgPath)
@@ -1078,6 +1093,39 @@ func extractPartyFromROICandidate(text string, role string) (name string, taxID 
 		}
 	}
 
+	// Some OCR outputs place the actual name at the end of a "multi-label" line,
+	// e.g. "名称: ... 纳税人识别号: 中国移动通信集团上海有限公司". Prefer the last label value.
+	if name == "" {
+		for _, line := range strings.Split(text, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			if !strings.ContainsAny(line, ":：") {
+				continue
+			}
+			if !(strings.Contains(line, "名称") || strings.Contains(line, "纳税人识别号") || strings.Contains(line, "统一社会信用代码")) {
+				continue
+			}
+			idx := strings.LastIndexAny(line, ":：")
+			if idx < 0 || idx+1 >= len(line) {
+				continue
+			}
+			candidate := cleanupName(strings.TrimSpace(line[idx+1:]))
+			if candidate == "" {
+				continue
+			}
+			if taxIDRegex.MatchString(candidate) || isBadPartyNameCandidate(candidate) {
+				continue
+			}
+			if len([]rune(candidate)) > MaxMerchantNameLength {
+				continue
+			}
+			name = candidate
+			break
+		}
+	}
+
 	// Fallback: sometimes "名称" is on its own line and the value is on the next line.
 	if name == "" {
 		lines := strings.Split(text, "\n")
@@ -1164,6 +1212,9 @@ func pickBestPartyNameHeuristic(text string, role string) string {
 	scoreCandidate := func(s string) int {
 		s = cleanLine(s)
 		if s == "" {
+			return -1
+		}
+		if isBadPartyNameCandidate(s) {
 			return -1
 		}
 		if containsAny(s, badContains) {
@@ -1341,6 +1392,33 @@ func scaleGrayNearest(src *image.Gray, scale int, maxW, maxH int) *image.Gray {
 	return dst
 }
 
+func binarizeImage(src image.Image, thr int) (*image.Gray, error) {
+	b := src.Bounds()
+	if b.Dx() <= 0 || b.Dy() <= 0 {
+		return nil, fmt.Errorf("empty image")
+	}
+	if thr < 0 {
+		thr = 0
+	}
+	if thr > 255 {
+		thr = 255
+	}
+
+	dst := image.NewGray(image.Rect(0, 0, b.Dx(), b.Dy()))
+	for y := 0; y < b.Dy(); y++ {
+		for x := 0; x < b.Dx(); x++ {
+			r, g, bb, _ := src.At(b.Min.X+x, b.Min.Y+y).RGBA()
+			l := uint8((299*r + 587*g + 114*bb + 500) / 1000 >> 8)
+			if int(l) > thr {
+				dst.SetGray(x, y, color.Gray{Y: 255})
+			} else {
+				dst.SetGray(x, y, color.Gray{Y: 0})
+			}
+		}
+	}
+	return dst, nil
+}
+
 func binarizeRegion(src image.Image, rect image.Rectangle) (*image.Gray, error) {
 	roi := image.NewRGBA(image.Rect(0, 0, rect.Dx(), rect.Dy()))
 	for y := 0; y < rect.Dy(); y++ {
@@ -1462,9 +1540,74 @@ func (s *OCRService) decodeInvoiceQRCode(imgPath string) (*invoiceQRFields, erro
 		return nil, err
 	}
 
-	codes, err := goqr.Recognize(img)
-	if err != nil || len(codes) == 0 {
+	type subImager interface {
+		SubImage(r image.Rectangle) image.Image
+	}
+
+	cropImage := func(src image.Image, r image.Rectangle) image.Image {
+		r = r.Intersect(src.Bounds())
+		if r.Empty() {
+			return src
+		}
+		if si, ok := src.(subImager); ok {
+			return si.SubImage(r)
+		}
+		dst := image.NewRGBA(image.Rect(0, 0, r.Dx(), r.Dy()))
+		draw.Draw(dst, dst.Bounds(), src, r.Min, draw.Src)
+		return dst
+	}
+
+	tryRecognize := func(src image.Image) ([]*goqr.QRData, error) {
+		codes, err := goqr.Recognize(src)
+		if err == nil && len(codes) > 0 {
+			return codes, nil
+		}
 		return nil, err
+	}
+
+	var codes []*goqr.QRData
+
+	// Pass 1: full image.
+	if c, e := tryRecognize(img); e == nil && len(c) > 0 {
+		codes = c
+	}
+
+	// Pass 2: crop top-left region (common invoice QR placement).
+	if len(codes) == 0 {
+		b := img.Bounds()
+		r := image.Rect(b.Min.X, b.Min.Y, b.Min.X+int(float64(b.Dx())*0.45), b.Min.Y+int(float64(b.Dy())*0.45))
+		cropped := cropImage(img, r)
+		if c, e := tryRecognize(cropped); e == nil && len(c) > 0 {
+			codes = c
+		}
+	}
+
+	// Pass 3: binarize (different thresholds) to improve QR decoding on faint scans.
+	if len(codes) == 0 {
+		thresholds := []int{110, 130, 150, 170, 190, 210}
+		for _, thr := range thresholds {
+			bin, binErr := binarizeImage(img, thr)
+			if binErr == nil {
+				if c, e := tryRecognize(bin); e == nil && len(c) > 0 {
+					codes = c
+					break
+				}
+			}
+			b := img.Bounds()
+			r := image.Rect(b.Min.X, b.Min.Y, b.Min.X+int(float64(b.Dx())*0.45), b.Min.Y+int(float64(b.Dy())*0.45))
+			cropped := cropImage(img, r)
+			binCrop, binErr2 := binarizeImage(cropped, thr)
+			if binErr2 == nil {
+				if c, e := tryRecognize(binCrop); e == nil && len(c) > 0 {
+					codes = c
+					break
+				}
+			}
+		}
+	}
+
+	if len(codes) == 0 {
+		return nil, nil
 	}
 
 	var best invoiceQRFields
@@ -4040,6 +4183,24 @@ func isBadPartyNameCandidate(name string) bool {
 	if regexp.MustCompile(`\d{4}年\d{1,2}月\d{1,2}日`).MatchString(name) {
 		return true
 	}
+	// Chinese amount-in-words (e.g. "贰佰圆整") are not party names.
+	if strings.Contains(name, "圆整") || strings.Contains(name, "元整") {
+		return true
+	}
+	if regexp.MustCompile(`^[零壹贰叁肆伍陆柒捌玖拾佰仟万亿圆元整]+$`).MatchString(name) &&
+		(strings.Contains(name, "圆") || strings.Contains(name, "元")) {
+		return true
+	}
+	// Bank/account/address-like lines are not party names.
+	if regexp.MustCompile(`\d{10,}`).MatchString(name) {
+		return true
+	}
+	if strings.Contains(name, "银行") || strings.Contains(name, "流水号") || strings.Contains(name, "业务") {
+		return true
+	}
+	if regexp.MustCompile(`(?:路|街|道|弄|巷)\d+号`).MatchString(name) || regexp.MustCompile(`\d+号`).MatchString(name) {
+		return true
+	}
 	return false
 }
 
@@ -5070,9 +5231,44 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 
 	parsedText := normalizeInvoiceTextForParsing(text)
 
+	// Prefer the actual invoice number (usually 8 digits). Some OCR outputs place code/number
+	// in a swapped order like "发票号码: 发票代码: <code> <number>".
+	pickInvoiceNumberFromPair := func(a, b string) string {
+		a = onlyDigits(a)
+		b = onlyDigits(b)
+		if len(a) >= 20 {
+			return a
+		}
+		if len(b) >= 20 {
+			return b
+		}
+		if len(a) == 8 && len(b) != 8 {
+			return a
+		}
+		if len(b) == 8 && len(a) != 8 {
+			return b
+		}
+		if len(a) == 8 && len(b) == 8 {
+			return a
+		}
+		return ""
+	}
+	pairRegexes := []*regexp.Regexp{
+		regexp.MustCompile(`(?s)发票号码[：:]?.{0,60}?发票代码[：:]?.{0,60}?(\d{8,25}).{0,20}?(\d{8,25})`),
+		regexp.MustCompile(`(?s)发票代码[：:]?.{0,60}?发票号码[：:]?.{0,60}?(\d{8,25}).{0,20}?(\d{8,25})`),
+	}
+	for _, re := range pairRegexes {
+		if match := re.FindStringSubmatch(parsedText); len(match) > 2 {
+			if inv := pickInvoiceNumberFromPair(match[1], match[2]); inv != "" {
+				setStringWithSourceAndConfidence(&data.InvoiceNumber, &data.InvoiceNumberSource, &data.InvoiceNumberConfidence, inv, "label_pair", 0.95)
+				break
+			}
+		}
+	}
+
 	invoiceNumRegexes := []*regexp.Regexp{
-		regexp.MustCompile(`发票号码[：:]?\s*[\n\r]?\s*(\d+)`),
-		regexp.MustCompile(`发票代码[：:]?\s*[\n\r]?\s*(\d+)`),
+		regexp.MustCompile(`发票号码[：:]?\s*[\n\r]?\s*(\d{20,25}|\d{8})`),
+		regexp.MustCompile(`发票代码[：:]?\s*[\n\r]?\s*(\d{10,12})`),
 		regexp.MustCompile(`No[\.:]?\s*[\n\r]?\s*(\d+)`),
 	}
 	for _, re := range invoiceNumRegexes {
@@ -5097,6 +5293,16 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		if match := re.FindStringSubmatch(parsedText); len(match) > 1 {
 			setStringWithSourceAndConfidence(&data.InvoiceDate, &data.InvoiceDateSource, &data.InvoiceDateConfidence, match[1], "label", 0.9)
 			break
+		}
+	}
+	// Handle header dates printed as spaced digits: "2025  07  02" without 年/月/日 units.
+	if data.InvoiceDate == nil {
+		headerSpacedDigits := regexp.MustCompile(`(?s)(?:开票日期|日期)[：:]?.{0,120}?(\d{4})\s+(\d{1,2})\s+(\d{1,2})`)
+		if match := headerSpacedDigits.FindStringSubmatch(parsedText); len(match) > 3 {
+			mi, _ := strconv.Atoi(match[2])
+			di, _ := strconv.Atoi(match[3])
+			date := fmt.Sprintf("%s年%02d月%02d日", match[1], mi, di)
+			setStringWithSourceAndConfidence(&data.InvoiceDate, &data.InvoiceDateSource, &data.InvoiceDateConfidence, date, "spaced_digits", 0.85)
 		}
 	}
 	if data.InvoiceDate == nil {
@@ -5189,10 +5395,10 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 	}
 
 	if buyer, seller := s.extractBuyerAndSellerByPosition(parsedText); buyer != nil || seller != nil {
-		if buyer != nil {
+		if buyer != nil && !isBadPartyNameCandidate(*buyer) {
 			setStringWithSourceAndConfidence(&data.BuyerName, &data.BuyerNameSource, &data.BuyerNameConfidence, *buyer, "position", 0.7)
 		}
-		if seller != nil {
+		if seller != nil && !isBadPartyNameCandidate(*seller) {
 			setStringWithSourceAndConfidence(&data.SellerName, &data.SellerNameSource, &data.SellerNameConfidence, *seller, "position", 0.7)
 		}
 	}
