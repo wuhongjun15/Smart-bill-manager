@@ -6350,6 +6350,194 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 
 	parsedText := normalizeInvoiceTextForParsing(text)
 
+	// Special invoice type: 航空运输电子客票行程单 (air ticket itinerary).
+	// The layout is very different from VAT invoices, and fields like seller/buyer/amount do not
+	// follow the "购买方/销售方/价税合计" table patterns.
+	isAirTicketItinerary := func(s string) bool {
+		if strings.Contains(s, "航空运输电子客票行程单") {
+			return true
+		}
+		// Some OCR results miss "行程单" but still contain these strong markers.
+		if strings.Contains(s, "航空运输电子客票") && strings.Contains(s, "电子客票号码") {
+			return true
+		}
+		return false
+	}
+
+	airTicketDetected := isAirTicketItinerary(parsedText)
+
+	if airTicketDetected {
+		// Invoice date: 填开日期
+		if m := regexp.MustCompile(`填开日期[:：]?\s*(\d{4}年\d{1,2}月\d{1,2}日)`).FindStringSubmatch(parsedText); len(m) > 1 {
+			setStringWithSourceAndConfidence(&data.InvoiceDate, &data.InvoiceDateSource, &data.InvoiceDateConfidence, m[1], "air_ticket_fill_date", 0.95)
+		}
+
+		// Buyer: passenger name (旅客姓名)
+		passenger := ""
+		// Prefer raw OCR text for this field because normalization may move/merge lines.
+		if m := regexp.MustCompile(`(?m)^([\p{Han}·]{2,20})\s*[\r]?\n\s*旅客姓名\s*$`).FindStringSubmatch(text); len(m) > 1 {
+			passenger = cleanupName(strings.TrimSpace(m[1]))
+		}
+		if passenger == "" {
+			if m := regexp.MustCompile(`旅客姓名[:：]?\s*([^\n\r]+)`).FindStringSubmatch(text); len(m) > 1 {
+				passenger = cleanupName(strings.TrimSpace(m[1]))
+			}
+		}
+		if passenger == "" {
+			// Fallback: try a best-effort neighbor line lookup.
+			if m := regexp.MustCompile(`旅客姓名[:：]?\s*([^\n\r]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
+				passenger = cleanupName(strings.TrimSpace(m[1]))
+			}
+		}
+		if passenger == "" {
+			// Common OCR layout: "<姓名>\n旅客姓名"
+			lines := strings.Split(text, "\n")
+			for i, line := range lines {
+				l := strings.TrimSpace(strings.TrimRight(line, "\r"))
+				if l == "" {
+					continue
+				}
+				if l == "旅客姓名" || strings.HasPrefix(l, "旅客姓名") {
+					// Prefer previous non-empty line; if not plausible, try next.
+					for j := i - 1; j >= 0; j-- {
+						cand := strings.TrimSpace(strings.TrimRight(lines[j], "\r"))
+						if cand == "" {
+							continue
+						}
+						passenger = cleanupName(cand)
+						break
+					}
+					if passenger == "" && i+1 < len(lines) {
+						cand := strings.TrimSpace(strings.TrimRight(lines[i+1], "\r"))
+						passenger = cleanupName(cand)
+					}
+					break
+				}
+			}
+		}
+		if passenger != "" && passenger != "个人" && !isBadPartyNameCandidate(passenger) {
+			setStringWithSourceAndConfidence(&data.BuyerName, &data.BuyerNameSource, &data.BuyerNameConfidence, passenger, "air_ticket_passenger", 0.95)
+		}
+
+		// Seller: 填开单位
+		if m := regexp.MustCompile(`填开单位[:：]?\s*([^\n\r]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
+			val := cleanupName(strings.TrimSpace(m[1]))
+			if val != "" && !isBadPartyNameCandidate(val) {
+				setStringWithSourceAndConfidence(&data.SellerName, &data.SellerNameSource, &data.SellerNameConfidence, val, "air_ticket_issuer", 0.95)
+			}
+		}
+
+		// Total amount: 合计 CNY 2220.00
+		if m := regexp.MustCompile(`(?m)^合计\s*(?:CNY\s*)?([\d,.]+)\s*$`).FindStringSubmatch(parsedText); len(m) > 1 {
+			if amt := parseAmount(m[1]); amt != nil {
+				setAmountWithSourceAndConfidence(&data.Amount, &data.AmountSource, &data.AmountConfidence, amt, "air_ticket_total", 0.95)
+			}
+		}
+		if data.Amount == nil {
+			// Two-line variant:
+			// 合计
+			// CNY 2220.00
+			if m := regexp.MustCompile(`(?s)合计\s*[\n\r]+\s*(?:CNY\s*)?([\d,.]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
+				if amt := parseAmount(m[1]); amt != nil {
+					setAmountWithSourceAndConfidence(&data.Amount, &data.AmountSource, &data.AmountConfidence, amt, "air_ticket_total", 0.95)
+				}
+			}
+		}
+
+		// VAT tax amount: 增值税税额 CNY 179.17
+		if m := regexp.MustCompile(`增值税税额[:：]?\s*(?:CNY\s*)?([\d,.]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
+			if tax := parseAmount(m[1]); tax != nil {
+				setAmountWithSourceAndConfidence(&data.TaxAmount, &data.TaxAmountSource, &data.TaxAmountConfidence, tax, "air_ticket_vat_tax", 0.9)
+			}
+		}
+
+		// Build a simple 1-line item for better UX (route + flight number + date/time).
+		if len(data.Items) == 0 {
+			lines := strings.Split(parsedText, "\n")
+			findAfterPrefix := func(prefixes ...string) string {
+				for _, line := range lines {
+					l := strings.TrimSpace(line)
+					for _, p := range prefixes {
+						if strings.HasPrefix(l, p) {
+							v := strings.TrimSpace(strings.TrimPrefix(l, p))
+							v = strings.TrimSpace(strings.TrimPrefix(v, "："))
+							v = strings.TrimSpace(strings.TrimPrefix(v, ":"))
+							if v != "" {
+								return removeChineseInlineSpaces(v)
+							}
+						}
+					}
+				}
+				return ""
+			}
+
+			origin := findAfterPrefix("自：", "自:")
+			dest := ""
+			// There may be multiple "至：" placeholders; prefer the first non-empty.
+			for _, line := range lines {
+				l := strings.TrimSpace(line)
+				if strings.HasPrefix(l, "至：") || strings.HasPrefix(l, "至:") {
+					v := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(l, "至："), "至:"))
+					v = strings.TrimSpace(strings.TrimPrefix(v, "："))
+					v = strings.TrimSpace(strings.TrimPrefix(v, ":"))
+					v = removeChineseInlineSpaces(v)
+					if v != "" {
+						dest = v
+						break
+					}
+				}
+			}
+
+			flightNo := ""
+			if m := regexp.MustCompile(`\b([A-Z]{2}\d{3,4})\b`).FindStringSubmatch(parsedText); len(m) > 1 {
+				flightNo = m[1]
+			}
+			flightDate := ""
+			flightTime := ""
+			// Prefer the first date after the flight number if possible.
+			if flightNo != "" {
+				if m := regexp.MustCompile(regexp.QuoteMeta(flightNo) + `(?s).{0,120}?(\d{4}年\d{1,2}月\d{1,2}日)`).FindStringSubmatch(parsedText); len(m) > 1 {
+					flightDate = m[1]
+				}
+			}
+			if flightDate == "" {
+				if m := regexp.MustCompile(`(\d{4}年\d{1,2}月\d{1,2}日)`).FindStringSubmatch(parsedText); len(m) > 1 {
+					flightDate = m[1]
+				}
+			}
+			if m := regexp.MustCompile(`\b(\d{1,2}:\d{2})\b`).FindStringSubmatch(parsedText); len(m) > 1 {
+				flightTime = m[1]
+			}
+
+			itemNameParts := make([]string, 0, 6)
+			itemNameParts = append(itemNameParts, "航空运输服务")
+			if origin != "" && dest != "" {
+				itemNameParts = append(itemNameParts, fmt.Sprintf("%s→%s", origin, dest))
+			} else if origin != "" {
+				itemNameParts = append(itemNameParts, origin)
+			}
+			if flightNo != "" {
+				itemNameParts = append(itemNameParts, flightNo)
+			}
+			if flightDate != "" {
+				itemNameParts = append(itemNameParts, flightDate)
+			}
+			if flightTime != "" {
+				itemNameParts = append(itemNameParts, flightTime)
+			}
+
+			name := strings.TrimSpace(strings.Join(itemNameParts, " "))
+			if name != "" {
+				q := 1.0
+				data.Items = []InvoiceLineItem{{
+					Name:     name,
+					Unit:     "次",
+					Quantity: &q,
+				}}
+			}
+		}
+	}
+
 	isPlausibleInvoiceYear := func(y int) bool {
 		nowY := time.Now().Year()
 		return y >= 2000 && y <= nowY+2
@@ -6828,7 +7016,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 
 	// Recover buyer/seller names from merged-label PDF text (e.g. "名称：个人 销售方信息 名称：").
 	// This happens with PyMuPDF text extraction where buyer/seller blocks are on the same line.
-	{
+	if !airTicketDetected {
 		// Buyer: extract from buyer block. Even if a plausible name was picked by position (e.g. footer "张唯"),
 		// override when the buyer block explicitly indicates "电话: 个人".
 		buyerText := parsedText
@@ -6979,7 +7167,9 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		data.BuyerNameConfidence = 0.6
 	}
 
-	data.Items = extractInvoiceLineItems(parsedText)
+	if len(data.Items) == 0 {
+		data.Items = extractInvoiceLineItems(parsedText)
+	}
 	data.PrettyText = formatInvoicePrettyText(text, data)
 	return data, nil
 }
@@ -6987,7 +7177,7 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 // parseAmount parses amount string to float64
 func parseAmount(s string) *float64 {
 	// Remove currency symbols, commas and spaces
-	s = strings.NewReplacer("￥", "", "¥", "").Replace(s)
+	s = strings.NewReplacer("￥", "", "¥", "", "CNY", "", "cny", "", "RMB", "", "rmb", "", "人民币", "").Replace(s)
 	s = strings.ReplaceAll(s, ",", "")
 	s = strings.ReplaceAll(s, " ", "")
 	s = strings.TrimSpace(s)

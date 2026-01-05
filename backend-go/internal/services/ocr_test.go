@@ -1540,7 +1540,11 @@ func TestParseInvoiceData_JDModelCodeMergedIntoName_PyMuPDFZoned(t *testing.T) {
 		t.Fatalf("ParseInvoiceData returned error: %v", err)
 	}
 	if data.BuyerName == nil || *data.BuyerName != "乌洪军" {
-		t.Fatalf("Expected BuyerName '乌洪军', got %+v (src=%q)", data.BuyerName, data.BuyerNameSource)
+		got := "<nil>"
+		if data.BuyerName != nil {
+			got = *data.BuyerName
+		}
+		t.Fatalf("Expected BuyerName '乌洪军', got %q (src=%q)", got, data.BuyerNameSource)
 	}
 	if data.SellerName == nil || *data.SellerName != "南京京东朝禾贸易有限公司" {
 		t.Fatalf("Expected SellerName '南京京东朝禾贸易有限公司', got %+v (src=%q)", data.SellerName, data.SellerNameSource)
@@ -1759,6 +1763,99 @@ func TestParseInvoiceData_OneItemWithSimpleMLSpec_PyMuPDFZoned(t *testing.T) {
 	}
 	if it.Unit != "瓶" || it.Quantity == nil || *it.Quantity != 6 {
 		t.Fatalf("Unexpected unit/qty: %+v", it)
+	}
+}
+
+func TestParseInvoiceData_AirTicketItinerary_RapidOCR(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `乌洪军
+旅客姓名
+国内国际标识：国内
+有效身份证件号码
+231083********3233
+电子发票
+航空运输电子客票行程单）
+上海市税务局
+签注
+Q/改期退票收费
+开票状态：正常
+发票号码：25318781112038121208
+承运人
+航班号
+座位等级
+日期
+时间
+客票级别/客票类别
+客票生效日期有效截止日期免费行李
+自：北京首都 T2
+东航
+MU5156
+Y
+2025年10月17日
+13:30
+Y
+20K
+至:上海虹桥 T2
+票价
+CNY 1972.48
+燃油附加费
+CNY 18.35
+增值税税率
+%6
+增值税税额
+CNY 179.17
+民航发展基金
+CNY 50.00
+其他税费
+CNY 0.00
+合计
+CNY 2220.00
+电子客票号码：7812103964567
+验证码：1208
+提示信息：
+保险费：XXX
+销售网点代号：SHA155/08677392
+填开单位：中国东方航空股份有限公司
+填开日期：2025年10月18日
+购买方名称：个人
+统一社会信用代码/纳税人识别号：`
+
+	data, err := service.ParseInvoiceData(sampleText)
+	if err != nil {
+		t.Fatalf("ParseInvoiceData returned error: %v", err)
+	}
+	if data.InvoiceNumber == nil || *data.InvoiceNumber != "25318781112038121208" {
+		t.Fatalf("Expected InvoiceNumber '25318781112038121208', got %+v (src=%q)", data.InvoiceNumber, data.InvoiceNumberSource)
+	}
+	if data.InvoiceDate == nil || *data.InvoiceDate != "2025年10月18日" {
+		t.Fatalf("Expected InvoiceDate '2025年10月18日', got %+v (src=%q)", data.InvoiceDate, data.InvoiceDateSource)
+	}
+	if data.BuyerName == nil || *data.BuyerName != "乌洪军" {
+		got := "<nil>"
+		if data.BuyerName != nil {
+			got = *data.BuyerName
+		}
+		t.Fatalf("Expected BuyerName '乌洪军', got %q (src=%q)", got, data.BuyerNameSource)
+	}
+	if data.SellerName == nil || *data.SellerName != "中国东方航空股份有限公司" {
+		t.Fatalf("Expected SellerName '中国东方航空股份有限公司', got %+v (src=%q)", data.SellerName, data.SellerNameSource)
+	}
+	if data.Amount == nil || *data.Amount != 2220.00 {
+		t.Fatalf("Expected Amount 2220.00, got %+v (src=%q)", data.Amount, data.AmountSource)
+	}
+	if data.TaxAmount == nil || *data.TaxAmount != 179.17 {
+		t.Fatalf("Expected TaxAmount 179.17, got %+v (src=%q)", data.TaxAmount, data.TaxAmountSource)
+	}
+	if len(data.Items) != 1 {
+		t.Fatalf("Expected 1 item, got %d: %+v", len(data.Items), data.Items)
+	}
+	it := data.Items[0]
+	if it.Unit != "次" || it.Quantity == nil || *it.Quantity != 1 {
+		t.Fatalf("Unexpected item unit/qty: %+v", it)
+	}
+	if !strings.Contains(it.Name, "MU5156") || !strings.Contains(it.Name, "北京") || !strings.Contains(it.Name, "上海") {
+		t.Fatalf("Unexpected item name: %+v", it)
 	}
 }
 
