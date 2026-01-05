@@ -1451,6 +1451,68 @@ func TestExtractBuyerAndSellerByPosition(t *testing.T) {
 	})
 }
 
+func TestParseInvoiceData_WalmartXiamen_BuyerAndItems_PyMuPDFZoned(t *testing.T) {
+	service := NewOCRService()
+
+	sampleText := `【第1页-分区】
+【发票信息】
+发票代码: 035021700111
+发票号码: 31126517
+开票日期: 2025年11月16日
+校验码: 59872 35946 41356 16868
+厦门增值税电子普通发票
+机器编号： 661911919489
+【购买方】
+买方购名称: 地  址 、电  话: 纳税人识别号: 开户行及账号: 邬先生
+货物或应税劳务、服务名称规格型号   单位数量单价
+【密码区】
+密码区 *1*+6-<4-01>76<43*33+-2442>
+53.01金  额106.02税率13% 税  额13.78
+1.77 1.77 13% 0.23
+【明细】
+*乳制品*Member's Mark 希腊式酸奶1.23kg(410g*3) 3X410g 组2
+*日用杂品*包装费配送费1
+合计 ￥107.79 ￥14.01
+价税合计(大写) 壹佰贰拾壹圆捌角 (小写) ￥121.80
+【销售方】
+方售销名称: 沃尔玛（厦门）商业零售有限公司
+【备注/其他】
+备订单号[3087538259083065845]
+注
+林燕红销售方:(章)`
+
+	data, err := service.ParseInvoiceData(sampleText)
+	if err != nil {
+		t.Fatalf("ParseInvoiceData returned error: %v", err)
+	}
+
+	if data.BuyerName == nil || *data.BuyerName != "邬先生" {
+		t.Fatalf("Expected BuyerName '邬先生', got %+v (src=%q)", data.BuyerName, data.BuyerNameSource)
+	}
+	if data.SellerName == nil || *data.SellerName != "沃尔玛（厦门）商业零售有限公司" {
+		t.Fatalf("Expected SellerName '沃尔玛（厦门）商业零售有限公司', got %+v (src=%q)", data.SellerName, data.SellerNameSource)
+	}
+	if data.Amount == nil || *data.Amount != 121.80 {
+		t.Fatalf("Expected Amount 121.80, got %+v (src=%q)", data.Amount, data.AmountSource)
+	}
+	if data.TaxAmount == nil || *data.TaxAmount != 14.01 {
+		t.Fatalf("Expected TaxAmount 14.01, got %+v (src=%q)", data.TaxAmount, data.TaxAmountSource)
+	}
+
+	if len(data.Items) != 2 {
+		t.Fatalf("Expected 2 items, got %d: %+v", len(data.Items), data.Items)
+	}
+	if strings.Contains(data.Items[0].Name, "密码区") || strings.Contains(data.Items[1].Name, "密码区") {
+		t.Fatalf("Unexpected password area captured as item: %+v", data.Items)
+	}
+	if data.Items[0].Quantity == nil || *data.Items[0].Quantity != 2 || data.Items[0].Unit != "组" {
+		t.Fatalf("Unexpected first item parsed: %+v", data.Items[0])
+	}
+	if data.Items[1].Quantity == nil || *data.Items[1].Quantity != 1 {
+		t.Fatalf("Unexpected second item parsed: %+v", data.Items[1])
+	}
+}
+
 func TestParseInvoiceData_SpaceSeparatedDate(t *testing.T) {
 	service := NewOCRService()
 

@@ -6121,6 +6121,28 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		}
 	}
 
+	// Some invoices have a dedicated net/tax summary line like:
+	// "合计 ￥107.79 ￥14.01"
+	// Prefer this over per-line item "税额" matches.
+	if data.TaxAmount == nil {
+		netTaxLineRe := regexp.MustCompile(`(?m)^合计\s*[¥￥]?\s*([\d,.]+)\s*[¥￥]?\s*([\d,.]+)\s*$`)
+		if m := netTaxLineRe.FindStringSubmatch(parsedText); len(m) > 2 {
+			tax := parseAmount(m[2])
+			if tax != nil {
+				setAmountWithSourceAndConfidence(&data.TaxAmount, &data.TaxAmountSource, &data.TaxAmountConfidence, tax, "sum_net_tax_line", 0.9)
+			}
+			// Keep amount parsing anchored on explicit totals (价税合计/小写) when present.
+			// Some invoices omit the 价税合计 line though; for those, we can derive total as net+tax.
+			if data.Amount == nil && !strings.Contains(parsedText, "价税合计") {
+				net := parseAmount(m[1])
+				if net != nil && tax != nil {
+					v := *net + *tax
+					setAmountWithSourceAndConfidence(&data.Amount, &data.AmountSource, &data.AmountConfidence, &v, "sum_net_tax_line_total", 0.7)
+				}
+			}
+		}
+	}
+
 	amountRegexes := []struct {
 		re   *regexp.Regexp
 		src  string
