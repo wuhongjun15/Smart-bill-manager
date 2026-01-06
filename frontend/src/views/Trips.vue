@@ -182,7 +182,7 @@
 
                     <div class="sbm-dt-hscroll">
                       <DataTable
-                        :value="getTripOrder(trip.id).ordered"
+                        :value="tripOrders[trip.id]?.ordered || tripPayments[trip.id] || []"
                         :loading="loadingPaymentsTripId === trip.id"
                         responsiveLayout="scroll"
                         :paginator="true"
@@ -1334,7 +1334,9 @@ const loadTripPayments = async (tripId: string) => {
   loadingPaymentsTripId.value = tripId;
   try {
     const res = await tripsApi.getPayments(tripId, true);
-    tripPayments[tripId] = res.data.data || [];
+    const items = res.data.data || [];
+    tripPayments[tripId] = items;
+    tripOrders[tripId] = computeTripOrder(items);
   } finally {
     loadingPaymentsTripId.value = null;
   }
@@ -1346,11 +1348,7 @@ type TripOrderCacheItem = {
   invoiceSeq: Record<string, Record<string, string>>;
 };
 
-const EMPTY_PAYMENTS: TripPaymentWithInvoices[] = [];
-const tripOrderMemo = new Map<
-  string,
-  { srcRef: TripPaymentWithInvoices[]; value: TripOrderCacheItem }
->();
+const tripOrders = reactive<Record<string, TripOrderCacheItem>>({});
 
 const parseFilename = (disposition?: string) => {
   if (!disposition) return "";
@@ -1390,12 +1388,8 @@ const indexToLetters = (idx: number) => {
   return out || "a";
 };
 
-const getTripOrder = (tripId: string): TripOrderCacheItem => {
-  const src = tripPayments[tripId] ?? EMPTY_PAYMENTS;
-  const cached = tripOrderMemo.get(tripId);
-  if (cached && cached.srcRef === src) return cached.value;
-
-  const ordered = [...src]
+const computeTripOrder = (src: TripPaymentWithInvoices[]): TripOrderCacheItem => {
+  const ordered = [...(src || [])]
     .sort((a, b) => {
       const ta = paymentSortTs(a);
       const tb = paymentSortTs(b);
@@ -1431,13 +1425,11 @@ const getTripOrder = (tripId: string): TripOrderCacheItem => {
     invoiceSeq[p.id] = m;
   }
 
-  const value = { ordered, paymentSeq, invoiceSeq };
-  tripOrderMemo.set(tripId, { srcRef: src, value });
-  return value;
+  return { ordered, paymentSeq, invoiceSeq };
 };
 
 const getPaymentSeq = (tripId: string, paymentId: string) =>
-  getTripOrder(tripId).paymentSeq[paymentId] || "";
+  tripOrders[tripId]?.paymentSeq?.[paymentId] || "";
 
 const tripExportOptions = computed(() =>
   trips.value.map((t) => ({
@@ -1451,9 +1443,9 @@ const formatInvoiceChipLabel = (
   paymentId: string,
   inv: TripPaymentInvoice,
 ) => {
-  const order = getTripOrder(tripId);
-  const pSeq = order.paymentSeq[paymentId] || "";
-  const invSeq = order.invoiceSeq[paymentId]?.[inv.id] || "";
+  const order = tripOrders[tripId];
+  const pSeq = order?.paymentSeq?.[paymentId] || "";
+  const invSeq = order?.invoiceSeq?.[paymentId]?.[inv.id] || "";
   const prefix = pSeq ? `${pSeq}${invSeq}` : invSeq;
   const label = inv.invoice_number || inv.seller_name || inv.id;
   return prefix ? `${prefix} ${label}` : String(label || "");
@@ -1565,14 +1557,20 @@ const handleTripOpen = (e: { index: number }) => {
   const trip = pagedTrips.value[e.index];
   if (!trip) return;
   openTripIds.add(trip.id);
-  if (tripPayments[trip.id]) return;
-  loadTripPayments(trip.id);
+  if (tripPayments[trip.id]) {
+    if (!tripOrders[trip.id]) {
+      tripOrders[trip.id] = computeTripOrder(tripPayments[trip.id] || []);
+    }
+    return;
+  }
+  void loadTripPayments(trip.id);
 };
 
 const handleTripClose = (e: { index: number }) => {
   const trip = pagedTrips.value[e.index];
   if (!trip) return;
   openTripIds.delete(trip.id);
+  delete tripOrders[trip.id];
 };
 
 const reloadAll = async () => {
