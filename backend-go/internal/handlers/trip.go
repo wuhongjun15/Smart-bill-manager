@@ -9,6 +9,7 @@ import (
 	"smart-bill-manager/internal/middleware"
 	"smart-bill-manager/internal/services"
 	"smart-bill-manager/internal/utils"
+	"gorm.io/gorm"
 )
 
 type TripHandler struct {
@@ -30,6 +31,7 @@ func (h *TripHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.PUT("/:id", h.Update)
 	r.GET("/:id/summary", h.GetSummary)
 	r.GET("/:id/payments", h.GetPayments)
+	r.GET("/:id/export", h.ExportZip)
 	r.GET("/:id/cascade-preview", h.CascadePreview)
 	r.DELETE("/:id", h.DeleteCascade)
 }
@@ -110,6 +112,39 @@ func (h *TripHandler) GetPayments(c *gin.Context) {
 		return
 	}
 	utils.SuccessData(c, payments)
+}
+
+func (h *TripHandler) ExportZip(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		utils.Error(c, 400, "参数错误", nil)
+		return
+	}
+
+	b, filename, err := h.tripService.ExportTripZip(middleware.GetEffectiveUserID(c), id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			utils.Error(c, 404, "行程不存在", err)
+			return
+		}
+		if strings.Contains(err.Error(), "no payments") {
+			utils.Error(c, 400, "行程内没有可导出的支付记录", err)
+			return
+		}
+		utils.Error(c, 500, "导出失败", err)
+		return
+	}
+
+	filename = strings.ReplaceAll(filename, "\n", "")
+	filename = strings.ReplaceAll(filename, "\r", "")
+	filename = strings.ReplaceAll(filename, "\"", "")
+	if strings.TrimSpace(filename) == "" {
+		filename = "trip_export.zip"
+	}
+
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	c.Data(200, "application/zip", b)
 }
 
 func (h *TripHandler) CascadePreview(c *gin.Context) {

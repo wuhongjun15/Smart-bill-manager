@@ -27,6 +27,11 @@ export const tripsApi = {
       params: { includeInvoices: includeInvoices ? 1 : 0 },
     }),
 
+  exportZip: async (id: string) =>
+    api.get(`/trips/${id}/export`, {
+      responseType: 'blob',
+    }),
+
   cascadePreview: (id: string) => api.get<ApiResponse<TripCascadePreview>>(`/trips/${id}/cascade-preview`),
 
   deleteCascade: (

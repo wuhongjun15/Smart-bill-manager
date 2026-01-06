@@ -44,6 +44,25 @@
               <div v-else class="trip-list">
                 <div class="trip-list-toolbar">
                   <small class="muted">共 {{ tripListTotal }} 个行程</small>
+                  <div class="trip-list-toolbar-actions">
+                    <Dropdown
+                      v-model="exportTripSelection"
+                      :options="tripExportOptions"
+                      optionLabel="label"
+                      optionValue="value"
+                      placeholder="选择行程"
+                      filter
+                      class="trip-export-dropdown"
+                    />
+                    <Button
+                      label="导出"
+                      icon="pi pi-download"
+                      class="p-button-outlined"
+                      :disabled="!exportTripSelection"
+                      :loading="exportingTripId === exportTripSelection"
+                      @click="exportSelectedTrip"
+                    />
+                  </div>
                 </div>
 
                 <Accordion
@@ -133,6 +152,13 @@
                     <div class="trip-actions">
                       <div class="trip-actions-left">
                         <Button
+                          label="导出"
+                          icon="pi pi-download"
+                          class="p-button-text"
+                          :loading="exportingTripId === trip.id"
+                          @click="exportTrip(trip)"
+                        />
+                        <Button
                           label="编辑行程"
                           icon="pi pi-pencil"
                           class="p-button-text"
@@ -156,23 +182,27 @@
 
                     <div class="sbm-dt-hscroll">
                       <DataTable
-                        :value="tripPayments[trip.id] || []"
+                        :value="getTripOrder(trip.id).ordered"
                         :loading="loadingPaymentsTripId === trip.id"
                         responsiveLayout="scroll"
                         :paginator="true"
                         :rows="10"
                         :rowsPerPageOptions="[10, 20, 50]"
-                        sortField="transaction_time"
-                        :sortOrder="-1"
                         class="trip-table"
                         :pt="tableScrollPt"
                         :tableStyle="tripTableStyle"
                       >
+                        <Column header="序号" :style="{ width: '84px' }">
+                          <template #body="{ data: row }">
+                            <span class="sbm-mono">{{
+                              getPaymentSeq(trip.id, row.id) || "-"
+                            }}</span>
+                          </template>
+                        </Column>
                         <Column
                           field="amount"
                           header="金额"
                           :style="{ width: '120px' }"
-                          sortable
                         >
                           <template #body="{ data: row }">
                             <span class="amount">{{
@@ -202,7 +232,6 @@
                           field="transaction_time"
                           header="支付时间"
                           :style="{ width: '180px' }"
-                          sortable
                         >
                           <template #body="{ data: row }">
                             {{ formatDateTime(row.transaction_time) }}
@@ -247,14 +276,10 @@
                                     inv.bad_debt ? 'danger' : 'secondary'
                                   "
                                   :value="
-                                    inv.invoice_number ||
-                                    inv.seller_name ||
-                                    inv.id
+                                    formatInvoiceChipLabel(trip.id, row.id, inv)
                                   "
                                   :title="
-                                    inv.invoice_number ||
-                                    inv.seller_name ||
-                                    inv.id
+                                    formatInvoiceChipLabel(trip.id, row.id, inv)
                                   "
                                 />
                               </button>
@@ -999,6 +1024,8 @@ const summaries = reactive<Record<string, TripSummary>>({});
 const tripPayments = reactive<Record<string, TripPaymentWithInvoices[]>>({});
 
 const loadingPaymentsTripId = ref<string | null>(null);
+const exportingTripId = ref<string | null>(null);
+const exportTripSelection = ref<string | null>(null);
 const deletingTripId = ref<string | null>(null);
 const deleteTripModalVisible = ref(false);
 const deleteTripTarget = ref<Trip | null>(null);
@@ -1310,6 +1337,154 @@ const loadTripPayments = async (tripId: string) => {
     tripPayments[tripId] = res.data.data || [];
   } finally {
     loadingPaymentsTripId.value = null;
+  }
+};
+
+type TripOrderCacheItem = {
+  src: TripPaymentWithInvoices[];
+  ordered: TripPaymentWithInvoices[];
+  paymentSeq: Record<string, string>;
+  invoiceSeq: Record<string, Record<string, string>>;
+};
+
+const tripOrderCache = reactive<Record<string, TripOrderCacheItem>>({});
+
+const parseFilename = (disposition?: string) => {
+  if (!disposition) return "";
+  const m = disposition.match(/filename=\"?([^\";]+)\"?/i);
+  return m?.[1] || "";
+};
+
+const sanitizeDownloadFilename = (name: string) =>
+  String(name || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .slice(0, 120) || "trip_export.zip";
+
+const paymentSortTs = (p: TripPaymentWithInvoices) => {
+  const ts = Number((p as any).transaction_time_ts || 0);
+  if (Number.isFinite(ts) && ts > 0) return ts;
+  const parsed = dayjs(p.transaction_time);
+  if (parsed.isValid()) return parsed.valueOf();
+  return Number.MAX_SAFE_INTEGER;
+};
+
+const invoiceSortKey = (inv: TripPaymentInvoice) => {
+  const parsed = inv.invoice_date ? dayjs(inv.invoice_date) : null;
+  const ts = parsed && parsed.isValid() ? parsed.valueOf() : Number.MAX_SAFE_INTEGER;
+  return ts;
+};
+
+const indexToLetters = (idx: number) => {
+  let n = idx + 1;
+  let out = "";
+  while (n > 0) {
+    n -= 1;
+    out = String.fromCharCode(97 + (n % 26)) + out;
+    n = Math.floor(n / 26);
+  }
+  return out || "a";
+};
+
+const getTripOrder = (tripId: string): TripOrderCacheItem => {
+  const src = tripPayments[tripId] || [];
+  const cached = tripOrderCache[tripId];
+  if (cached && cached.src === src) return cached;
+
+  const ordered = [...src].sort((a, b) => {
+    const ta = paymentSortTs(a);
+    const tb = paymentSortTs(b);
+    if (ta !== tb) return ta - tb;
+    return String(a.id).localeCompare(String(b.id));
+  });
+
+  const width = Math.max(3, String(ordered.length).length);
+  const paymentSeq: Record<string, string> = {};
+  const invoiceSeq: Record<string, Record<string, string>> = {};
+
+  for (let i = 0; i < ordered.length; i += 1) {
+    const p = ordered[i];
+    const seq = String(i + 1).padStart(width, "0");
+    paymentSeq[p.id] = seq;
+
+    const invs = [...(p.invoices || [])].sort((a, b) => {
+      const ka = invoiceSortKey(a);
+      const kb = invoiceSortKey(b);
+      if (ka !== kb) return ka - kb;
+      const na = String(a.invoice_number || "");
+      const nb = String(b.invoice_number || "");
+      if (na !== nb) return na.localeCompare(nb);
+      return String(a.id).localeCompare(String(b.id));
+    });
+    (p as any).invoices = invs;
+
+    const m: Record<string, string> = {};
+    for (let j = 0; j < invs.length; j += 1) {
+      m[invs[j].id] = indexToLetters(j);
+    }
+    invoiceSeq[p.id] = m;
+  }
+
+  const next = { src, ordered, paymentSeq, invoiceSeq };
+  tripOrderCache[tripId] = next;
+  return next;
+};
+
+const getPaymentSeq = (tripId: string, paymentId: string) =>
+  getTripOrder(tripId).paymentSeq[paymentId] || "";
+
+const tripExportOptions = computed(() =>
+  trips.value.map((t) => ({
+    label: `${t.name} · ${formatDateTime(t.start_time)}~${formatDateTime(t.end_time)}`,
+    value: t.id,
+  })),
+);
+
+const formatInvoiceChipLabel = (
+  tripId: string,
+  paymentId: string,
+  inv: TripPaymentInvoice,
+) => {
+  const order = getTripOrder(tripId);
+  const pSeq = order.paymentSeq[paymentId] || "";
+  const invSeq = order.invoiceSeq[paymentId]?.[inv.id] || "";
+  const prefix = pSeq ? `${pSeq}${invSeq}` : invSeq;
+  const label = inv.invoice_number || inv.seller_name || inv.id;
+  return prefix ? `${prefix} ${label}` : String(label || "");
+};
+
+const exportSelectedTrip = async () => {
+  if (!exportTripSelection.value) return;
+  const trip = trips.value.find((t) => t.id === exportTripSelection.value);
+  if (!trip) {
+    toast.add({ severity: "warn", summary: "请选择一个行程", life: 2500 });
+    return;
+  }
+  await exportTrip(trip);
+};
+
+const exportTrip = async (trip: Trip) => {
+  exportingTripId.value = trip.id;
+  try {
+    const res = await tripsApi.exportZip(trip.id);
+    const blob = new Blob([res.data], { type: "application/zip" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download =
+      parseFilename((res.headers as any)?.["content-disposition"]) ||
+      sanitizeDownloadFilename(`trip_${trip.name}.zip`);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    toast.add({ severity: "success", summary: "已导出 ZIP", life: 2000 });
+  } catch (e: any) {
+    const msg = e?.response?.data?.message || "导出失败";
+    toast.add({ severity: "error", summary: msg, life: 3500 });
+  } finally {
+    exportingTripId.value = null;
   }
 };
 
@@ -1936,6 +2111,17 @@ onMounted(async () => {
   flex-wrap: wrap;
 }
 
+.trip-list-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.trip-export-dropdown {
+  min-width: 260px;
+}
+
 .trip-accordion :deep(.p-accordioncontent),
 .trip-accordion :deep(.p-accordioncontent-wrapper),
 .trip-accordion :deep(.p-accordioncontent-content) {
@@ -2342,6 +2528,12 @@ onMounted(async () => {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 16px;
+}
+
+.sbm-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 @media (max-width: 980px) {
