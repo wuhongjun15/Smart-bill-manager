@@ -51,7 +51,11 @@
             responsiveLayout="scroll"
             :tableStyle="samplesTableStyle"
             :paginator="true"
-            :rows="20"
+            :rows="limit"
+            :first="offset"
+            :rowsPerPageOptions="[10, 20, 50, 100]"
+            paginatorTemplate="RowsPerPageDropdown FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink CurrentPageReport"
+            currentPageReportTemplate="共 {totalRecords} 条"
             :totalRecords="total"
             lazy
             dataKey="id"
@@ -83,7 +87,7 @@
             </Column>
             <Column field="source_id" header="来源ID" :style="{ width: '26%', minWidth: '240px' }">
               <template #body="{ data: row }">
-                <span class="mono sbm-ellipsis">{{ displaySourceId(row) }}</span>
+                <span class="mono sbm-ellipsis" :title="String(row?.source_id || '')">{{ displaySourceId(row) }}</span>
               </template>
             </Column>
             <Column field="created_at" header="创建时间" :style="{ width: '16%', minWidth: '170px' }">
@@ -334,6 +338,15 @@ watch(originFilter, () => {
 
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+.sbm-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .dt-nowrap {
