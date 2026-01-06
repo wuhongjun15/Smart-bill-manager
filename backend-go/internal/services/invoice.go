@@ -357,6 +357,8 @@ func (s *InvoiceService) Create(ownerUserID string, input CreateInvoiceInput) (*
 type InvoiceFilterInput struct {
 	Limit        int  `form:"limit"`
 	Offset       int  `form:"offset"`
+	StartDate    string `form:"startDate"`
+	EndDate      string `form:"endDate"`
 	IncludeDraft bool `form:"includeDraft"`
 }
 
@@ -365,8 +367,46 @@ func (s *InvoiceService) GetAll(ownerUserID string, filter InvoiceFilterInput) (
 		OwnerUserID:   strings.TrimSpace(ownerUserID),
 		Limit:        filter.Limit,
 		Offset:       filter.Offset,
+		StartDate:    strings.TrimSpace(filter.StartDate),
+		EndDate:      strings.TrimSpace(filter.EndDate),
 		IncludeDraft: filter.IncludeDraft,
 	})
+}
+
+func (s *InvoiceService) List(ownerUserID string, filter InvoiceFilterInput) ([]models.Invoice, int64, error) {
+	filter.Limit, filter.Offset = normalizeLimitOffset(filter.Limit, filter.Offset)
+
+	selectCols := []string{
+		"id",
+		"owner_user_id",
+		"is_draft",
+		"payment_id",
+		"filename",
+		"original_name",
+		"file_path",
+		"file_size",
+		"invoice_number",
+		"invoice_date",
+		"amount",
+		"tax_amount",
+		"bad_debt",
+		"seller_name",
+		"buyer_name",
+		"parse_status",
+		"source",
+		"dedup_status",
+		"dedup_ref_id",
+		"created_at",
+	}
+
+	return s.repo.FindAllPaged(repository.InvoiceFilter{
+		OwnerUserID:   strings.TrimSpace(ownerUserID),
+		Limit:        filter.Limit,
+		Offset:       filter.Offset,
+		StartDate:    strings.TrimSpace(filter.StartDate),
+		EndDate:      strings.TrimSpace(filter.EndDate),
+		IncludeDraft: filter.IncludeDraft,
+	}, selectCols)
 }
 
 func (s *InvoiceService) GetUnlinked(ownerUserID string, limit int, offset int) ([]models.Invoice, int64, error) {
@@ -617,7 +657,11 @@ func (s *InvoiceService) Delete(ownerUserID string, id string) error {
 }
 
 func (s *InvoiceService) GetStats(ownerUserID string) (*models.InvoiceStats, error) {
-	return s.repo.GetStats(strings.TrimSpace(ownerUserID))
+	return s.repo.GetStats(strings.TrimSpace(ownerUserID), "", "")
+}
+
+func (s *InvoiceService) GetStatsByInvoiceDate(ownerUserID string, startDate string, endDate string) (*models.InvoiceStats, error) {
+	return s.repo.GetStats(strings.TrimSpace(ownerUserID), strings.TrimSpace(startDate), strings.TrimSpace(endDate))
 }
 
 // LinkPayment links an invoice to a payment

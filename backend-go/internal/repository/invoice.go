@@ -71,22 +71,55 @@ type InvoiceFilter struct {
 	OwnerUserID string
 	Limit  int
 	Offset int
+	// StartDate/EndDate are "YYYY-MM-DD" prefixes for filtering invoice_date.
+	StartDate string
+	EndDate   string
 	// IncludeDraft controls whether draft records are included.
 	// By default, drafts are hidden from normal list/stats flows.
 	IncludeDraft bool
 }
 
-func (r *InvoiceRepository) FindAll(filter InvoiceFilter) ([]models.Invoice, error) {
-	var invoices []models.Invoice
-
-	query := database.GetDB().Model(&models.Invoice{}).Order("created_at DESC")
+func (r *InvoiceRepository) buildFindAllQuery(filter InvoiceFilter) *gorm.DB {
+	query := database.GetDB().Model(&models.Invoice{})
 	if strings.TrimSpace(filter.OwnerUserID) != "" {
 		query = query.Where("owner_user_id = ?", strings.TrimSpace(filter.OwnerUserID))
 	}
 	if !filter.IncludeDraft {
 		query = query.Where("is_draft = 0")
 	}
+	if strings.TrimSpace(filter.StartDate) != "" && strings.TrimSpace(filter.EndDate) != "" {
+		start := strings.TrimSpace(filter.StartDate)
+		end := strings.TrimSpace(filter.EndDate)
+		query = query.Where("invoice_date IS NOT NULL AND LENGTH(invoice_date) >= 10")
+		query = query.Where("SUBSTR(invoice_date, 1, 10) >= ? AND SUBSTR(invoice_date, 1, 10) <= ?", start, end)
+	}
+	return query
+}
 
+func (r *InvoiceRepository) FindAll(filter InvoiceFilter) ([]models.Invoice, error) {
+	var invoices []models.Invoice
+	query := r.buildFindAllQuery(filter).Order("created_at DESC")
+	if filter.Limit > 0 {
+		query = query.Limit(filter.Limit)
+		if filter.Offset > 0 {
+			query = query.Offset(filter.Offset)
+		}
+	}
+	err := query.Find(&invoices).Error
+	return invoices, err
+}
+
+func (r *InvoiceRepository) FindAllPaged(filter InvoiceFilter, selectCols []string) ([]models.Invoice, int64, error) {
+	query := r.buildFindAllQuery(filter)
+	var total int64
+	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	query = query.Order("created_at DESC")
+	if len(selectCols) > 0 {
+		query = query.Select(selectCols)
+	}
 	if filter.Limit > 0 {
 		query = query.Limit(filter.Limit)
 		if filter.Offset > 0 {
@@ -94,8 +127,11 @@ func (r *InvoiceRepository) FindAll(filter InvoiceFilter) ([]models.Invoice, err
 		}
 	}
 
-	err := query.Find(&invoices).Error
-	return invoices, err
+	var invoices []models.Invoice
+	if err := query.Find(&invoices).Error; err != nil {
+		return nil, 0, err
+	}
+	return invoices, total, nil
 }
 
 func (r *InvoiceRepository) FindUnlinked(ownerUserID string, limit int, offset int) ([]models.Invoice, int64, error) {
@@ -202,14 +238,25 @@ func (r *InvoiceRepository) DeleteForOwner(ownerUserID string, id string) error 
 	return result.Error
 }
 
-func (r *InvoiceRepository) GetStats(ownerUserID string) (*models.InvoiceStats, error) {
+func (r *InvoiceRepository) GetStats(ownerUserID string, startDate string, endDate string) (*models.InvoiceStats, error) {
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	if ownerUserID == "" {
 		return nil, fmt.Errorf("missing owner_user_id")
 	}
+	startDate = strings.TrimSpace(startDate)
+	endDate = strings.TrimSpace(endDate)
+
 	stats := &models.InvoiceStats{
 		BySource: make(map[string]int),
 		ByMonth:  make(map[string]float64),
+	}
+
+	applyDate := func(q *gorm.DB) *gorm.DB {
+		if startDate != "" && endDate != "" {
+			q = q.Where("invoice_date IS NOT NULL AND LENGTH(invoice_date) >= 10")
+			q = q.Where("SUBSTR(invoice_date, 1, 10) >= ? AND SUBSTR(invoice_date, 1, 10) <= ?", startDate, endDate)
+		}
+		return q
 	}
 
 	type totalsRow struct {
@@ -217,11 +264,11 @@ func (r *InvoiceRepository) GetStats(ownerUserID string) (*models.InvoiceStats, 
 		TotalAmount float64 `gorm:"column:total_amount"`
 	}
 	var totals totalsRow
-	if err := database.GetDB().
+	if err := applyDate(database.GetDB().
 		Table("invoices").
 		Where("is_draft = 0 AND owner_user_id = ?", ownerUserID).
-		Select("COUNT(*) AS total_count, COALESCE(SUM(amount), 0) AS total_amount").
-		Scan(&totals).Error; err != nil {
+		Select("COUNT(*) AS total_count, COALESCE(SUM(amount), 0) AS total_amount"),
+	).Scan(&totals).Error; err != nil {
 		return nil, err
 	}
 	stats.TotalCount = int(totals.TotalCount)
@@ -233,12 +280,12 @@ func (r *InvoiceRepository) GetStats(ownerUserID string) (*models.InvoiceStats, 
 		Cnt    int64  `gorm:"column:cnt"`
 	}
 	var srcRows []srcRow
-	if err := database.GetDB().
+	if err := applyDate(database.GetDB().
 		Table("invoices").
 		Where("is_draft = 0 AND owner_user_id = ?", ownerUserID).
 		Select(`CASE WHEN source IS NULL OR TRIM(source) = '' THEN 'unknown' ELSE source END AS src, COUNT(*) AS cnt`).
-		Group("src").
-		Scan(&srcRows).Error; err != nil {
+		Group("src"),
+	).Scan(&srcRows).Error; err != nil {
 		return nil, err
 	}
 	for _, r := range srcRows {
@@ -251,13 +298,13 @@ func (r *InvoiceRepository) GetStats(ownerUserID string) (*models.InvoiceStats, 
 		Total float64 `gorm:"column:total"`
 	}
 	var monthRows []monthRow
-	if err := database.GetDB().
+	if err := applyDate(database.GetDB().
 		Table("invoices").
 		Where("is_draft = 0 AND owner_user_id = ?", ownerUserID).
 		Where("invoice_date IS NOT NULL AND LENGTH(invoice_date) >= 7 AND amount IS NOT NULL").
 		Select(`SUBSTR(invoice_date, 1, 7) AS m, COALESCE(SUM(amount), 0) AS total`).
-		Group("m").
-		Scan(&monthRows).Error; err != nil {
+		Group("m"),
+	).Scan(&monthRows).Error; err != nil {
 		return nil, err
 	}
 	for _, r := range monthRows {

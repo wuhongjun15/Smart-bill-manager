@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"smart-bill-manager/internal/middleware"
+	"smart-bill-manager/internal/models"
 	"smart-bill-manager/internal/services"
 	"smart-bill-manager/internal/utils"
 )
@@ -81,13 +82,16 @@ func (h *InvoiceHandler) GetAll(c *gin.Context) {
 		return
 	}
 
-	invoices, err := h.invoiceService.GetAll(middleware.GetEffectiveUserID(c), filter)
+	items, total, err := h.invoiceService.List(middleware.GetEffectiveUserID(c), filter)
 	if err != nil {
 		utils.Error(c, 500, "获取发票列表失败", err)
 		return
 	}
 
-	utils.SuccessData(c, invoices)
+	utils.SuccessData(c, gin.H{
+		"items": items,
+		"total": total,
+	})
 }
 
 func (h *InvoiceHandler) GetUnlinked(c *gin.Context) {
@@ -117,7 +121,20 @@ func (h *InvoiceHandler) GetUnlinked(c *gin.Context) {
 }
 
 func (h *InvoiceHandler) GetStats(c *gin.Context) {
-	stats, err := h.invoiceService.GetStats(middleware.GetEffectiveUserID(c))
+	startDate := strings.TrimSpace(c.Query("startDate"))
+	endDate := strings.TrimSpace(c.Query("endDate"))
+
+	var (
+		stats *models.InvoiceStats
+		err   error
+	)
+
+	ownerUserID := middleware.GetEffectiveUserID(c)
+	if startDate != "" || endDate != "" {
+		stats, err = h.invoiceService.GetStatsByInvoiceDate(ownerUserID, startDate, endDate)
+	} else {
+		stats, err = h.invoiceService.GetStats(ownerUserID)
+	}
 	if err != nil {
 		utils.Error(c, 500, "获取统计数据失败", err)
 		return

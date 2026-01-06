@@ -12,8 +12,8 @@ type UploadInvoiceAsyncResult = {
 }
 
 export const invoiceApi = {
-  getAll: (params?: { limit?: number; offset?: number }) =>
-    api.get<ApiResponse<Invoice[]>>('/invoices', { params }),
+  getAll: (params?: { limit?: number; offset?: number; startDate?: string; endDate?: string; includeDraft?: boolean }) =>
+    api.get<ApiResponse<{ items: Invoice[]; total: number }>>('/invoices', { params }),
 
   getUnlinked: (params?: { limit?: number; offset?: number }) =>
     api.get<ApiResponse<{ items: Invoice[]; total: number }>>('/invoices/unlinked', { params }),
@@ -21,8 +21,8 @@ export const invoiceApi = {
   getById: (id: string) =>
     api.get<ApiResponse<Invoice>>(`/invoices/${id}`),
   
-  getStats: () =>
-    api.get<ApiResponse<{ totalCount: number; totalAmount: number; bySource: Record<string, number>; byMonth: Record<string, number> }>>('/invoices/stats'),
+  getStats: (params?: { startDate?: string; endDate?: string }) =>
+    api.get<ApiResponse<{ totalCount: number; totalAmount: number; bySource: Record<string, number>; byMonth: Record<string, number> }>>('/invoices/stats', { params }),
   
   upload: (file: File, paymentId?: string) => {
     const formData = new FormData()

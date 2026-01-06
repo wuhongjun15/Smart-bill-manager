@@ -79,16 +79,20 @@
       <template #content>
         <DataTable
           class="invoices-table"
-          :value="filteredInvoices"
+          :value="invoices"
           :loading="loading"
           :paginator="true"
+          :lazy="true"
           :rows="pageSize"
+          :first="first"
+          :totalRecords="totalRecords"
           :rowsPerPageOptions="[10, 20, 50, 100]"
           responsiveLayout="scroll"
           sortField="created_at"
           :sortOrder="-1"
           dataKey="id"
           v-model:selection="selectedInvoices"
+          @page="onPage"
         >
           <Column v-if="batchDeleteMode" selectionMode="multiple" :style="{ width: '4%' }" />
           <Column field="original_name" :header="'\u6587\u4EF6\u540D'" :style="{ width: '16%' }">
@@ -778,6 +782,8 @@ const invoices = ref<Invoice[]>([])
 const selectedInvoices = ref<Invoice[]>([])
 const batchDeleteMode = ref(false)
 const pageSize = ref(10)
+const first = ref(0)
+const totalRecords = ref(0)
 const dateRange = ref<Date[] | null>(null)
 
 const stats = ref<{ totalCount: number; totalAmount: number; bySource: Record<string, number> } | null>(null)
@@ -915,8 +921,24 @@ const linkedPayments = ref<Payment[]>([])
 const loadInvoices = async () => {
   loading.value = true
   try {
-    const res = await invoiceApi.getAll()
-    if (res.data.success && res.data.data) invoices.value = res.data.data
+    const params: Record<string, any> = {
+      limit: pageSize.value,
+      offset: first.value,
+    }
+    if (dateRange.value && dateRange.value[0] && dateRange.value[1]) {
+      params.startDate = dayjs(dateRange.value[0]).format('YYYY-MM-DD')
+      params.endDate = dayjs(dateRange.value[1]).format('YYYY-MM-DD')
+    }
+    const res = await invoiceApi.getAll(params)
+    const data = res.data.data
+    if (res.data.success && data) {
+      invoices.value = data.items || []
+      totalRecords.value = typeof data.total === 'number' ? data.total : 0
+      if (invoices.value.length === 0 && totalRecords.value > 0 && first.value > 0) {
+        first.value = Math.max(0, first.value - pageSize.value)
+        await loadInvoices()
+      }
+    }
   } catch {
     toast.add({ severity: 'error', summary: '\u52A0\u8F7D\u53D1\u7968\u5217\u8868\u5931\u8D25', life: 3000 })
   } finally {
@@ -926,7 +948,11 @@ const loadInvoices = async () => {
 
 const loadStats = async () => {
   try {
-    const res = await invoiceApi.getStats()
+    const startDate =
+      dateRange.value?.[0] && dateRange.value?.[1] ? dayjs(dateRange.value[0]).format('YYYY-MM-DD') : undefined
+    const endDate =
+      dateRange.value?.[0] && dateRange.value?.[1] ? dayjs(dateRange.value[1]).format('YYYY-MM-DD') : undefined
+    const res = await invoiceApi.getStats({ startDate, endDate })
     if (res.data.success && res.data.data) stats.value = res.data.data
   } catch (error) {
     console.error('Load stats failed:', error)
@@ -934,7 +960,17 @@ const loadStats = async () => {
 }
 
 const handleDateChange = () => {
-  // 这里使用前端过滤，不需要请求后端
+  first.value = 0
+  selectedInvoices.value = []
+  loadInvoices()
+  loadStats()
+}
+
+const onPage = (event: any) => {
+  first.value = typeof event?.first === 'number' ? event.first : 0
+  pageSize.value = typeof event?.rows === 'number' ? event.rows : pageSize.value
+  selectedInvoices.value = []
+  loadInvoices()
 }
 
 const toggleBatchDeleteMode = () => {
@@ -974,17 +1010,6 @@ const handleBulkDelete = async () => {
   await loadStats()
 }
 
-const filteredInvoices = computed(() => {
-  const start = dateRange.value?.[0] ? dayjs(dateRange.value[0]).startOf('day') : null
-  const end = dateRange.value?.[1] ? dayjs(dateRange.value[1]).endOf('day') : null
-  if (!start || !end) return invoices.value
-  return invoices.value.filter(inv => {
-    const d = parseInvoiceDateToDayjs(inv.invoice_date)
-    if (!d) return false
-    return !d.isBefore(start) && !d.isAfter(end)
-  })
-})
-
 const computeStatsFromInvoices = (list: Invoice[]) => {
   let totalAmount = 0
   const bySource: Record<string, number> = {}
@@ -997,9 +1022,6 @@ const computeStatsFromInvoices = (list: Invoice[]) => {
 }
 
 const displayStats = computed(() => {
-  const start = dateRange.value?.[0]
-  const end = dateRange.value?.[1]
-  if (start && end) return computeStatsFromInvoices(filteredInvoices.value)
   if (stats.value) return stats.value
   return computeStatsFromInvoices(invoices.value)
 })
@@ -1299,17 +1321,26 @@ const handleDelete = async (id: string) => {
   }
 }
 
-const openPreview = (invoice: Invoice) => {
-  previewInvoice.value = invoice
+const openPreview = async (invoice: Invoice) => {
+  let full = invoice
+  if (invoice?.id && (!invoice?.raw_text || !invoice?.extracted_data)) {
+    try {
+      const res = await invoiceApi.getById(invoice.id)
+      if (res.data?.success && res.data?.data) full = res.data.data
+    } catch {
+      // ignore, fallback to list item
+    }
+  }
+  previewInvoice.value = full
   invoiceDetailEditing.value = false
   savingInvoiceDetail.value = false
-  invoiceDetailForm.invoice_number = invoice.invoice_number || ''
-  invoiceDetailForm.invoice_date = parseInvoiceDateToDate(invoice.invoice_date)
-  invoiceDetailForm.amount = invoice.amount ?? null
-  invoiceDetailForm.seller_name = invoice.seller_name || ''
-  invoiceDetailForm.buyer_name = invoice.buyer_name || ''
+  invoiceDetailForm.invoice_number = full.invoice_number || ''
+  invoiceDetailForm.invoice_date = parseInvoiceDateToDate(full.invoice_date)
+  invoiceDetailForm.amount = full.amount ?? null
+  invoiceDetailForm.seller_name = full.seller_name || ''
+  invoiceDetailForm.buyer_name = full.buyer_name || ''
   previewVisible.value = true
-  loadLinkedPayments(invoice.id)
+  loadLinkedPayments(full.id)
 }
 
 const downloadFile = async (invoice: Invoice) => {

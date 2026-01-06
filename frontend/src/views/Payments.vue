@@ -77,13 +77,17 @@
           :value="payments"
           :loading="loading"
           :paginator="true"
+          :lazy="true"
           :rows="pageSize"
+          :first="first"
+          :totalRecords="totalRecords"
           :rowsPerPageOptions="[10, 20, 50, 100]"
           responsiveLayout="scroll"
           sortField="transaction_time"
           :sortOrder="-1"
           dataKey="id"
           v-model:selection="selectedPayments"
+          @page="onPage"
         >
           <Column v-if="batchDeleteMode" selectionMode="multiple" :style="{ width: '4%' }" />
           <Column field="amount" :header="'\u91D1\u989D'" sortable :style="{ width: '10%' }">
@@ -764,6 +768,8 @@ const payments = ref<Payment[]>([])
 const selectedPayments = ref<Payment[]>([])
 const batchDeleteMode = ref(false)
 const pageSize = ref(10)
+const first = ref(0)
+const totalRecords = ref(0)
 const dateRange = ref<Date[] | null>(null)
 
 const stats = ref<{ totalAmount: number; totalCount: number } | null>(null)
@@ -1047,13 +1053,24 @@ const validateOcrForm = () => {
 const loadPayments = async () => {
   loading.value = true
   try {
-    const params: Record<string, string> = {}
+    const params: Record<string, any> = {
+      limit: pageSize.value,
+      offset: first.value,
+    }
     if (dateRange.value && dateRange.value[0] && dateRange.value[1]) {
       params.startDate = dayjs(dateRange.value[0]).startOf('day').toISOString()
       params.endDate = dayjs(dateRange.value[1]).endOf('day').toISOString()
     }
     const res = await paymentApi.getAll(params)
-    if (res.data.success && res.data.data) payments.value = res.data.data
+    const data = res.data.data
+    if (res.data.success && data) {
+      payments.value = data.items || []
+      totalRecords.value = typeof data.total === 'number' ? data.total : 0
+      if (payments.value.length === 0 && totalRecords.value > 0 && first.value > 0) {
+        first.value = Math.max(0, first.value - pageSize.value)
+        await loadPayments()
+      }
+    }
   } catch {
     toast.add({ severity: 'error', summary: '\u52A0\u8F7D\u652F\u4ED8\u8BB0\u5F55\u5931\u8D25', life: 3000 })
   } finally {
@@ -1091,8 +1108,17 @@ const invoiceCountLabel = (cnt?: number | null) => {
 }
 
 const handleDateChange = () => {
+  first.value = 0
+  selectedPayments.value = []
   loadPayments()
   loadStats()
+}
+
+const onPage = (event: any) => {
+  first.value = typeof event?.first === 'number' ? event.first : 0
+  pageSize.value = typeof event?.rows === 'number' ? event.rows : pageSize.value
+  selectedPayments.value = []
+  loadPayments()
 }
 
 const toggleBatchDeleteMode = () => {
@@ -1579,18 +1605,27 @@ const handleUnlinkInvoiceFromPayment = async (invoiceId: string) => {
   }
 }
 
-const openPaymentDetail = (payment: Payment) => {
-  detailPayment.value = payment
+const openPaymentDetail = async (payment: Payment) => {
+  let full = payment
+  if (payment?.id && !payment?.extracted_data) {
+    try {
+      const res = await paymentApi.getById(payment.id)
+      if (res.data?.success && res.data?.data) full = res.data.data
+    } catch {
+      // ignore, fallback to list item
+    }
+  }
+  detailPayment.value = full
   paymentDetailEditing.value = false
   savingPaymentDetail.value = false
   paymentTimePanel.value?.hide?.()
   paymentTimeLastTarget.value = null
   paymentDetailTimeDraft.value = null
-  paymentDetailForm.amount = Number(payment.amount || 0)
-  paymentDetailForm.merchant = payment.merchant || ''
-  paymentDetailForm.payment_method = normalizePaymentMethodText(payment.payment_method || '')
-  paymentDetailForm.description = payment.description || ''
-  paymentDetailForm.transaction_time = payment.transaction_time ? new Date(payment.transaction_time) : new Date()
+  paymentDetailForm.amount = Number(full.amount || 0)
+  paymentDetailForm.merchant = full.merchant || ''
+  paymentDetailForm.payment_method = normalizePaymentMethodText(full.payment_method || '')
+  paymentDetailForm.description = full.description || ''
+  paymentDetailForm.transaction_time = full.transaction_time ? new Date(full.transaction_time) : new Date()
   paymentDetailVisible.value = true
 }
 

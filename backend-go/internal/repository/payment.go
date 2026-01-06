@@ -40,9 +40,7 @@ type PaymentFilter struct {
 	IncludeDraft bool
 }
 
-func (r *PaymentRepository) FindAll(filter PaymentFilter) ([]models.Payment, error) {
-	var payments []models.Payment
-
+func (r *PaymentRepository) buildFindAllQuery(filter PaymentFilter) *gorm.DB {
 	query := database.GetDB().Model(&models.Payment{})
 	if filter.OwnerUserID != "" {
 		query = query.Where("owner_user_id = ?", filter.OwnerUserID)
@@ -50,7 +48,6 @@ func (r *PaymentRepository) FindAll(filter PaymentFilter) ([]models.Payment, err
 	if !filter.IncludeDraft {
 		query = query.Where("is_draft = 0")
 	}
-
 	if filter.StartTs > 0 {
 		query = query.Where("transaction_time_ts >= ?", filter.StartTs)
 	}
@@ -60,8 +57,13 @@ func (r *PaymentRepository) FindAll(filter PaymentFilter) ([]models.Payment, err
 	if filter.Category != "" {
 		query = query.Where("category = ?", filter.Category)
 	}
+	return query
+}
 
-	query = query.Order("transaction_time_ts DESC")
+func (r *PaymentRepository) FindAll(filter PaymentFilter) ([]models.Payment, error) {
+	var payments []models.Payment
+
+	query := r.buildFindAllQuery(filter).Order("transaction_time_ts DESC")
 
 	if filter.Limit > 0 {
 		query = query.Limit(filter.Limit)
@@ -72,6 +74,32 @@ func (r *PaymentRepository) FindAll(filter PaymentFilter) ([]models.Payment, err
 
 	err := query.Find(&payments).Error
 	return payments, err
+}
+
+func (r *PaymentRepository) FindAllPaged(filter PaymentFilter, selectCols []string) ([]models.Payment, int64, error) {
+	var payments []models.Payment
+
+	query := r.buildFindAllQuery(filter)
+	var total int64
+	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	query = query.Order("transaction_time_ts DESC")
+	if len(selectCols) > 0 {
+		query = query.Select(selectCols)
+	}
+	if filter.Limit > 0 {
+		query = query.Limit(filter.Limit)
+		if filter.Offset > 0 {
+			query = query.Offset(filter.Offset)
+		}
+	}
+
+	if err := query.Find(&payments).Error; err != nil {
+		return nil, 0, err
+	}
+	return payments, total, nil
 }
 
 func (r *PaymentRepository) FindByIDForOwner(ownerUserID string, id string) (*models.Payment, error) {

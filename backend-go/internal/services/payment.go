@@ -286,6 +286,19 @@ type PaymentFilterInput struct {
 	IncludeDraft bool `form:"includeDraft"`
 }
 
+func normalizeLimitOffset(limit, offset int) (int, int) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return limit, offset
+}
+
 func (s *PaymentService) GetAll(ownerUserID string, filter PaymentFilterInput) ([]models.Payment, error) {
 	startTs := int64(0)
 	endTs := int64(0)
@@ -361,6 +374,96 @@ func (s *PaymentService) GetAllWithInvoiceCounts(ownerUserID string, filter Paym
 		})
 	}
 	return out, nil
+}
+
+func (s *PaymentService) ListWithInvoiceCounts(ownerUserID string, filter PaymentFilterInput) ([]PaymentListItem, int64, error) {
+	startTs := int64(0)
+	endTs := int64(0)
+	if strings.TrimSpace(filter.StartDate) != "" {
+		if t, err := parseRFC3339ToUTC(filter.StartDate); err == nil {
+			startTs = unixMilli(t)
+		} else {
+			return nil, 0, fmt.Errorf("invalid startDate: %w", err)
+		}
+	}
+	if strings.TrimSpace(filter.EndDate) != "" {
+		if t, err := parseRFC3339ToUTC(filter.EndDate); err == nil {
+			endTs = unixMilli(t)
+		} else {
+			return nil, 0, fmt.Errorf("invalid endDate: %w", err)
+		}
+	}
+	filter.Limit, filter.Offset = normalizeLimitOffset(filter.Limit, filter.Offset)
+
+	selectCols := []string{
+		"id",
+		"owner_user_id",
+		"is_draft",
+		"trip_id",
+		"trip_assignment_source",
+		"trip_assignment_state",
+		"bad_debt",
+		"amount",
+		"merchant",
+		"category",
+		"payment_method",
+		"description",
+		"transaction_time",
+		"transaction_time_ts",
+		"screenshot_path",
+		"dedup_status",
+		"dedup_ref_id",
+		"created_at",
+	}
+
+	payments, total, err := s.repo.FindAllPaged(repository.PaymentFilter{
+		OwnerUserID:  strings.TrimSpace(ownerUserID),
+		Limit:        filter.Limit,
+		Offset:       filter.Offset,
+		StartDate:    filter.StartDate,
+		EndDate:      filter.EndDate,
+		StartTs:      startTs,
+		EndTs:        endTs,
+		Category:     filter.Category,
+		IncludeDraft: filter.IncludeDraft,
+	}, selectCols)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(payments) == 0 {
+		return []PaymentListItem{}, total, nil
+	}
+
+	ids := make([]string, 0, len(payments))
+	for _, p := range payments {
+		ids = append(ids, p.ID)
+	}
+
+	type row struct {
+		PaymentID string `gorm:"column:payment_id"`
+		Cnt       int    `gorm:"column:cnt"`
+	}
+	var rows []row
+	_ = database.GetDB().
+		Table("invoice_payment_links").
+		Select("payment_id, COUNT(*) AS cnt").
+		Where("payment_id IN ?", ids).
+		Group("payment_id").
+		Scan(&rows).Error
+
+	counts := make(map[string]int, len(rows))
+	for _, r := range rows {
+		counts[strings.TrimSpace(r.PaymentID)] = r.Cnt
+	}
+
+	out := make([]PaymentListItem, 0, len(payments))
+	for _, p := range payments {
+		out = append(out, PaymentListItem{
+			Payment:      p,
+			InvoiceCount: counts[p.ID],
+		})
+	}
+	return out, total, nil
 }
 
 func (s *PaymentService) GetByID(ownerUserID string, id string) (*models.Payment, error) {

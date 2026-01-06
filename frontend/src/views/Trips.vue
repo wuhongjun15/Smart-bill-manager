@@ -1919,12 +1919,25 @@ const refreshCalendarMonth = async () => {
   const { year, month } = calendarMonth.value;
   const start = dayjs().year(year).month(month).startOf("month").toISOString();
   const end = dayjs().year(year).month(month).endOf("month").toISOString();
-  const res = await paymentApi.getAll({
-    startDate: start,
-    endDate: end,
-    limit: 2000,
-  });
-  calendarMonthPayments.value = res.data.data || [];
+  const limit = 200;
+  const cap = 2000;
+  let offset = 0;
+  const all: Payment[] = [];
+  while (offset < cap) {
+    const res = await paymentApi.getAll({
+      startDate: start,
+      endDate: end,
+      limit,
+      offset,
+    });
+    const data = res.data?.data as any;
+    const items = (data?.items || []) as Payment[];
+    const total: number = typeof data?.total === "number" ? data.total : 0;
+    all.push(...items);
+    offset += items.length;
+    if (items.length === 0 || (total > 0 && offset >= total)) break;
+  }
+  calendarMonthPayments.value = all;
 };
 
 const goToThisMonth = () => {

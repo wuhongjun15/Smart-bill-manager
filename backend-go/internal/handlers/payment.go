@@ -60,13 +60,16 @@ func (h *PaymentHandler) GetAll(c *gin.Context) {
 	}
 
 	ownerUserID := middleware.GetEffectiveUserID(c)
-	payments, err := h.paymentService.GetAllWithInvoiceCounts(ownerUserID, filter)
+	items, total, err := h.paymentService.ListWithInvoiceCounts(ownerUserID, filter)
 	if err != nil {
 		utils.Error(c, 500, "获取支付记录失败", err)
 		return
 	}
 
-	utils.SuccessData(c, payments)
+	utils.SuccessData(c, gin.H{
+		"items": items,
+		"total": total,
+	})
 }
 
 func (h *PaymentHandler) GetStats(c *gin.Context) {

@@ -16,8 +16,8 @@ type UploadScreenshotAsyncResult = {
 }
 
 export const paymentApi = {
-  getAll: (params?: { limit?: number; offset?: number; startDate?: string; endDate?: string; category?: string }) =>
-    api.get<ApiResponse<Payment[]>>('/payments', { params }),
+  getAll: (params?: { limit?: number; offset?: number; startDate?: string; endDate?: string; category?: string; includeDraft?: boolean }) =>
+    api.get<ApiResponse<{ items: Payment[]; total: number }>>('/payments', { params }),
   
   getById: (id: string) =>
     api.get<ApiResponse<Payment>>(`/payments/${id}`),
