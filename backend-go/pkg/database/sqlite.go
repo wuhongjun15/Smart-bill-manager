@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/driver/sqlite"
@@ -22,8 +24,9 @@ func Init(dataDir string) *gorm.DB {
 
 	dbPath := filepath.Join(dataDir, "bills.db")
 
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+	dsn := buildSQLiteDSN(dbPath)
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: newGormLogger(),
 	})
 	if err != nil {
 		log.Fatal("Failed to connect to database:", err)
@@ -35,8 +38,7 @@ func Init(dataDir string) *gorm.DB {
 	}
 
 	// SQLite tuning:
-	// - keep a single connection so PRAGMA settings apply consistently
-	// - reduce "database is locked" under concurrent requests
+	// - apply PRAGMAs for compatibility (DSN sets most options for new conns)
 	// - improve read/write concurrency with WAL
 	applySQLiteTuning(sqlDB)
 
@@ -53,9 +55,10 @@ func applySQLiteTuning(sqlDB *sql.DB) {
 		return
 	}
 
-	// One connection avoids per-connection PRAGMA drift and reduces lock contention.
-	sqlDB.SetMaxOpenConns(1)
-	sqlDB.SetMaxIdleConns(1)
+	// Allow concurrent readers under WAL while keeping SQLite safe.
+	// Writes are still serialized by SQLite.
+	sqlDB.SetMaxOpenConns(5)
+	sqlDB.SetMaxIdleConns(5)
 	sqlDB.SetConnMaxLifetime(0)
 	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 
@@ -76,4 +79,52 @@ func applySQLiteTuning(sqlDB *sql.DB) {
 			log.Printf("[DB] sqlite pragma failed: %s err=%v", q, err)
 		}
 	}
+}
+
+func buildSQLiteDSN(dbPath string) string {
+	// Apply defaults per-connection via DSN so increased pool sizes remain safe.
+	// Most pragmas are also re-applied in applySQLiteTuning as a compatibility fallback.
+	p := strings.TrimSpace(dbPath)
+	if p == "" {
+		return dbPath
+	}
+	// Avoid duplicating params if caller already passed a DSN.
+	if strings.Contains(p, "?") {
+		return p
+	}
+	return p + "?" + strings.Join([]string{
+		"_busy_timeout=5000",
+		"_foreign_keys=1",
+		"_journal_mode=WAL",
+		"_synchronous=NORMAL",
+		"_temp_store=MEMORY",
+		"_cache_size=-20000",
+		"_wal_autocheckpoint=1000",
+	}, "&")
+}
+
+func newGormLogger() logger.Interface {
+	// Default to Warn in production, Info during debugging.
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("SBM_DB_LOG_SQL")))
+	lvl := logger.Warn
+	if mode == "1" || mode == "true" || mode == "yes" || mode == "on" {
+		lvl = logger.Info
+	}
+
+	slowMs := 200
+	if v := strings.TrimSpace(os.Getenv("SBM_DB_SLOW_MS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			slowMs = n
+		}
+	}
+
+	return logger.New(
+		log.New(os.Stdout, "\r\n[GORM] ", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             time.Duration(slowMs) * time.Millisecond,
+			LogLevel:                  lvl,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  false,
+		},
+	)
 }
