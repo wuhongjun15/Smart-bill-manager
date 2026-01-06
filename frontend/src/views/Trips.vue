@@ -1341,13 +1341,16 @@ const loadTripPayments = async (tripId: string) => {
 };
 
 type TripOrderCacheItem = {
-  src: TripPaymentWithInvoices[];
   ordered: TripPaymentWithInvoices[];
   paymentSeq: Record<string, string>;
   invoiceSeq: Record<string, Record<string, string>>;
 };
 
-const tripOrderCache = reactive<Record<string, TripOrderCacheItem>>({});
+const EMPTY_PAYMENTS: TripPaymentWithInvoices[] = [];
+const tripOrderMemo = new Map<
+  string,
+  { srcRef: TripPaymentWithInvoices[]; value: TripOrderCacheItem }
+>();
 
 const parseFilename = (disposition?: string) => {
   if (!disposition) return "";
@@ -1388,16 +1391,29 @@ const indexToLetters = (idx: number) => {
 };
 
 const getTripOrder = (tripId: string): TripOrderCacheItem => {
-  const src = tripPayments[tripId] || [];
-  const cached = tripOrderCache[tripId];
-  if (cached && cached.src === src) return cached;
+  const src = tripPayments[tripId] ?? EMPTY_PAYMENTS;
+  const cached = tripOrderMemo.get(tripId);
+  if (cached && cached.srcRef === src) return cached.value;
 
-  const ordered = [...src].sort((a, b) => {
-    const ta = paymentSortTs(a);
-    const tb = paymentSortTs(b);
-    if (ta !== tb) return ta - tb;
-    return String(a.id).localeCompare(String(b.id));
-  });
+  const ordered = [...src]
+    .sort((a, b) => {
+      const ta = paymentSortTs(a);
+      const tb = paymentSortTs(b);
+      if (ta !== tb) return ta - tb;
+      return String(a.id).localeCompare(String(b.id));
+    })
+    .map((p) => {
+      const invs = [...(p.invoices || [])].sort((a, b) => {
+        const ka = invoiceSortKey(a);
+        const kb = invoiceSortKey(b);
+        if (ka !== kb) return ka - kb;
+        const na = String(a.invoice_number || "");
+        const nb = String(b.invoice_number || "");
+        if (na !== nb) return na.localeCompare(nb);
+        return String(a.id).localeCompare(String(b.id));
+      });
+      return { ...p, invoices: invs };
+    });
 
   const width = Math.max(3, String(ordered.length).length);
   const paymentSeq: Record<string, string> = {};
@@ -1408,27 +1424,16 @@ const getTripOrder = (tripId: string): TripOrderCacheItem => {
     const seq = String(i + 1).padStart(width, "0");
     paymentSeq[p.id] = seq;
 
-    const invs = [...(p.invoices || [])].sort((a, b) => {
-      const ka = invoiceSortKey(a);
-      const kb = invoiceSortKey(b);
-      if (ka !== kb) return ka - kb;
-      const na = String(a.invoice_number || "");
-      const nb = String(b.invoice_number || "");
-      if (na !== nb) return na.localeCompare(nb);
-      return String(a.id).localeCompare(String(b.id));
-    });
-    (p as any).invoices = invs;
-
     const m: Record<string, string> = {};
-    for (let j = 0; j < invs.length; j += 1) {
-      m[invs[j].id] = indexToLetters(j);
+    for (let j = 0; j < (p.invoices || []).length; j += 1) {
+      m[p.invoices[j].id] = indexToLetters(j);
     }
     invoiceSeq[p.id] = m;
   }
 
-  const next = { src, ordered, paymentSeq, invoiceSeq };
-  tripOrderCache[tripId] = next;
-  return next;
+  const value = { ordered, paymentSeq, invoiceSeq };
+  tripOrderMemo.set(tripId, { srcRef: src, value });
+  return value;
 };
 
 const getPaymentSeq = (tripId: string, paymentId: string) =>
