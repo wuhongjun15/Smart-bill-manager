@@ -175,7 +175,7 @@ func (h *AdminRegressionSamplesHandler) Export(c *gin.Context) {
 	kind := strings.TrimSpace(c.Query("kind"))
 	origin := strings.TrimSpace(c.Query("origin"))
 	redact := strings.TrimSpace(c.Query("redact")) == "1"
-	b, filename, err := h.svc.ExportZip(services.ExportRegressionSamplesParams{
+	plan, err := h.svc.PrepareExportZip(services.ExportRegressionSamplesParams{
 		Kind:   kind,
 		Origin: origin,
 		Redact: redact,
@@ -184,9 +184,16 @@ func (h *AdminRegressionSamplesHandler) Export(c *gin.Context) {
 		utils.Error(c, 400, "导出失败", err)
 		return
 	}
+	filename := strings.ReplaceAll(plan.Filename, "\n", "")
+	filename = strings.ReplaceAll(filename, "\r", "")
+	filename = strings.ReplaceAll(filename, "\"", "")
+	if strings.TrimSpace(filename) == "" {
+		filename = "regression_samples.zip"
+	}
 	c.Header("Content-Type", "application/zip")
 	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
-	c.Data(200, "application/zip", b)
+	c.Status(200)
+	_ = plan.Write(c.Writer)
 }
 
 func (h *AdminRegressionSamplesHandler) ExportSelected(c *gin.Context) {
@@ -195,7 +202,7 @@ func (h *AdminRegressionSamplesHandler) ExportSelected(c *gin.Context) {
 		utils.Error(c, 400, "参数错误", err)
 		return
 	}
-	b, filename, err := h.svc.ExportZip(services.ExportRegressionSamplesParams{
+	plan, err := h.svc.PrepareExportZip(services.ExportRegressionSamplesParams{
 		Kind:   strings.TrimSpace(input.Kind),
 		Origin: strings.TrimSpace(input.Origin),
 		IDs:    input.IDs,
@@ -205,7 +212,14 @@ func (h *AdminRegressionSamplesHandler) ExportSelected(c *gin.Context) {
 		utils.Error(c, 400, "导出失败", err)
 		return
 	}
+	filename := strings.ReplaceAll(plan.Filename, "\n", "")
+	filename = strings.ReplaceAll(filename, "\r", "")
+	filename = strings.ReplaceAll(filename, "\"", "")
+	if strings.TrimSpace(filename) == "" {
+		filename = "regression_samples.zip"
+	}
 	c.Header("Content-Type", "application/zip")
 	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
-	c.Data(200, "application/zip", b)
+	c.Status(200)
+	_ = plan.Write(c.Writer)
 }

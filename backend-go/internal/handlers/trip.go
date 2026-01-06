@@ -121,7 +121,7 @@ func (h *TripHandler) ExportZip(c *gin.Context) {
 		return
 	}
 
-	b, filename, err := h.tripService.ExportTripZip(middleware.GetEffectiveUserID(c), id)
+	plan, err := h.tripService.PrepareTripExportZip(middleware.GetEffectiveUserID(c), id)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			utils.Error(c, 404, "行程不存在", err)
@@ -135,7 +135,7 @@ func (h *TripHandler) ExportZip(c *gin.Context) {
 		return
 	}
 
-	filename = strings.ReplaceAll(filename, "\n", "")
+	filename := strings.ReplaceAll(plan.Filename, "\n", "")
 	filename = strings.ReplaceAll(filename, "\r", "")
 	filename = strings.ReplaceAll(filename, "\"", "")
 	if strings.TrimSpace(filename) == "" {
@@ -144,7 +144,8 @@ func (h *TripHandler) ExportZip(c *gin.Context) {
 
 	c.Header("Content-Type", "application/zip")
 	c.Header("Content-Disposition", "attachment; filename=\""+filename+"\"")
-	c.Data(200, "application/zip", b)
+	c.Status(200)
+	_ = plan.Write(c.Writer)
 }
 
 func (h *TripHandler) CascadePreview(c *gin.Context) {

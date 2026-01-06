@@ -2,7 +2,6 @@ package services
 
 import (
 	"archive/zip"
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -27,19 +26,19 @@ type tripExportInvoice struct {
 	CreatedAt     time.Time
 }
 
-func (s *TripService) ExportTripZip(ownerUserID string, tripID string) ([]byte, string, error) {
+func (s *TripService) PrepareTripExportZip(ownerUserID string, tripID string) (*ZipStream, error) {
 	db := database.GetDB()
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	tripID = strings.TrimSpace(tripID)
 	if ownerUserID == "" || tripID == "" {
-		return nil, "", fmt.Errorf("missing owner_user_id or trip_id")
+		return nil, fmt.Errorf("missing owner_user_id or trip_id")
 	}
 
 	var trip models.Trip
 	if err := db.Model(&models.Trip{}).
 		Where("id = ? AND owner_user_id = ?", tripID, ownerUserID).
 		First(&trip).Error; err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	var payments []models.Payment
@@ -49,10 +48,10 @@ func (s *TripService) ExportTripZip(ownerUserID string, tripID string) ([]byte, 
 		Where("is_draft = 0").
 		Order("transaction_time_ts ASC, id ASC").
 		Find(&payments).Error; err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	if len(payments) == 0 {
-		return nil, "", fmt.Errorf("no payments to export")
+		return nil, fmt.Errorf("no payments to export")
 	}
 
 	paymentIDs := make([]string, 0, len(payments))
@@ -70,7 +69,7 @@ func (s *TripService) ExportTripZip(ownerUserID string, tripID string) ([]byte, 
 		Select("payment_id, invoice_id").
 		Where("payment_id IN ?", paymentIDs).
 		Scan(&links).Error; err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	invoiceIDsSet := make(map[string]struct{}, len(links))
@@ -93,7 +92,7 @@ func (s *TripService) ExportTripZip(ownerUserID string, tripID string) ([]byte, 
 			Where("id IN ?", invoiceIDs).
 			Where("is_draft = 0").
 			Find(&invoices).Error; err != nil {
-			return nil, "", err
+			return nil, err
 		}
 		for _, inv := range invoices {
 			invByID[inv.ID] = tripExportInvoice{
@@ -125,96 +124,99 @@ func (s *TripService) ExportTripZip(ownerUserID string, tripID string) ([]byte, 
 	rootDir := zipBase + "_" + now
 	zipName := rootDir + ".zip"
 
-	buf := new(bytes.Buffer)
-	zw := zip.NewWriter(buf)
+	return &ZipStream{
+		Filename: zipName,
+		Write: func(w io.Writer) error {
+			zw := zip.NewWriter(w)
 
-	var warnings []string
-	_, _ = zw.Create(rootDir + "/")
+			var warnings []string
+			_, _ = zw.Create(rootDir + "/")
 
-	for i, p := range payments {
-		seq := fmt.Sprintf("%0*d", width, i+1)
-		when := formatZipTimeLabel(p.TransactionTime, p.CreatedAt)
-		merchant := sanitizeZipComponent(ptrOrEmpty(p.Merchant), 24)
-		amount := sanitizeZipComponent(fmt.Sprintf("%.2f", p.Amount), 16)
+			for i, p := range payments {
+				seq := fmt.Sprintf("%0*d", width, i+1)
+				when := formatZipTimeLabel(p.TransactionTime, p.CreatedAt)
+				merchant := sanitizeZipComponent(ptrOrEmpty(p.Merchant), 24)
+				amount := sanitizeZipComponent(fmt.Sprintf("%.2f", p.Amount), 16)
 
-		paymentDir := rootDir + "/" + strings.Trim(sanitizeZipComponent(strings.Join([]string{seq, when, merchant, amount}, "_"), 120), "_") + "/"
-		_, _ = zw.Create(paymentDir)
+				paymentDir := rootDir + "/" + strings.Trim(sanitizeZipComponent(strings.Join([]string{seq, when, merchant, amount}, "_"), 120), "_") + "/"
+				_, _ = zw.Create(paymentDir)
 
-		// Payment screenshot (optional)
-		if p.ScreenshotPath != nil && strings.TrimSpace(*p.ScreenshotPath) != "" {
-			stored := strings.TrimSpace(*p.ScreenshotPath)
-			abs, err := resolveUploadsFilePathAbs(s.uploadsDir, stored)
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("payment %s screenshot path invalid: %s (%v)", p.ID, stored, err))
-			} else if err := zipAddFile(zw, paymentDir+("payment_screenshot"+fileExtOrDefault(stored, ".png")), abs); err != nil {
-				warnings = append(warnings, fmt.Sprintf("payment %s screenshot read failed: %s (%v)", p.ID, stored, err))
+				// Payment screenshot (optional)
+				if p.ScreenshotPath != nil && strings.TrimSpace(*p.ScreenshotPath) != "" {
+					stored := strings.TrimSpace(*p.ScreenshotPath)
+					abs, err := resolveUploadsFilePathAbs(s.uploadsDir, stored)
+					if err != nil {
+						warnings = append(warnings, fmt.Sprintf("payment %s screenshot path invalid: %s (%v)", p.ID, stored, err))
+					} else if err := zipAddFile(zw, paymentDir+("payment_screenshot"+fileExtOrDefault(stored, ".png")), abs); err != nil {
+						warnings = append(warnings, fmt.Sprintf("payment %s screenshot read failed: %s (%v)", p.ID, stored, err))
+					}
+				}
+
+				// Linked invoices (0..N)
+				invIDs := byPayment[p.ID]
+				invs := make([]tripExportInvoice, 0, len(invIDs))
+				for _, invID := range invIDs {
+					if inv, ok := invByID[invID]; ok {
+						invs = append(invs, inv)
+					}
+				}
+				sort.Slice(invs, func(a, b int) bool {
+					da := invoiceDateKey(invs[a].InvoiceDate)
+					db := invoiceDateKey(invs[b].InvoiceDate)
+					if da != db {
+						return da < db
+					}
+					if !invs[a].CreatedAt.Equal(invs[b].CreatedAt) {
+						return invs[a].CreatedAt.Before(invs[b].CreatedAt)
+					}
+					return invs[a].ID < invs[b].ID
+				})
+
+				for j, inv := range invs {
+					sub := indexToLetters(j)
+					label := inv.ID
+					if inv.InvoiceNumber != nil && strings.TrimSpace(*inv.InvoiceNumber) != "" {
+						label = strings.TrimSpace(*inv.InvoiceNumber)
+					} else if inv.SellerName != nil && strings.TrimSpace(*inv.SellerName) != "" {
+						label = strings.TrimSpace(*inv.SellerName)
+					} else if len(inv.ID) >= 8 {
+						label = inv.ID[:8]
+					}
+					label = sanitizeZipComponent(label, 36)
+
+					stored := strings.TrimSpace(inv.FilePath)
+					if stored == "" {
+						warnings = append(warnings, fmt.Sprintf("invoice %s file_path missing", inv.ID))
+						continue
+					}
+
+					abs, err := resolveUploadsFilePathAbs(s.uploadsDir, stored)
+					if err != nil {
+						warnings = append(warnings, fmt.Sprintf("invoice %s path invalid: %s (%v)", inv.ID, stored, err))
+						continue
+					}
+
+					ext := filepath.Ext(inv.OriginalName)
+					if ext == "" {
+						ext = fileExtOrDefault(stored, ".pdf")
+					}
+					name := fmt.Sprintf("invoice_%s_%s%s", sub, label, ext)
+					if err := zipAddFile(zw, paymentDir+name, abs); err != nil {
+						warnings = append(warnings, fmt.Sprintf("invoice %s read failed: %s (%v)", inv.ID, stored, err))
+					}
+				}
 			}
-		}
 
-		// Linked invoices (0..N)
-		invIDs := byPayment[p.ID]
-		invs := make([]tripExportInvoice, 0, len(invIDs))
-		for _, invID := range invIDs {
-			if inv, ok := invByID[invID]; ok {
-				invs = append(invs, inv)
-			}
-		}
-		sort.Slice(invs, func(a, b int) bool {
-			da := invoiceDateKey(invs[a].InvoiceDate)
-			db := invoiceDateKey(invs[b].InvoiceDate)
-			if da != db {
-				return da < db
-			}
-			if !invs[a].CreatedAt.Equal(invs[b].CreatedAt) {
-				return invs[a].CreatedAt.Before(invs[b].CreatedAt)
-			}
-			return invs[a].ID < invs[b].ID
-		})
-
-		for j, inv := range invs {
-			sub := indexToLetters(j)
-			label := inv.ID
-			if inv.InvoiceNumber != nil && strings.TrimSpace(*inv.InvoiceNumber) != "" {
-				label = strings.TrimSpace(*inv.InvoiceNumber)
-			} else if inv.SellerName != nil && strings.TrimSpace(*inv.SellerName) != "" {
-				label = strings.TrimSpace(*inv.SellerName)
-			} else if len(inv.ID) >= 8 {
-				label = inv.ID[:8]
-			}
-			label = sanitizeZipComponent(label, 36)
-
-			stored := strings.TrimSpace(inv.FilePath)
-			if stored == "" {
-				warnings = append(warnings, fmt.Sprintf("invoice %s file_path missing", inv.ID))
-				continue
+			if len(warnings) > 0 {
+				b := []byte(strings.Join(warnings, "\n") + "\n")
+				if f, err := zw.Create(rootDir + "/WARNINGS.txt"); err == nil {
+					_, _ = f.Write(b)
+				}
 			}
 
-			abs, err := resolveUploadsFilePathAbs(s.uploadsDir, stored)
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("invoice %s path invalid: %s (%v)", inv.ID, stored, err))
-				continue
-			}
-
-			ext := filepath.Ext(inv.OriginalName)
-			if ext == "" {
-				ext = fileExtOrDefault(stored, ".pdf")
-			}
-			name := fmt.Sprintf("invoice_%s_%s%s", sub, label, ext)
-			if err := zipAddFile(zw, paymentDir+name, abs); err != nil {
-				warnings = append(warnings, fmt.Sprintf("invoice %s read failed: %s (%v)", inv.ID, stored, err))
-			}
-		}
-	}
-
-	if len(warnings) > 0 {
-		b := []byte(strings.Join(warnings, "\n") + "\n")
-		if f, err := zw.Create(rootDir + "/WARNINGS.txt"); err == nil {
-			_, _ = f.Write(b)
-		}
-	}
-
-	_ = zw.Close()
-	return buf.Bytes(), zipName, nil
+			return zw.Close()
+		},
+	}, nil
 }
 
 func zipAddFile(zw *zip.Writer, zipPath string, absPath string) error {

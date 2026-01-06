@@ -2,11 +2,11 @@ package services
 
 import (
 	"archive/zip"
-	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -713,7 +713,7 @@ type ExportRegressionSamplesParams struct {
 	Redact bool     // redact raw_text for export
 }
 
-func (s *RegressionSampleService) ExportZip(params ExportRegressionSamplesParams) ([]byte, string, error) {
+func (s *RegressionSampleService) PrepareExportZip(params ExportRegressionSamplesParams) (*ZipStream, error) {
 	db := database.GetDB()
 	backfillRegressionSampleRawHashes(db)
 	q := db.Model(&models.RegressionSample{})
@@ -740,17 +740,17 @@ func (s *RegressionSampleService) ExportZip(params ExportRegressionSamplesParams
 			clean = append(clean, id)
 		}
 		if len(clean) == 0 {
-			return nil, "", fmt.Errorf("no samples to export")
+			return nil, fmt.Errorf("no samples to export")
 		}
 		q = q.Where("id IN ?", clean)
 	}
 
 	var rows []models.RegressionSample
 	if err := q.Find(&rows).Error; err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	if len(rows) == 0 {
-		return nil, "", fmt.Errorf("no samples to export")
+		return nil, fmt.Errorf("no samples to export")
 	}
 
 	sort.Slice(rows, func(i, j int) bool {
@@ -763,63 +763,65 @@ func (s *RegressionSampleService) ExportZip(params ExportRegressionSamplesParams
 		return rows[i].ID < rows[j].ID
 	})
 
-	buf := new(bytes.Buffer)
-	zw := zip.NewWriter(buf)
-
 	now := time.Now().UTC().Format("20060102_150405")
 	zipName := "regression_samples_" + now + ".zip"
 	base := filepath.Join("backend-go", "internal", "services", "testdata", "regression")
-	seenPaths := map[string]int{}
+	return &ZipStream{
+		Filename: zipName,
+		Write: func(w io.Writer) error {
+			zw := zip.NewWriter(w)
+			seenPaths := map[string]int{}
 
-	for _, r := range rows {
-		path := exportSampleZipPath(base, r)
-		if n := seenPaths[path]; n > 0 {
-			ext := filepath.Ext(path)
-			noExt := strings.TrimSuffix(path, ext)
-			path = fmt.Sprintf("%s_%d%s", noExt, n+1, ext)
-		}
-		seenPaths[path]++
+			for _, r := range rows {
+				path := exportSampleZipPath(base, r)
+				if n := seenPaths[path]; n > 0 {
+					ext := filepath.Ext(path)
+					noExt := strings.TrimSuffix(path, ext)
+					path = fmt.Sprintf("%s_%d%s", noExt, n+1, ext)
+				}
+				seenPaths[path]++
 
-		rawText := r.RawText
-		redacted := false
-		redactionRules := []string(nil)
-		if params.Redact {
-			redactedText, rules := redactSampleRawText(rawText)
-			rawText = redactedText
-			redactionRules = rules
-			redacted = len(rules) > 0
-		}
+				rawText := r.RawText
+				redacted := false
+				redactionRules := []string(nil)
+				if params.Redact {
+					redactedText, rules := redactSampleRawText(rawText)
+					rawText = redactedText
+					redactionRules = rules
+					redacted = len(rules) > 0
+				}
 
-		var expected any
-		_ = json.Unmarshal([]byte(r.ExpectedJSON), &expected)
-		payload := map[string]any{
-			"schema":   1,
-			"raw_hash": strings.TrimSpace(r.RawHash),
-			"kind":     r.Kind,
-			"name":     r.Name,
-			"raw_text": rawText,
-			"expected": expected,
-		}
-		if redacted {
-			payload["redacted"] = true
-			payload["redaction_rules"] = redactionRules
-		}
+				var expected any
+				_ = json.Unmarshal([]byte(r.ExpectedJSON), &expected)
+				payload := map[string]any{
+					"schema":   1,
+					"raw_hash": strings.TrimSpace(r.RawHash),
+					"kind":     r.Kind,
+					"name":     r.Name,
+					"raw_text": rawText,
+					"expected": expected,
+				}
+				if redacted {
+					payload["redacted"] = true
+					payload["redaction_rules"] = redactionRules
+				}
 
-		b, err := json.MarshalIndent(payload, "", "  ")
-		if err != nil {
-			continue
-		}
-		b = append(b, '\n')
+				b, err := json.MarshalIndent(payload, "", "  ")
+				if err != nil {
+					continue
+				}
+				b = append(b, '\n')
 
-		f, err := zw.Create(path)
-		if err != nil {
-			continue
-		}
-		_, _ = f.Write(b)
-	}
+				f, err := zw.Create(path)
+				if err != nil {
+					continue
+				}
+				_, _ = f.Write(b)
+			}
 
-	_ = zw.Close()
-	return buf.Bytes(), zipName, nil
+			return zw.Close()
+		},
+	}, nil
 }
 
 type RepoImportResult struct {
