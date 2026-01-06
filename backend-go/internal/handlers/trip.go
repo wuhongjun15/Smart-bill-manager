@@ -37,8 +37,14 @@ func (h *TripHandler) RegisterRoutes(r *gin.RouterGroup) {
 }
 
 func (h *TripHandler) GetSummaries(c *gin.Context) {
-	out, err := h.tripService.GetAllSummaries(middleware.GetEffectiveUserID(c))
+	ctx, cancel := withReadTimeout(c)
+	defer cancel()
+
+	out, err := h.tripService.GetAllSummariesCtx(ctx, middleware.GetEffectiveUserID(c))
 	if err != nil {
+		if handleReadTimeoutError(c, err) {
+			return
+		}
 		utils.Error(c, 500, "获取行程汇总失败", err)
 		return
 	}
@@ -46,8 +52,14 @@ func (h *TripHandler) GetSummaries(c *gin.Context) {
 }
 
 func (h *TripHandler) GetAll(c *gin.Context) {
-	trips, err := h.tripService.GetAll(middleware.GetEffectiveUserID(c))
+	ctx, cancel := withReadTimeout(c)
+	defer cancel()
+
+	trips, err := h.tripService.GetAllCtx(ctx, middleware.GetEffectiveUserID(c))
 	if err != nil {
+		if handleReadTimeoutError(c, err) {
+			return
+		}
 		utils.Error(c, 500, "获取行程失败", err)
 		return
 	}
@@ -70,8 +82,14 @@ func (h *TripHandler) Create(c *gin.Context) {
 
 func (h *TripHandler) GetByID(c *gin.Context) {
 	id := c.Param("id")
-	trip, err := h.tripService.GetByID(middleware.GetEffectiveUserID(c), id)
+	ctx, cancel := withReadTimeout(c)
+	defer cancel()
+
+	trip, err := h.tripService.GetByIDCtx(ctx, middleware.GetEffectiveUserID(c), id)
 	if err != nil {
+		if handleReadTimeoutError(c, err) {
+			return
+		}
 		utils.Error(c, 404, "行程不存在", err)
 		return
 	}
@@ -95,8 +113,14 @@ func (h *TripHandler) Update(c *gin.Context) {
 
 func (h *TripHandler) GetSummary(c *gin.Context) {
 	id := c.Param("id")
-	summary, err := h.tripService.GetSummary(middleware.GetEffectiveUserID(c), id)
+	ctx, cancel := withReadTimeout(c)
+	defer cancel()
+
+	summary, err := h.tripService.GetSummaryCtx(ctx, middleware.GetEffectiveUserID(c), id)
 	if err != nil {
+		if handleReadTimeoutError(c, err) {
+			return
+		}
 		utils.Error(c, 500, "获取统计失败", err)
 		return
 	}
@@ -106,8 +130,14 @@ func (h *TripHandler) GetSummary(c *gin.Context) {
 func (h *TripHandler) GetPayments(c *gin.Context) {
 	id := c.Param("id")
 	includeInvoices := c.Query("includeInvoices") == "1" || c.Query("includeInvoices") == "true"
-	payments, err := h.tripService.GetPayments(middleware.GetEffectiveUserID(c), id, includeInvoices)
+	ctx, cancel := withReadTimeout(c)
+	defer cancel()
+
+	payments, err := h.tripService.GetPaymentsCtx(ctx, middleware.GetEffectiveUserID(c), id, includeInvoices)
 	if err != nil {
+		if handleReadTimeoutError(c, err) {
+			return
+		}
 		utils.Error(c, 500, "获取支付记录失败", err)
 		return
 	}
@@ -157,8 +187,14 @@ func (h *TripHandler) ExportZip(c *gin.Context) {
 
 func (h *TripHandler) CascadePreview(c *gin.Context) {
 	id := c.Param("id")
-	out, _, _, err := h.tripService.GetCascadePreview(middleware.GetEffectiveUserID(c), id)
+	ctx, cancel := withReadTimeout(c)
+	defer cancel()
+
+	out, _, _, err := h.tripService.GetCascadePreviewCtx(ctx, middleware.GetEffectiveUserID(c), id)
 	if err != nil {
+		if handleReadTimeoutError(c, err) {
+			return
+		}
 		utils.Error(c, 500, "获取预览失败", err)
 		return
 	}
@@ -185,8 +221,14 @@ func (h *TripHandler) DeleteCascade(c *gin.Context) {
 
 	dryRun := c.Query("dryRun")
 	if dryRun == "1" || dryRun == "true" {
-		out, _, _, err := h.tripService.GetCascadePreview(middleware.GetEffectiveUserID(c), id)
+		ctx, cancel := withReadTimeout(c)
+		defer cancel()
+
+		out, _, _, err := h.tripService.GetCascadePreviewCtx(ctx, middleware.GetEffectiveUserID(c), id)
 		if err != nil {
+			if handleReadTimeoutError(c, err) {
+				return
+			}
 			utils.Error(c, 500, "获取预览失败", err)
 			return
 		}

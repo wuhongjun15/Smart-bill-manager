@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,11 +109,19 @@ func (s *TripService) Create(ownerUserID string, input CreateTripInput) (*models
 }
 
 func (s *TripService) GetAll(ownerUserID string) ([]models.Trip, error) {
-	return s.repo.FindAll(strings.TrimSpace(ownerUserID))
+	return s.GetAllCtx(context.Background(), ownerUserID)
+}
+
+func (s *TripService) GetAllCtx(ctx context.Context, ownerUserID string) ([]models.Trip, error) {
+	return s.repo.FindAllCtx(ctx, strings.TrimSpace(ownerUserID))
 }
 
 func (s *TripService) GetByID(ownerUserID string, id string) (*models.Trip, error) {
-	return s.repo.FindByIDForOwner(strings.TrimSpace(ownerUserID), id)
+	return s.GetByIDCtx(context.Background(), ownerUserID, id)
+}
+
+func (s *TripService) GetByIDCtx(ctx context.Context, ownerUserID string, id string) (*models.Trip, error) {
+	return s.repo.FindByIDForOwnerCtx(ctx, strings.TrimSpace(ownerUserID), id)
 }
 
 type UpdateTripInput struct {
@@ -203,9 +212,9 @@ func (s *TripService) Update(ownerUserID string, id string, input UpdateTripInpu
 		}
 
 		if len(data) > 0 {
-		if err := tx.Model(&models.Trip{}).Where("id = ? AND owner_user_id = ?", id, strings.TrimSpace(ownerUserID)).Updates(data).Error; err != nil {
-			return err
-		}
+			if err := tx.Model(&models.Trip{}).Where("id = ? AND owner_user_id = ?", id, strings.TrimSpace(ownerUserID)).Updates(data).Error; err != nil {
+				return err
+			}
 		}
 
 		unionStart := oldStartTs
@@ -242,88 +251,124 @@ type TripSummary struct {
 }
 
 func (s *TripService) GetSummary(ownerUserID string, tripID string) (*TripSummary, error) {
-	db := database.GetDB()
 	ownerUserID = strings.TrimSpace(ownerUserID)
+	return s.GetSummaryCtx(context.Background(), ownerUserID, tripID)
+}
 
-	var payments []models.Payment
-	if err := db.Model(&models.Payment{}).
+func (s *TripService) GetSummaryCtx(ctx context.Context, ownerUserID string, tripID string) (*TripSummary, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	db := database.GetDB().WithContext(ctx)
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	tripID = strings.TrimSpace(tripID)
+	if ownerUserID == "" || tripID == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	out := &TripSummary{TripID: tripID}
+	type payAgg struct {
+		PaymentCount int64   `gorm:"column:payment_count"`
+		TotalAmount  float64 `gorm:"column:total_amount"`
+	}
+	var pa payAgg
+	if err := db.
+		Model(&models.Payment{}).
+		Select("COUNT(*) AS payment_count, COALESCE(SUM(amount), 0) AS total_amount").
 		Where("owner_user_id = ?", ownerUserID).
 		Where("trip_id = ?", tripID).
 		Where("is_draft = 0").
-		Find(&payments).Error; err != nil {
+		Scan(&pa).Error; err != nil {
 		return nil, err
 	}
-
-	paymentIDs := make([]string, 0, len(payments))
-	out := &TripSummary{TripID: tripID}
-	for _, p := range payments {
-		out.PaymentCount++
-		out.TotalAmount += p.Amount
-		paymentIDs = append(paymentIDs, p.ID)
-	}
-	if len(paymentIDs) == 0 {
+	out.PaymentCount = int(pa.PaymentCount)
+	out.TotalAmount = pa.TotalAmount
+	if pa.PaymentCount == 0 {
 		return out, nil
 	}
 
 	// Count distinct invoices linked to these payments.
 	var invoiceCount int64
 	if err := db.
-		Table("invoice_payment_links").
-		Where("payment_id IN ?", paymentIDs).
-		Distinct("invoice_id").
+		Table("invoice_payment_links AS l").
+		Joins("JOIN payments AS p ON p.id = l.payment_id").
+		Where("p.owner_user_id = ?", ownerUserID).
+		Where("p.trip_id = ?", tripID).
+		Where("p.is_draft = 0").
+		Distinct("l.invoice_id").
 		Count(&invoiceCount).Error; err != nil {
 		return nil, err
 	}
 	out.LinkedInvoices = int(invoiceCount)
 
 	// Count payments with no linked invoices.
-	type row struct {
-		PaymentID string
-		Cnt       int64
-	}
-	var rows []row
-	if err := db.
-		Table("invoice_payment_links").
-		Select("payment_id as payment_id, COUNT(*) as cnt").
-		Where("payment_id IN ?", paymentIDs).
-		Group("payment_id").
-		Scan(&rows).Error; err != nil {
+	var unlinked int64
+	if err := db.Raw(`
+		SELECT COUNT(*)
+		FROM payments p
+		LEFT JOIN invoice_payment_links l ON l.payment_id = p.id
+		WHERE p.owner_user_id = ?
+		  AND p.trip_id = ?
+		  AND p.is_draft = 0
+		  AND l.payment_id IS NULL
+	`, ownerUserID, tripID).Scan(&unlinked).Error; err != nil {
 		return nil, err
 	}
-	hasLink := make(map[string]struct{}, len(rows))
-	for _, r := range rows {
-		if r.Cnt > 0 {
-			hasLink[r.PaymentID] = struct{}{}
-		}
-	}
-	for _, pid := range paymentIDs {
-		if _, ok := hasLink[pid]; !ok {
-			out.UnlinkedPays++
-		}
-	}
+	out.UnlinkedPays = int(unlinked)
 	return out, nil
 }
 
 func (s *TripService) GetAllSummaries(ownerUserID string) ([]TripSummary, error) {
-	db := database.GetDB()
 	ownerUserID = strings.TrimSpace(ownerUserID)
+	return s.GetAllSummariesCtx(context.Background(), ownerUserID)
+}
+
+func (s *TripService) GetAllSummariesCtx(ctx context.Context, ownerUserID string) ([]TripSummary, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	db := database.GetDB().WithContext(ctx)
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	if ownerUserID == "" {
+		return nil, fmt.Errorf("missing owner_user_id")
+	}
 
 	var out []TripSummary
-	err := db.
-		Table("trips AS t").
-		Select(`
+	err := db.Raw(`
+		SELECT
 			t.id AS trip_id,
-			COUNT(DISTINCT p.id) AS payment_count,
-			COALESCE(SUM(p.amount), 0) AS total_amount,
-			COUNT(DISTINCT l.invoice_id) AS linked_invoices,
-			COALESCE(SUM(CASE WHEN p.id IS NULL THEN 0 WHEN l.invoice_id IS NULL THEN 1 ELSE 0 END), 0) AS unlinked_pays
-		`).
-		Joins("LEFT JOIN payments AS p ON p.trip_id = t.id AND p.owner_user_id = t.owner_user_id").
-		Joins("LEFT JOIN invoice_payment_links AS l ON l.payment_id = p.id").
-		Where("t.owner_user_id = ?", ownerUserID).
-		Group("t.id").
-		Order("t.start_time_ts DESC").
-		Scan(&out).Error
+			COALESCE(p.payment_count, 0) AS payment_count,
+			COALESCE(p.total_amount, 0) AS total_amount,
+			COALESCE(li.linked_invoices, 0) AS linked_invoices,
+			COALESCE(p.unlinked_pays, 0) AS unlinked_pays
+		FROM trips t
+		LEFT JOIN (
+			SELECT
+				trip_id,
+				owner_user_id,
+				COUNT(*) AS payment_count,
+				COALESCE(SUM(amount), 0) AS total_amount,
+				COALESCE(SUM(CASE
+					WHEN NOT EXISTS (SELECT 1 FROM invoice_payment_links l WHERE l.payment_id = payments.id) THEN 1
+					ELSE 0
+				END), 0) AS unlinked_pays
+			FROM payments
+			WHERE owner_user_id = ? AND is_draft = 0
+			GROUP BY owner_user_id, trip_id
+		) p ON p.trip_id = t.id AND p.owner_user_id = t.owner_user_id
+		LEFT JOIN (
+			SELECT
+				p.trip_id AS trip_id,
+				p.owner_user_id AS owner_user_id,
+				COUNT(DISTINCT l.invoice_id) AS linked_invoices
+			FROM payments p
+			JOIN invoice_payment_links l ON l.payment_id = p.id
+			WHERE p.owner_user_id = ? AND p.is_draft = 0
+			GROUP BY p.owner_user_id, p.trip_id
+		) li ON li.trip_id = t.id AND li.owner_user_id = t.owner_user_id
+		WHERE t.owner_user_id = ?
+		ORDER BY t.start_time_ts DESC
+	`, ownerUserID, ownerUserID, ownerUserID).Scan(&out).Error
 	return out, err
 }
 
@@ -342,11 +387,43 @@ type TripPaymentWithInvoices struct {
 }
 
 func (s *TripService) GetPayments(ownerUserID string, tripID string, includeInvoices bool) ([]TripPaymentWithInvoices, error) {
-	db := database.GetDB()
 	ownerUserID = strings.TrimSpace(ownerUserID)
+	return s.GetPaymentsCtx(context.Background(), ownerUserID, tripID, includeInvoices)
+}
+
+func (s *TripService) GetPaymentsCtx(ctx context.Context, ownerUserID string, tripID string, includeInvoices bool) ([]TripPaymentWithInvoices, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	db := database.GetDB().WithContext(ctx)
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	tripID = strings.TrimSpace(tripID)
+	if ownerUserID == "" || tripID == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
 
 	var payments []models.Payment
 	if err := db.Model(&models.Payment{}).
+		Select([]string{
+			"id",
+			"owner_user_id",
+			"is_draft",
+			"trip_id",
+			"trip_assignment_source",
+			"trip_assignment_state",
+			"bad_debt",
+			"amount",
+			"merchant",
+			"category",
+			"payment_method",
+			"description",
+			"transaction_time",
+			"transaction_time_ts",
+			"screenshot_path",
+			"dedup_status",
+			"dedup_ref_id",
+			"created_at",
+		}).
 		Where("owner_user_id = ?", ownerUserID).
 		Where("trip_id = ?", tripID).
 		Where("is_draft = 0").
@@ -397,6 +474,14 @@ func (s *TripService) GetPayments(ownerUserID string, tripID string, includeInvo
 
 	var invoices []models.Invoice
 	if err := db.Model(&models.Invoice{}).
+		Select([]string{
+			"id",
+			"invoice_number",
+			"invoice_date",
+			"amount",
+			"seller_name",
+			"bad_debt",
+		}).
 		Where("owner_user_id = ?", ownerUserID).
 		Where("id IN ?", invoiceIDs).
 		Where("is_draft = 0").
@@ -439,11 +524,24 @@ type DeleteTripOptions struct {
 }
 
 func (s *TripService) GetCascadePreview(ownerUserID string, tripID string) (*CascadePreview, []string, []string, error) {
-	db := database.GetDB()
 	ownerUserID = strings.TrimSpace(ownerUserID)
+	return s.GetCascadePreviewCtx(context.Background(), ownerUserID, tripID)
+}
+
+func (s *TripService) GetCascadePreviewCtx(ctx context.Context, ownerUserID string, tripID string) (*CascadePreview, []string, []string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	db := database.GetDB().WithContext(ctx)
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	tripID = strings.TrimSpace(tripID)
+	if ownerUserID == "" || tripID == "" {
+		return nil, nil, nil, gorm.ErrRecordNotFound
+	}
 
 	var payments []models.Payment
 	if err := db.Model(&models.Payment{}).
+		Select([]string{"id", "screenshot_path"}).
 		Where("owner_user_id = ?", ownerUserID).
 		Where("trip_id = ?", tripID).
 		Where("is_draft = 0").
@@ -475,16 +573,24 @@ func (s *TripService) GetCascadePreview(ownerUserID string, tripID string) (*Cas
 	preview.Invoices = len(invoiceIDs)
 
 	// Determine which invoices become unlinked after removing these payments.
-	toDelete := make([]string, 0)
-	for _, invID := range invoiceIDs {
-		var count int64
+	remaining := make(map[string]struct{})
+	if len(invoiceIDs) > 0 {
+		var stillLinked []string
 		if err := db.
 			Table("invoice_payment_links").
-			Where("invoice_id = ? AND payment_id NOT IN ?", invID, paymentIDs).
-			Count(&count).Error; err != nil {
+			Distinct("invoice_id").
+			Where("invoice_id IN ? AND payment_id NOT IN ?", invoiceIDs, paymentIDs).
+			Pluck("invoice_id", &stillLinked).Error; err != nil {
 			return nil, nil, nil, err
 		}
-		if count == 0 {
+		for _, id := range stillLinked {
+			remaining[id] = struct{}{}
+		}
+	}
+
+	toDelete := make([]string, 0, len(invoiceIDs))
+	for _, invID := range invoiceIDs {
+		if _, ok := remaining[invID]; !ok {
 			toDelete = append(toDelete, invID)
 		}
 	}
@@ -571,15 +677,23 @@ func (s *TripService) DeleteWithOptions(ownerUserID string, tripID string, opts 
 				}
 
 				toDelete := make(map[string]struct{})
-				for _, invID := range invoiceIDs {
-					var count int64
-					if err := tx.Table("invoice_payment_links").
-						Where("invoice_id = ? AND payment_id NOT IN ?", invID, paymentIDs).
-						Count(&count).Error; err != nil {
+				if len(invoiceIDs) > 0 {
+					remaining := make(map[string]struct{})
+					var stillLinked []string
+					if err := tx.
+						Table("invoice_payment_links").
+						Distinct("invoice_id").
+						Where("invoice_id IN ? AND payment_id NOT IN ?", invoiceIDs, paymentIDs).
+						Pluck("invoice_id", &stillLinked).Error; err != nil {
 						return err
 					}
-					if count == 0 {
-						toDelete[invID] = struct{}{}
+					for _, id := range stillLinked {
+						remaining[id] = struct{}{}
+					}
+					for _, invID := range invoiceIDs {
+						if _, ok := remaining[invID]; !ok {
+							toDelete[invID] = struct{}{}
+						}
 					}
 				}
 

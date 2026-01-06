@@ -28,7 +28,6 @@ type tripExportInvoice struct {
 }
 
 func (s *TripService) PrepareTripExportZip(ctx context.Context, ownerUserID string, tripID string) (*ZipStream, error) {
-	db := database.GetDB()
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	tripID = strings.TrimSpace(tripID)
 	if ownerUserID == "" || tripID == "" {
@@ -37,6 +36,7 @@ func (s *TripService) PrepareTripExportZip(ctx context.Context, ownerUserID stri
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	db := database.GetDB().WithContext(ctx)
 
 	var trip models.Trip
 	if err := db.Model(&models.Trip{}).
@@ -47,6 +47,15 @@ func (s *TripService) PrepareTripExportZip(ctx context.Context, ownerUserID stri
 
 	var payments []models.Payment
 	if err := db.Model(&models.Payment{}).
+		Select([]string{
+			"id",
+			"merchant",
+			"amount",
+			"transaction_time",
+			"transaction_time_ts",
+			"screenshot_path",
+			"created_at",
+		}).
 		Where("owner_user_id = ?", ownerUserID).
 		Where("trip_id = ?", tripID).
 		Where("is_draft = 0").
@@ -92,6 +101,15 @@ func (s *TripService) PrepareTripExportZip(ctx context.Context, ownerUserID stri
 	if len(invoiceIDs) > 0 {
 		var invoices []models.Invoice
 		if err := db.Model(&models.Invoice{}).
+			Select([]string{
+				"id",
+				"original_name",
+				"file_path",
+				"invoice_number",
+				"invoice_date",
+				"seller_name",
+				"created_at",
+			}).
 			Where("owner_user_id = ?", ownerUserID).
 			Where("id IN ?", invoiceIDs).
 			Where("is_draft = 0").

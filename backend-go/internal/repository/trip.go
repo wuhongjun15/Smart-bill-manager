@@ -1,6 +1,9 @@
 package repository
 
 import (
+	"context"
+	"strings"
+
 	"smart-bill-manager/internal/models"
 	"smart-bill-manager/pkg/database"
 
@@ -18,8 +21,15 @@ func (r *TripRepository) Create(trip *models.Trip) error {
 }
 
 func (r *TripRepository) FindByID(id string) (*models.Trip, error) {
+	return r.FindByIDCtx(context.Background(), id)
+}
+
+func (r *TripRepository) FindByIDCtx(ctx context.Context, id string) (*models.Trip, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var trip models.Trip
-	err := database.GetDB().Where("id = ?", id).First(&trip).Error
+	err := database.GetDB().WithContext(ctx).Where("id = ?", id).First(&trip).Error
 	if err != nil {
 		return nil, err
 	}
@@ -27,21 +37,37 @@ func (r *TripRepository) FindByID(id string) (*models.Trip, error) {
 }
 
 func (r *TripRepository) FindAll(ownerUserID string) ([]models.Trip, error) {
+	return r.FindAllCtx(context.Background(), ownerUserID)
+}
+
+func (r *TripRepository) FindAllCtx(ctx context.Context, ownerUserID string) ([]models.Trip, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var trips []models.Trip
-	q := database.GetDB().Model(&models.Trip{}).Order("start_time_ts DESC")
-	if ownerUserID != "" {
-		q = q.Where("owner_user_id = ?", ownerUserID)
+	q := database.GetDB().WithContext(ctx).Model(&models.Trip{}).Order("start_time_ts DESC")
+	if strings.TrimSpace(ownerUserID) != "" {
+		q = q.Where("owner_user_id = ?", strings.TrimSpace(ownerUserID))
 	}
 	err := q.Find(&trips).Error
 	return trips, err
 }
 
 func (r *TripRepository) FindByIDForOwner(ownerUserID string, id string) (*models.Trip, error) {
-	var trip models.Trip
-	q := database.GetDB().Where("id = ?", id)
-	if ownerUserID != "" {
-		q = q.Where("owner_user_id = ?", ownerUserID)
+	return r.FindByIDForOwnerCtx(context.Background(), ownerUserID, id)
+}
+
+func (r *TripRepository) FindByIDForOwnerCtx(ctx context.Context, ownerUserID string, id string) (*models.Trip, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	var trip models.Trip
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	id = strings.TrimSpace(id)
+	if ownerUserID == "" || id == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	q := database.GetDB().WithContext(ctx).Where("id = ? AND owner_user_id = ?", id, ownerUserID)
 	err := q.First(&trip).Error
 	if err != nil {
 		return nil, err
