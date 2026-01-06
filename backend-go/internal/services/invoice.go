@@ -182,6 +182,15 @@ func (s *InvoiceService) ProcessInvoiceOCRTask(invoiceID string) (any, error) {
 	} else {
 		updateData["invoice_date"] = nil
 	}
+	if invoiceDate != nil {
+		if ymd := utils.NormalizeDateYMD(*invoiceDate); ymd != "" {
+			updateData["invoice_date_ymd"] = ymd
+		} else {
+			updateData["invoice_date_ymd"] = nil
+		}
+	} else {
+		updateData["invoice_date_ymd"] = nil
+	}
 	if amount != nil {
 		updateData["amount"] = *amount
 	} else {
@@ -355,16 +364,16 @@ func (s *InvoiceService) Create(ownerUserID string, input CreateInvoiceInput) (*
 }
 
 type InvoiceFilterInput struct {
-	Limit        int  `form:"limit"`
-	Offset       int  `form:"offset"`
+	Limit        int    `form:"limit"`
+	Offset       int    `form:"offset"`
 	StartDate    string `form:"startDate"`
 	EndDate      string `form:"endDate"`
-	IncludeDraft bool `form:"includeDraft"`
+	IncludeDraft bool   `form:"includeDraft"`
 }
 
 func (s *InvoiceService) GetAll(ownerUserID string, filter InvoiceFilterInput) ([]models.Invoice, error) {
 	return s.repo.FindAll(repository.InvoiceFilter{
-		OwnerUserID:   strings.TrimSpace(ownerUserID),
+		OwnerUserID:  strings.TrimSpace(ownerUserID),
 		Limit:        filter.Limit,
 		Offset:       filter.Offset,
 		StartDate:    strings.TrimSpace(filter.StartDate),
@@ -400,7 +409,7 @@ func (s *InvoiceService) List(ownerUserID string, filter InvoiceFilterInput) ([]
 	}
 
 	return s.repo.FindAllPaged(repository.InvoiceFilter{
-		OwnerUserID:   strings.TrimSpace(ownerUserID),
+		OwnerUserID:  strings.TrimSpace(ownerUserID),
 		Limit:        filter.Limit,
 		Offset:       filter.Offset,
 		StartDate:    strings.TrimSpace(filter.StartDate),
@@ -542,7 +551,18 @@ func (s *InvoiceService) Update(ownerUserID string, id string, input UpdateInvoi
 		data["invoice_number"] = *input.InvoiceNumber
 	}
 	if input.InvoiceDate != nil {
-		data["invoice_date"] = *input.InvoiceDate
+		trimmed := strings.TrimSpace(*input.InvoiceDate)
+		if trimmed == "" {
+			data["invoice_date"] = nil
+			data["invoice_date_ymd"] = nil
+		} else {
+			data["invoice_date"] = trimmed
+			if ymd := utils.NormalizeDateYMD(trimmed); ymd != "" {
+				data["invoice_date_ymd"] = ymd
+			} else {
+				data["invoice_date_ymd"] = nil
+			}
+		}
 	}
 	if input.Amount != nil {
 		data["amount"] = *input.Amount
@@ -988,6 +1008,13 @@ func (s *InvoiceService) Reparse(ownerUserID string, id string) (*models.Invoice
 	}
 	if invoiceDate != nil {
 		updateData["invoice_date"] = *invoiceDate
+	}
+	if invoiceDate != nil {
+		if ymd := utils.NormalizeDateYMD(*invoiceDate); ymd != "" {
+			updateData["invoice_date_ymd"] = ymd
+		} else {
+			updateData["invoice_date_ymd"] = nil
+		}
 	}
 	if amount != nil {
 		updateData["amount"] = *amount

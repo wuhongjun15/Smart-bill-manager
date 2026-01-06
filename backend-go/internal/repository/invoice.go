@@ -69,8 +69,8 @@ func (r *InvoiceRepository) FindByIDForOwner(ownerUserID string, id string) (*mo
 
 type InvoiceFilter struct {
 	OwnerUserID string
-	Limit  int
-	Offset int
+	Limit       int
+	Offset      int
 	// StartDate/EndDate are "YYYY-MM-DD" prefixes for filtering invoice_date.
 	StartDate string
 	EndDate   string
@@ -90,8 +90,8 @@ func (r *InvoiceRepository) buildFindAllQuery(filter InvoiceFilter) *gorm.DB {
 	if strings.TrimSpace(filter.StartDate) != "" && strings.TrimSpace(filter.EndDate) != "" {
 		start := strings.TrimSpace(filter.StartDate)
 		end := strings.TrimSpace(filter.EndDate)
-		query = query.Where("invoice_date IS NOT NULL AND LENGTH(invoice_date) >= 10")
-		query = query.Where("SUBSTR(invoice_date, 1, 10) >= ? AND SUBSTR(invoice_date, 1, 10) <= ?", start, end)
+		query = query.Where("invoice_date_ymd IS NOT NULL AND LENGTH(invoice_date_ymd) = 10")
+		query = query.Where("invoice_date_ymd >= ? AND invoice_date_ymd <= ?", start, end)
 	}
 	return query
 }
@@ -253,8 +253,8 @@ func (r *InvoiceRepository) GetStats(ownerUserID string, startDate string, endDa
 
 	applyDate := func(q *gorm.DB) *gorm.DB {
 		if startDate != "" && endDate != "" {
-			q = q.Where("invoice_date IS NOT NULL AND LENGTH(invoice_date) >= 10")
-			q = q.Where("SUBSTR(invoice_date, 1, 10) >= ? AND SUBSTR(invoice_date, 1, 10) <= ?", startDate, endDate)
+			q = q.Where("invoice_date_ymd IS NOT NULL AND LENGTH(invoice_date_ymd) = 10")
+			q = q.Where("invoice_date_ymd >= ? AND invoice_date_ymd <= ?", startDate, endDate)
 		}
 		return q
 	}
@@ -301,8 +301,8 @@ func (r *InvoiceRepository) GetStats(ownerUserID string, startDate string, endDa
 	if err := applyDate(database.GetDB().
 		Table("invoices").
 		Where("is_draft = 0 AND owner_user_id = ?", ownerUserID).
-		Where("invoice_date IS NOT NULL AND LENGTH(invoice_date) >= 7 AND amount IS NOT NULL").
-		Select(`SUBSTR(invoice_date, 1, 7) AS m, COALESCE(SUM(amount), 0) AS total`).
+		Where("invoice_date_ymd IS NOT NULL AND LENGTH(invoice_date_ymd) >= 7 AND amount IS NOT NULL").
+		Select(`SUBSTR(invoice_date_ymd, 1, 7) AS m, COALESCE(SUM(amount), 0) AS total`).
 		Group("m"),
 	).Scan(&monthRows).Error; err != nil {
 		return nil, err
@@ -415,7 +415,9 @@ func (r *InvoiceRepository) SuggestPayments(invoice *models.Invoice, limit int) 
 
 	// If invoice has date, prioritize payments from similar timeframe
 	datePrefix := ""
-	if invoice.InvoiceDate != nil && *invoice.InvoiceDate != "" {
+	if invoice.InvoiceDateYMD != nil && strings.TrimSpace(*invoice.InvoiceDateYMD) != "" {
+		datePrefix = strings.TrimSpace(*invoice.InvoiceDateYMD)
+	} else if invoice.InvoiceDate != nil && *invoice.InvoiceDate != "" {
 		datePrefix = normalizeDatePrefix(*invoice.InvoiceDate)
 	}
 

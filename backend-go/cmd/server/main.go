@@ -18,6 +18,7 @@ import (
 	"smart-bill-manager/internal/middleware"
 	"smart-bill-manager/internal/models"
 	"smart-bill-manager/internal/services"
+	"smart-bill-manager/internal/utils"
 	"smart-bill-manager/pkg/database"
 )
 
@@ -95,7 +96,7 @@ func main() {
 				SET owner_user_id = COALESCE(
 					(SELECT owner_user_id FROM email_configs WHERE email_configs.id = email_logs.email_config_id),
 					?
-				)
+	)
 				WHERE owner_user_id IS NULL OR TRIM(owner_user_id) = ''
 			`, defaultOwnerID)
 			// Tasks: default to created_by; fallback to default owner.
@@ -114,6 +115,8 @@ func main() {
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invites_used_at ON invites(used_at)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_time ON payments(transaction_time)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_time_ts ON payments(transaction_time_ts)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_owner_draft_time_ts ON payments(owner_user_id, is_draft, transaction_time_ts)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_owner_draft_category_time_ts ON payments(owner_user_id, is_draft, category, transaction_time_ts)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_trip_id ON payments(trip_id)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_bad_debt ON payments(bad_debt)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_payments_trip_assign_src ON payments(trip_assignment_source)")
@@ -126,9 +129,14 @@ func main() {
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_trips_reimburse_status ON trips(reimburse_status)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_trips_bad_debt_locked ON trips(bad_debt_locked)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(invoice_date)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_date_ymd ON invoices(invoice_date_ymd)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_owner_draft_created_at ON invoices(owner_user_id, is_draft, created_at)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_owner_draft_date_ymd ON invoices(owner_user_id, is_draft, invoice_date_ymd)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_invoice_number ON invoices(invoice_number)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_owner_invoice_number ON invoices(owner_user_id, invoice_number)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_bad_debt ON invoices(bad_debt)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_file_sha256 ON invoices(file_sha256)")
+	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_owner_file_sha256 ON invoices(owner_user_id, file_sha256)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoices_dedup_status ON invoices(dedup_status)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_status_created_at ON tasks(status, created_at)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_tasks_created_by ON tasks(created_by)")
@@ -145,6 +153,46 @@ func main() {
 	db.Exec("DROP INDEX IF EXISTS ux_invoice_payment_links_payment_id")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_invoice_payment_links_payment_id ON invoice_payment_links(payment_id)")
 	db.Exec("CREATE INDEX IF NOT EXISTS idx_email_logs_date ON email_logs(created_at)")
+
+	// Backfill invoice_date_ymd (fast path via SQL for common formats, then a Go parser fallback).
+	db.Exec(`
+		UPDATE invoices
+		SET invoice_date_ymd = SUBSTR(invoice_date, 1, 10)
+		WHERE (invoice_date_ymd IS NULL OR TRIM(invoice_date_ymd) = '')
+		  AND invoice_date IS NOT NULL
+		  AND invoice_date LIKE '____-__-__%'
+	`)
+	db.Exec(`
+		UPDATE invoices
+		SET invoice_date_ymd = REPLACE(SUBSTR(invoice_date, 1, 10), '/', '-')
+		WHERE (invoice_date_ymd IS NULL OR TRIM(invoice_date_ymd) = '')
+		  AND invoice_date IS NOT NULL
+		  AND invoice_date LIKE '____/__/__%'
+	`)
+
+	type invoiceDateRow struct {
+		ID          string  `gorm:"column:id"`
+		InvoiceDate *string `gorm:"column:invoice_date"`
+	}
+	var missing []invoiceDateRow
+	_ = db.Raw(`
+		SELECT id, invoice_date
+		FROM invoices
+		WHERE invoice_date IS NOT NULL
+		  AND TRIM(invoice_date) != ''
+		  AND (invoice_date_ymd IS NULL OR TRIM(invoice_date_ymd) = '')
+		LIMIT 2000
+	`).Scan(&missing).Error
+	for _, r := range missing {
+		if r.ID == "" || r.InvoiceDate == nil {
+			continue
+		}
+		ymd := utils.NormalizeDateYMD(*r.InvoiceDate)
+		if ymd == "" {
+			continue
+		}
+		db.Exec(`UPDATE invoices SET invoice_date_ymd = ? WHERE id = ?`, ymd, r.ID)
+	}
 
 	// Ensure uploads directory exists
 	uploadsDir := cfg.UploadsDir
