@@ -33,18 +33,24 @@
           :paginator="true"
           :rows="configPageSize"
           :rowsPerPageOptions="[10, 20, 50, 100]"
+          :tableStyle="{ minWidth: '980px', tableLayout: 'fixed' }"
+          emptyMessage="暂无邮箱配置"
           responsiveLayout="scroll"
           @page="onConfigPage"
         >
-          <Column :header="'\u90AE\u7BB1\u5730\u5740'">
+          <Column :header="'\u90AE\u7BB1\u5730\u5740'" :style="{ width: '260px' }">
             <template #body="{ data: row }">
               <div class="email-cell">
                 <i class="pi pi-envelope" />
-                <span>{{ row.email }}</span>
+                <span class="sbm-ellipsis" :title="row.email">{{ row.email }}</span>
               </div>
             </template>
           </Column>
-          <Column field="imap_host" :header="'IMAP \u670D\u52A1\u5668'" />
+          <Column field="imap_host" :header="'IMAP \u670D\u52A1\u5668'" :style="{ width: '220px' }">
+            <template #body="{ data: row }">
+              <span class="sbm-ellipsis" :title="row.imap_host">{{ row.imap_host }}</span>
+            </template>
+          </Column>
           <Column field="imap_port" :header="'\u7AEF\u53E3'" :style="{ width: '90px' }" />
           <Column :header="'\u72B6\u6001'" :style="{ width: '120px' }">
             <template #body="{ data: row }">
@@ -59,7 +65,7 @@
               {{ row.last_check ? formatDateTime(row.last_check) : '-' }}
             </template>
           </Column>
-          <Column :header="'\u64CD\u4F5C'" :style="{ width: '340px' }">
+          <Column :header="'\u64CD\u4F5C'" :style="{ width: '200px' }">
             <template #body="{ data: row }">
               <div class="actions">
                 <Button
@@ -68,7 +74,7 @@
                   severity="danger"
                   class="p-button-outlined"
                   icon="pi pi-stop"
-                  :label="'\u505C\u6B62'"
+                  :title="'停止监控'"
                   @click="handleStopMonitor(row.id)"
                 />
                 <Button
@@ -77,7 +83,7 @@
                   severity="success"
                   class="p-button-outlined"
                   icon="pi pi-play"
-                  :label="'\u542F\u52A8'"
+                  :title="'启动监控'"
                   @click="handleStartMonitor(row.id)"
                 />
 
@@ -85,7 +91,7 @@
                   size="small"
                   class="p-button-outlined"
                   icon="pi pi-bolt"
-                  :label="'\u68C0\u67E5'"
+                  :title="'检查未读邮件'"
                   :loading="checkLoading === row.id"
                   @click="handleManualCheck(row.id)"
                 />
@@ -94,7 +100,7 @@
                   size="small"
                   class="p-button-outlined"
                   icon="pi pi-download"
-                  :label="'\u5168\u91cf\u540C\u6B65'"
+                  :title="'全量同步'"
                   :loading="fullSyncLoading === row.id"
                   @click="handleManualFullSync(row.id)"
                 />
@@ -104,6 +110,7 @@
                   severity="danger"
                   class="p-button-text"
                   icon="pi pi-trash"
+                  :title="'删除配置'"
                   @click="confirmDelete(row.id)"
                 />
               </div>
@@ -126,11 +133,21 @@
           :paginator="true"
           :rows="logPageSize"
           :rowsPerPageOptions="[10, 20, 50, 100]"
+          :tableStyle="{ minWidth: '1260px', tableLayout: 'fixed' }"
+          emptyMessage="暂无邮件日志"
           responsiveLayout="scroll"
           @page="onLogPage"
         >
-          <Column field="subject" :header="'\u4E3B\u9898'" />
-          <Column field="from_address" :header="'\u53D1\u4EF6\u4EBA'" :style="{ width: '220px' }" />
+          <Column field="subject" :header="'\u4E3B\u9898'" :style="{ width: '360px' }">
+            <template #body="{ data: row }">
+              <span class="sbm-ellipsis" :title="row.subject || ''">{{ row.subject || '-' }}</span>
+            </template>
+          </Column>
+          <Column field="from_address" :header="'\u53D1\u4EF6\u4EBA'" :style="{ width: '240px' }">
+            <template #body="{ data: row }">
+              <span class="sbm-ellipsis" :title="row.from_address || ''">{{ row.from_address || '-' }}</span>
+            </template>
+          </Column>
           <Column :header="'\u9644\u4EF6'" :style="{ width: '110px' }">
             <template #body="{ data: row }">
               <Tag
@@ -146,23 +163,25 @@
               {{ row.received_date ? formatDateTime(row.received_date) : '-' }}
             </template>
           </Column>
-          <Column :header="'\u72B6\u6001'" :style="{ width: '200px' }">
+          <Column :header="'\u72B6\u6001'" :style="{ width: '280px' }">
             <template #body="{ data: row }">
               <div class="log-status">
                 <Tag :severity="getLogStatusSeverity(row.status)" :value="getLogStatusLabel(row.status)" />
-                <small v-if="row.parse_error" class="p-error">{{ row.parse_error }}</small>
-                <small v-else-if="row.parsed_invoice_id" class="muted">发票ID：{{ row.parsed_invoice_id }}</small>
+                <small v-if="row.parse_error" class="p-error sbm-ellipsis" :title="row.parse_error">{{ row.parse_error }}</small>
+                <small v-else-if="row.parsed_invoice_id" class="muted sbm-ellipsis" :title="row.parsed_invoice_id"
+                  >发票ID：{{ row.parsed_invoice_id }}</small
+                >
               </div>
             </template>
           </Column>
-          <Column :header="'\u64CD\u4F5C'" :style="{ width: '220px' }">
+          <Column :header="'\u64CD\u4F5C'" :style="{ width: '160px' }">
             <template #body="{ data: row }">
               <div class="actions">
                 <Button
                   size="small"
                   class="p-button-outlined"
                   icon="pi pi-cog"
-                  :label="'\u89E3\u6790'"
+                  :label="'解析'"
                   :loading="parseLoading === row.id"
                   :disabled="row.status === 'parsing' || row.status === 'parsed'"
                   @click="handleParseLog(row.id)"
@@ -172,7 +191,7 @@
                   size="small"
                   class="p-button-text"
                   icon="pi pi-copy"
-                  :label="'\u590D\u5236\u53D1\u7968ID'"
+                  :title="'复制发票ID'"
                   @click="copyText(row.parsed_invoice_id)"
                 />
               </div>
@@ -772,7 +791,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .log-status {
@@ -784,6 +803,15 @@ onBeforeUnmount(() => {
 
 .muted {
   color: var(--p-text-muted-color);
+}
+
+.sbm-ellipsis {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .grid-form {
