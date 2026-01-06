@@ -234,7 +234,7 @@
               size="small"
               :rows="6"
               responsiveLayout="scroll"
-              :tableStyle="{ minWidth: '720px', tableLayout: 'fixed' }"
+              :tableStyle="{ width: '100%', tableLayout: 'fixed' }"
             >
               <Column :header="'\u4E3B\u9898'" :style="{ width: '44%' }">
                 <template #body="{ data: row }">
