@@ -8,8 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +24,8 @@ type rapidOCRWorkerProcess struct {
 	stdin  io.WriteCloser
 	stdout *bufio.Reader
 	waitCh chan error
+
+	reqCount int64
 }
 
 var globalRapidOCRWorker rapidOCRWorkerProcess
@@ -28,6 +33,81 @@ var globalRapidOCRWorker rapidOCRWorkerProcess
 func ocrWorkerEnabled() bool {
 	v := strings.ToLower(strings.TrimSpace(os.Getenv("SBM_OCR_WORKER")))
 	return v == "1" || v == "true" || v == "yes" || v == "y" || v == "on"
+}
+
+func getEnvInt64(key string, def int64) int64 {
+	s := strings.TrimSpace(os.Getenv(key))
+	if s == "" {
+		return def
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+func ocrWorkerRestartEveryN() int64 {
+	// Default ON: restart periodically to prevent long-running Python + native libs from ballooning RSS.
+	// Set to 0 to disable.
+	n := getEnvInt64("SBM_OCR_WORKER_RESTART_EVERY_N", 200)
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+func ocrWorkerMaxRSSBytes() int64 {
+	// Optional: restart when worker RSS exceeds this threshold (MB). Disabled by default.
+	mb := getEnvInt64("SBM_OCR_WORKER_MAX_RSS_MB", 0)
+	if mb <= 0 {
+		return 0
+	}
+	return mb * 1024 * 1024
+}
+
+func readLinuxRSSBytes(pid int) (int64, error) {
+	if pid <= 0 {
+		return 0, fmt.Errorf("invalid pid")
+	}
+	b, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return 0, err
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		if !strings.HasPrefix(line, "VmRSS:") {
+			continue
+		}
+		// Example: "VmRSS:\t  12345 kB"
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return 0, fmt.Errorf("invalid VmRSS line")
+		}
+		kb, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return kb * 1024, nil
+	}
+	return 0, fmt.Errorf("VmRSS not found")
+}
+
+func (w *rapidOCRWorkerProcess) shouldRestartLocked() (bool, string) {
+	if !w.isRunningLocked() || w.cmd == nil || w.cmd.Process == nil {
+		return false, ""
+	}
+
+	if every := ocrWorkerRestartEveryN(); every > 0 && w.reqCount >= every {
+		return true, fmt.Sprintf("request_count=%d threshold=%d", w.reqCount, every)
+	}
+
+	if maxRSS := ocrWorkerMaxRSSBytes(); maxRSS > 0 && runtime.GOOS == "linux" {
+		if rss, err := readLinuxRSSBytes(w.cmd.Process.Pid); err == nil && rss > maxRSS {
+			return true, fmt.Sprintf("rss_bytes=%d threshold=%d", rss, maxRSS)
+		}
+	}
+
+	return false, ""
 }
 
 func StartOCRWorkerIfEnabled() (bool, error) {
@@ -110,6 +190,7 @@ func (w *rapidOCRWorkerProcess) stopLocked() {
 	w.cmd = nil
 	w.stdout = nil
 	w.waitCh = nil
+	w.reqCount = 0
 }
 
 func (w *rapidOCRWorkerProcess) startLocked(python string, scriptPath string) error {
@@ -152,13 +233,19 @@ func (w *rapidOCRWorkerProcess) startLocked(python string, scriptPath string) er
 
 func (w *rapidOCRWorkerProcess) ensureStartedLocked(scriptPath string) error {
 	if w.isRunningLocked() {
-		return nil
+		if ok, reason := w.shouldRestartLocked(); ok {
+			log.Printf("[OCRWorker] restarting python worker (%s)", reason)
+			w.stopLocked()
+		} else {
+			return nil
+		}
 	}
 	w.stopLocked()
 
 	var lastErr error
 	for _, python := range []string{"python3", "python"} {
 		if err := w.startLocked(python, scriptPath); err == nil {
+			w.reqCount = 0
 			return nil
 		} else {
 			lastErr = err
@@ -180,6 +267,7 @@ func (w *rapidOCRWorkerProcess) recognizeLocked(scriptPath string, imagePath str
 	if err := w.ensureStartedLocked(scriptPath); err != nil {
 		return nil, err
 	}
+	w.reqCount += 1
 
 	reqID := randHex(12)
 	req := map[string]any{
