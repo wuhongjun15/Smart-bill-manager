@@ -121,7 +121,14 @@ func (r *UserRepository) Update(user *models.User) error {
 }
 
 func (r *UserRepository) UpdatePassword(id, hashedPassword string) error {
-	return database.GetDB().Model(&models.User{}).Where("id = ?", id).Update("password", hashedPassword).Error
+	return r.UpdatePasswordCtx(context.Background(), id, hashedPassword)
+}
+
+func (r *UserRepository) UpdatePasswordCtx(ctx context.Context, id, hashedPassword string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return database.GetDB().WithContext(ctx).Model(&models.User{}).Where("id = ?", id).Update("password", hashedPassword).Error
 }
 
 func (r *UserRepository) UpdateRole(username, role string) error {

@@ -257,6 +257,9 @@ export const authApi = {
   adminSetUserActive: (id: string, active: boolean) =>
     api.patch<ApiResponse<User>>(`/admin/users/${id}/active`, { is_active: active }),
 
+  adminSetUserPassword: (id: string, password: string) =>
+    api.patch<ApiResponse<{ updated: boolean; userId: string }>>(`/admin/users/${id}/password`, { password }),
+
   adminDeleteUser: (id: string) => api.delete<ApiResponse<AdminDeleteUserResult>>(`/admin/users/${id}`),
 }
 

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"smart-bill-manager/internal/models"
@@ -70,6 +72,36 @@ func (s *AuthService) SetUserActiveCtx(ctx context.Context, actorUserID, targetU
 	}
 	resp := updated.ToResponse()
 	return &resp, nil
+}
+
+func (s *AuthService) AdminSetUserPasswordCtx(ctx context.Context, actorUserID, targetUserID, newPassword string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if actorUserID != "" && actorUserID == targetUserID {
+		return ErrUserSelfAction
+	}
+	if strings.TrimSpace(newPassword) == "" {
+		return errors.New("password required")
+	}
+	if len(newPassword) < 6 || len(newPassword) > 200 {
+		return errors.New("password length invalid")
+	}
+
+	// Ensure user exists
+	if _, err := s.userRepo.FindByIDCtx(ctx, targetUserID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	return s.userRepo.UpdatePasswordCtx(ctx, targetUserID, string(hashedPassword))
 }
 
 func (s *AuthService) DeleteUserCtx(ctx context.Context, actorUserID, targetUserID string) (*DeleteUserResult, error) {

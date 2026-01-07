@@ -38,6 +38,15 @@
             <template #body="{ data: row }">
               <div class="actions">
                 <Button
+                  size="small"
+                  class="p-button-outlined"
+                  severity="help"
+                  icon="pi pi-key"
+                  :label="'改密'"
+                  :disabled="isSelf(row.id)"
+                  @click="openPasswordDialog(row)"
+                />
+                <Button
                   v-if="row.is_active"
                   size="small"
                   class="p-button-outlined"
@@ -103,6 +112,36 @@
         </DataTable>
       </template>
     </Card>
+
+    <Dialog
+      v-model:visible="passwordDialogVisible"
+      modal
+      :draggable="false"
+      :style="{ width: '520px', maxWidth: '92vw' }"
+      header="重置用户密码"
+      @hide="closePasswordDialog"
+    >
+      <div class="p-fluid">
+        <div class="field">
+          <label>用户</label>
+          <div class="mono sbm-ellipsis" :title="passwordTarget?.username || ''">
+            {{ passwordTarget?.username || '-' }}
+          </div>
+        </div>
+
+        <div class="field" style="margin-top: 12px">
+          <label>新密码</label>
+          <Password v-model="passwordValue" toggleMask :feedback="false" autocomplete="new-password" />
+          <small v-if="passwordError" class="p-error">{{ passwordError }}</small>
+          <small v-else class="muted">用户需要使用新密码重新登录</small>
+        </div>
+      </div>
+
+      <template #footer>
+        <Button class="p-button-outlined" severity="secondary" label="取消" @click="closePasswordDialog" />
+        <Button :loading="passwordSaving" label="确认重置" icon="pi pi-check" @click="submitPasswordReset" />
+      </template>
+    </Dialog>
   </div>
 </template>
 
@@ -112,6 +151,8 @@ import Card from 'primevue/card'
 import Button from 'primevue/button'
 import Column from 'primevue/column'
 import DataTable from 'primevue/datatable'
+import Dialog from 'primevue/dialog'
+import Password from 'primevue/password'
 import Tag from 'primevue/tag'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
@@ -132,6 +173,11 @@ const pageSize = ref(10)
 const usersAbort = ref<AbortController | null>(null)
 const workingId = ref<string | null>(null)
 const deletingId = ref<string | null>(null)
+const passwordDialogVisible = ref(false)
+const passwordTarget = ref<User | null>(null)
+const passwordValue = ref('')
+const passwordSaving = ref(false)
+const passwordError = ref('')
 
 const onPage = (e: any) => {
   pageSize.value = e?.rows || pageSize.value
@@ -236,6 +282,51 @@ const confirmDeleteUser = (user: User) => {
   })
 }
 
+const openPasswordDialog = (user: User) => {
+  if (isSelf(user.id)) {
+    toast.add({ severity: 'warn', summary: '不能在此处修改自己的密码', life: 2500 })
+    return
+  }
+  passwordTarget.value = user
+  passwordValue.value = ''
+  passwordError.value = ''
+  passwordDialogVisible.value = true
+}
+
+const closePasswordDialog = () => {
+  passwordDialogVisible.value = false
+  passwordTarget.value = null
+  passwordValue.value = ''
+  passwordError.value = ''
+}
+
+const submitPasswordReset = async () => {
+  const target = passwordTarget.value
+  if (!target) return
+
+  const pwd = String(passwordValue.value || '')
+  if (pwd.trim().length < 6) {
+    passwordError.value = '密码长度至少 6 位'
+    return
+  }
+
+  passwordSaving.value = true
+  passwordError.value = ''
+  try {
+    const res = await authApi.adminSetUserPassword(target.id, pwd)
+    if (res.data.success) {
+      toast.add({ severity: 'success', summary: '密码已重置', life: 2000 })
+      closePasswordDialog()
+      return
+    }
+    passwordError.value = res.data.message || '重置失败'
+  } catch (e: any) {
+    passwordError.value = e.response?.data?.message || '重置失败'
+  } finally {
+    passwordSaving.value = false
+  }
+}
+
 const loadUsers = async () => {
   usersAbort.value?.abort()
   const controller = new AbortController()
@@ -299,5 +390,16 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.field label {
+  display: block;
+  font-weight: 700;
+  color: var(--p-text-muted-color);
+  margin-bottom: 6px;
+}
+
+.muted {
+  color: var(--p-text-muted-color);
 }
 </style>

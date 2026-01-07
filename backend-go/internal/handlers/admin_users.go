@@ -24,6 +24,7 @@ func NewAdminUsersHandler(authService *services.AuthService, uploadsDir string) 
 func (h *AdminUsersHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("", h.List)
 	r.PATCH("/:id/active", h.SetActive)
+	r.PATCH("/:id/password", h.SetPassword)
 	r.DELETE("/:id", h.Delete)
 }
 
@@ -119,4 +120,47 @@ func (h *AdminUsersHandler) Delete(c *gin.Context) {
 	if h.uploadsDir != "" {
 		_ = os.RemoveAll(filepath.Join(h.uploadsDir, id))
 	}
+}
+
+type SetUserPasswordInput struct {
+	Password string `json:"password"`
+}
+
+func (h *AdminUsersHandler) SetPassword(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		utils.Error(c, http.StatusBadRequest, "缺少用户 id", nil)
+		return
+	}
+
+	var input SetUserPasswordInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		utils.Error(c, http.StatusBadRequest, "参数错误", err)
+		return
+	}
+	if strings.TrimSpace(input.Password) == "" {
+		utils.Error(c, http.StatusBadRequest, "缺少 password", nil)
+		return
+	}
+	if len(input.Password) < 6 {
+		utils.Error(c, http.StatusBadRequest, "密码长度至少 6 位", nil)
+		return
+	}
+
+	actorID := middleware.GetUserID(c)
+	if err := h.authService.AdminSetUserPasswordCtx(c.Request.Context(), actorID, id, input.Password); err != nil {
+		switch err {
+		case services.ErrUserSelfAction:
+			utils.Error(c, http.StatusBadRequest, "不能在此处修改自己的密码，请使用“修改密码”功能", err)
+			return
+		case services.ErrNotFound:
+			utils.Error(c, http.StatusNotFound, "用户不存在", err)
+			return
+		default:
+			utils.Error(c, http.StatusInternalServerError, "重置密码失败", err)
+			return
+		}
+	}
+
+	utils.SuccessData(c, gin.H{"updated": true, "userId": id})
 }
