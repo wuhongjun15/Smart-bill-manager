@@ -588,13 +588,15 @@ func parseInvoiceXMLToExtracted(xmlBytes []byte) (*InvoiceExtractedData, error) 
 		return ""
 	}
 
-	invNo := first("fphm", "invoice_number", "invoiceno", "invoicenumber", "fpno")
-	invDate := first("kprq", "invoice_date", "invoicedate", "date")
-	seller := first("xfmc", "seller_name", "sellername", "xfname")
-	buyer := first("gfmc", "buyer_name", "buyername", "gfname")
-	amountStr := first("hjje", "amount", "je", "amt")
-	taxStr := first("hjse", "tax_amount", "taxamount", "se", "tax")
-	totalStr := first("jshj", "total", "total_amount", "totalamount")
+	invNo := first("fphm", "invoice_number", "invoiceno", "invoicenumber", "fpno", "eiid", "invoiceid", "invoicenum")
+	invDate := first("kprq", "invoice_date", "invoicedate", "issuetime", "requesttime", "date")
+	seller := first("xfmc", "seller_name", "sellername", "xfname", "seller", "sellername")
+	buyer := first("gfmc", "buyer_name", "buyername", "gfname", "buyer", "buyername")
+
+	// Prefer tax-included total (价税合计) when available.
+	amountStr := first("totaltax-includedamount", "totaltaxincludedamount", "jshj", "total", "total_amount", "totalamount", "amount", "je", "amt", "hjje")
+	taxStr := first("hjse", "totaltaxam", "comtaxam", "tax_amount", "taxamount", "se", "tax")
+	totalStr := first("jshj", "totaltax-includedamount", "totaltaxincludedamount", "total", "total_amount", "totalamount")
 
 	var amount *float64
 	if amountStr == "" && totalStr != "" {
@@ -649,6 +651,11 @@ func parseAmountLoose(s string) *float64 {
 	if s == "" {
 		return nil
 	}
+	s = strings.ReplaceAll(s, "￥", "")
+	s = strings.ReplaceAll(s, "¥", "")
+	s = strings.ReplaceAll(s, "CNY", "")
+	s = strings.ReplaceAll(s, "cny", "")
+	s = strings.TrimSpace(s)
 	s = strings.ReplaceAll(s, ",", "")
 	s = strings.ReplaceAll(s, "￥", "")
 	s = strings.ReplaceAll(s, "¥", "")
@@ -671,9 +678,22 @@ func buildInvoiceItems(values map[string][]string) []InvoiceLineItem {
 	if len(names) == 0 {
 		names = get("xmmc")
 	}
+	// EInvoice XML (IssuItemInformation/ItemName).
+	if len(names) == 0 {
+		names = get("itemname")
+	}
 	specs := get("ggxh")
+	if len(specs) == 0 {
+		specs = get("specmod")
+	}
 	units := get("dw")
+	if len(units) == 0 {
+		units = get("meaunits")
+	}
 	qtys := get("spsl")
+	if len(qtys) == 0 {
+		qtys = get("quantity")
+	}
 
 	n := len(names)
 	if n == 0 {
