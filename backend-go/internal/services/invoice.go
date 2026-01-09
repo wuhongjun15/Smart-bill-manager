@@ -747,6 +747,17 @@ func (s *InvoiceService) Delete(ownerUserID string, id string) error {
 		return err
 	}
 
+	// If this invoice was created from an email log, allow the user to parse the email again.
+	// (Email UI disables "解析" when status is "parsed".)
+	_ = database.GetDB().
+		Model(&models.EmailLog{}).
+		Where("owner_user_id = ? AND parsed_invoice_id = ?", ownerUserID, id).
+		Updates(map[string]interface{}{
+			"parsed_invoice_id": nil,
+			"status":           "received",
+			"parse_error":      nil,
+		}).Error
+
 	return recalcTripBadDebtLockedForTripIDs(affectedTrips)
 }
 

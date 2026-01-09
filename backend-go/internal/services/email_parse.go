@@ -66,7 +66,20 @@ func (s *EmailService) ParseEmailLogCtx(ctx context.Context, ownerUserID string,
 	}
 
 	if logRow.ParsedInvoiceID != nil && strings.TrimSpace(*logRow.ParsedInvoiceID) != "" {
-		return s.invoiceService.GetByID(strings.TrimSpace(logRow.OwnerUserID), strings.TrimSpace(*logRow.ParsedInvoiceID))
+		inv, err := s.invoiceService.GetByID(strings.TrimSpace(logRow.OwnerUserID), strings.TrimSpace(*logRow.ParsedInvoiceID))
+		if err == nil {
+			return inv, nil
+		}
+		// If user deleted the invoice, clear the pointer so they can parse again.
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			_ = s.repo.UpdateLog(logID, map[string]interface{}{
+				"parsed_invoice_id": nil,
+				"status":           "received",
+				"parse_error":      nil,
+			})
+		} else {
+			return nil, err
+		}
 	}
 
 	if logRow.MessageUID <= 0 {
