@@ -4245,8 +4245,29 @@ func extractCompanyNameNearTaxID(text string) string {
 		if len(matches) == 0 {
 			continue
 		}
-		// Prefer the last occurrence within the window (closest to the tax-id).
-		cand := cleanupName(strings.TrimSpace(matches[len(matches)-1][1]))
+		// Prefer the longest company-like match in the window.
+		// Some strings contain nested matches (e.g. "北京易行出行旅游有限公司" also matches "旅游有限公司"),
+		// and picking the "last" occurrence would incorrectly truncate the company name.
+		cand := ""
+		candLen := 0
+		for _, mm := range matches {
+			if len(mm) < 2 {
+				continue
+			}
+			v := cleanupName(strings.TrimSpace(mm[1]))
+			v = strings.TrimSpace(v)
+			if v == "" || v == "个人" || isBadPartyNameCandidate(v) {
+				continue
+			}
+			l := len([]rune(v))
+			if l > candLen {
+				cand = v
+				candLen = l
+			}
+		}
+		if cand == "" {
+			continue
+		}
 		// Strip common table/header prefixes that may be adjacent in PDF text.
 		cand = regexp.MustCompile(`^(?:单价|金额|税率/征收率|税率|税额|下载次数)+`).ReplaceAllString(cand, "")
 		cand = strings.TrimSpace(cand)
@@ -7206,8 +7227,9 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 			}
 		}
 
-		// If we couldn't locate the seller marker, fall back to the last company+taxid match in the whole text.
-		if best == "" && sellerText == parsedText {
+		// If seller section is empty (common with zoned PDF text), fall back to the last company+taxid match
+		// in the whole invoice text.
+		if best == "" {
 			if matches := companyTaxIDLoose.FindAllStringSubmatch(parsedText, -1); len(matches) > 0 {
 				cand := cleanupName(strings.TrimSpace(matches[len(matches)-1][1]))
 				if cand != "" && cand != "个人" && !isBadPartyNameCandidate(cand) {
