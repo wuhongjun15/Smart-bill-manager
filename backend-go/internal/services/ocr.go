@@ -6545,6 +6545,91 @@ func (s *OCRService) ParseInvoiceData(text string) (*InvoiceExtractedData, error
 		}
 	}
 
+	// Special invoice type: railway e-ticket (电子发票（铁路电子客票）).
+	// The seller block is often missing a real company name; OCR may mistakenly pick the tax bureau header.
+	// Build a stable seller + one line item for better UX.
+	isRailwayETicket := func(s string) bool {
+		if strings.Contains(s, "\u94c1\u8def\u7535\u5b50\u5ba2\u7968") {
+			return true
+		}
+		// Some PDFs omit brackets but still contain strong markers.
+		if strings.Contains(s, "\u7535\u5b50\u53d1\u7968") && strings.Contains(s, "\u94c1\u8def") && strings.Contains(s, "\u5ba2\u7968") {
+			return true
+		}
+		return false
+	}
+
+		railTicketDetected := isRailwayETicket(parsedText) || isRailwayETicket(text)
+		if railTicketDetected {
+			// Invoice date: 开票日期 / 章开票日期
+			if m := regexp.MustCompile(`(?:开票日期|章开票日期)[:：]?\s*(\d{4}年\d{1,2}月\d{1,2}日)`).FindStringSubmatch(parsedText); len(m) > 1 {
+				setStringWithSourceAndConfidence(&data.InvoiceDate, &data.InvoiceDateSource, &data.InvoiceDateConfidence, m[1], "rail_ticket_date", 0.9)
+			}
+
+			// Buyer: 购买方名称
+			if m := regexp.MustCompile(`购买方名称[:：]?\s*([^\n\r]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
+				val := cleanupName(strings.TrimSpace(m[1]))
+				if val != "" && val != "\u4e2a\u4eba" && !isBadPartyNameCandidate(val) {
+					setStringWithSourceAndConfidence(&data.BuyerName, &data.BuyerNameSource, &data.BuyerNameConfidence, val, "rail_ticket_buyer", 0.9)
+				}
+		}
+
+		// Seller: railway e-tickets are issued by China Railway; OCR may mistakenly pick tax-bureau headers as "seller".
+		setStringWithSourceAndConfidence(&data.SellerName, &data.SellerNameSource, &data.SellerNameConfidence, "\u4e2d\u56fd\u94c1\u8def", "rail_ticket_seller", 0.85)
+
+			// Amount: 票价
+			if m := regexp.MustCompile(`票价[:：]?\s*(?:￥|¥)?\s*([\d,.]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
+				if amt := parseAmount(m[1]); amt != nil {
+					setAmountWithSourceAndConfidence(&data.Amount, &data.AmountSource, &data.AmountConfidence, amt, "rail_ticket_price", 0.9)
+				}
+			}
+
+		// Build a simple 1-line item (route + train + seat).
+		if len(data.Items) == 0 {
+			origin := ""
+			dest := ""
+			if matches := regexp.MustCompile(`(?m)^([\p{Han}]{2,10})\s*[A-Za-z]*\s*站`).FindAllStringSubmatch(parsedText, -1); len(matches) > 0 {
+				origin = strings.TrimSpace(matches[0][1])
+				if len(matches) > 1 {
+					dest = strings.TrimSpace(matches[1][1])
+				}
+			}
+
+			trainNo := ""
+			if m := regexp.MustCompile(`\b([GDCKTZYLSP]\d{1,4})\b`).FindStringSubmatch(parsedText); len(m) > 1 {
+				trainNo = m[1]
+			}
+			seat := ""
+			if m := regexp.MustCompile(`(商务座|特等座|一等座|二等座|三等座|软卧|硬卧|软座|硬座|无座)`).FindStringSubmatch(parsedText); len(m) > 1 {
+				seat = m[1]
+			}
+
+			itemNameParts := make([]string, 0, 6)
+			itemNameParts = append(itemNameParts, "\u94c1\u8def\u5ba2\u8fd0\u670d\u52a1")
+			if origin != "" && dest != "" {
+				itemNameParts = append(itemNameParts, origin+"->"+dest)
+			} else if origin != "" {
+				itemNameParts = append(itemNameParts, origin)
+			}
+			if trainNo != "" {
+				itemNameParts = append(itemNameParts, trainNo)
+			}
+			if seat != "" {
+				itemNameParts = append(itemNameParts, seat)
+			}
+
+			name := strings.TrimSpace(strings.Join(itemNameParts, " "))
+			if name != "" {
+				q := 1.0
+				data.Items = []InvoiceLineItem{{
+					Name:     name,
+					Unit:     "\u6b21",
+					Quantity: &q,
+				}}
+			}
+		}
+	}
+
 	isPlausibleInvoiceYear := func(y int) bool {
 		nowY := time.Now().Year()
 		return y >= 2000 && y <= nowY+2
