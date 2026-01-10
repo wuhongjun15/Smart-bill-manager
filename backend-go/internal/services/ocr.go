@@ -4603,7 +4603,7 @@ func normalizeInvoiceTextForParsing(text string) string {
 	return text
 }
 
-func normalizeInvoiceTextForPretty(text string) string {
+func normalizeInvoiceTextForPretty(text string, data *InvoiceExtractedData) string {
 	// Pretty output should preserve PyMuPDF "分区" headers (e.g. "【发票信息】/【明细】"),
 	// while still normalizing common spacing/currency issues.
 	text = strings.ReplaceAll(text, "\r\n", "\n")
@@ -4651,12 +4651,12 @@ func normalizeInvoiceTextForPretty(text string) string {
 	// Some providers/templates omit the "密码区", but the fixed region split still emits a "【密码区】" block,
 	// and buyer info may be pushed into it, making the pretty zoned text misleading (even if the final
 	// extracted fields are correct).
-	out = fixInvoiceZonesForPretty(out)
+	out = fixInvoiceZonesForPretty(out, data)
 
 	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
-func fixInvoiceZonesForPretty(lines []string) []string {
+func fixInvoiceZonesForPretty(lines []string, data *InvoiceExtractedData) []string {
 	isZoneHeader := func(s string) bool {
 		s = strings.TrimSpace(s)
 		if s == "" {
@@ -4760,7 +4760,8 @@ func fixInvoiceZonesForPretty(lines []string) []string {
 	}
 	flush()
 
-	// Merge "【密码区】" into "【购买方】" when it doesn't look like a real password block.
+	// Merge non-password "【密码区】" into the most likely logical zone.
+	// This happens when a template has no password area but we still split by fixed regions.
 	for i := 0; i < len(segs); i++ {
 		if strings.TrimSpace(segs[i].header) != "【密码区】" {
 			continue
@@ -4769,8 +4770,9 @@ func fixInvoiceZonesForPretty(lines []string) []string {
 			continue
 		}
 
-		// Find the nearest buyer segment within the same page.
+		// Find the nearest buyer/seller segment within the same page.
 		buyerIdx := -1
+		sellerIdx := -1
 		for j := i - 1; j >= 0; j-- {
 			if isPageHeader(segs[j].header) {
 				break
@@ -4780,11 +4782,100 @@ func fixInvoiceZonesForPretty(lines []string) []string {
 				break
 			}
 		}
+		for j := i + 1; j < len(segs); j++ {
+			if isPageHeader(segs[j].header) {
+				break
+			}
+			if strings.TrimSpace(segs[j].header) == "【销售方】" {
+				sellerIdx = j
+				break
+			}
+		}
 		if buyerIdx == -1 {
 			continue
 		}
-		segs[buyerIdx].content = append(segs[buyerIdx].content, segs[i].content...)
+
+		// Decide destination: if we already extracted buyer/seller, try to place the block accordingly.
+		dest := buyerIdx
+		if sellerIdx != -1 && data != nil {
+			buyerName := ptrToString(data.BuyerName)
+			sellerName := ptrToString(data.SellerName)
+			joined := strings.TrimSpace(strings.Join(segs[i].content, " "))
+			// If buyer is "个人" and seller is a company, tax-id lines in this block are very likely seller-side.
+			if buyerName == "个人" && sellerName != "" && sellerName != "个人" {
+				if strings.Contains(joined, sellerName) || extractCompanyNameNearTaxID(joined) == sellerName {
+					dest = sellerIdx
+				} else if taxIDRegex.MatchString(joined) && regexp.MustCompile(`(?:有限责任公司|有限公司|公司|集团|商店|企业|中心|厂|店|行|社|院|局)`).MatchString(joined) {
+					dest = sellerIdx
+				}
+			}
+			// If a side's name appears in this block, prefer that side.
+			if buyerName != "" && strings.Contains(joined, buyerName) {
+				dest = buyerIdx
+			}
+			if sellerName != "" && strings.Contains(joined, sellerName) {
+				dest = sellerIdx
+			}
+		}
+
+		segs[dest].content = append(segs[dest].content, segs[i].content...)
 		segs[i].removed = true
+	}
+
+	// Clean merged header rows: buyer zone lines sometimes include both buyer and seller labels due to 2-column PDFs.
+	if data != nil {
+		buyerName := ptrToString(data.BuyerName)
+		sellerName := ptrToString(data.SellerName)
+		if buyerName != "" || sellerName != "" {
+			for i := range segs {
+				h := strings.TrimSpace(segs[i].header)
+				if h != "【购买方】" && h != "【销售方】" {
+					continue
+				}
+				cleaned := make([]string, 0, len(segs[i].content))
+				for _, line := range segs[i].content {
+					l := strings.TrimSpace(line)
+					if l == "" {
+						continue
+					}
+					// Split "…个人 销售方信息名称：…" into buyer/seller respective segments.
+					if strings.Contains(l, "销售方信息名称") && h == "【购买方】" {
+						if idx := strings.Index(l, "销售方信息名称"); idx > 0 {
+							left := strings.TrimSpace(l[:idx])
+							if left != "" {
+								cleaned = append(cleaned, left)
+							}
+							// Drop the trailing seller label fragment (seller details are handled via other blocks).
+							continue
+						}
+					}
+					if strings.Contains(l, "购买方信息名称") && h == "【销售方】" {
+						if idx := strings.Index(l, "购买方信息名称"); idx > 0 {
+							right := strings.TrimSpace(l[idx:])
+							_ = right
+							// Prefer dropping merged buyer fragments from seller zone.
+							l = strings.TrimSpace(l[:idx])
+							if l == "" {
+								continue
+							}
+						}
+					}
+					// If we have a known party name, remove obvious mismatched label-only lines.
+					if h == "【购买方】" && buyerName == "个人" && strings.Contains(l, "纳税人识别号") && taxIDRegex.MatchString(l) {
+						// A tax ID line in buyer zone is usually a seller-side column leak when buyer is individual.
+						continue
+					}
+					if h == "【销售方】" && sellerName != "" && sellerName != "个人" {
+						// If a line contains buyer name but not seller name, it's likely leaked from buyer column.
+						if buyerName != "" && strings.Contains(l, buyerName) && !strings.Contains(l, sellerName) && !taxIDRegex.MatchString(l) {
+							continue
+						}
+					}
+					cleaned = append(cleaned, l)
+				}
+				segs[i].content = cleaned
+			}
+		}
 	}
 
 	rebuilt := make([]string, 0, len(lines))
@@ -4814,7 +4905,7 @@ func formatFloat2(v *float64) string {
 }
 
 func formatInvoicePrettyText(raw string, data *InvoiceExtractedData) string {
-	clean := normalizeInvoiceTextForPretty(raw)
+	clean := normalizeInvoiceTextForPretty(raw, data)
 
 	var b strings.Builder
 	b.WriteString("【整理摘要】\n")
