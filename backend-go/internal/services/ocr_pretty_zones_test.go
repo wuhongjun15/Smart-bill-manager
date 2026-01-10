@@ -63,6 +63,8 @@ func TestFixInvoiceZonesForPretty_PlaceNonPasswordPasswordZoneIntoSellerWhenKnow
 		"【密码区】",
 		"统一社会信用代码/纳税人识别号: 北京易行出行旅游有限公司 91110108735575307R",
 		"单价 65.42 金额 65.42 税率/征收率 6% 税额 3.92",
+		"【明细】",
+		"*旅游服务*代订车服务费 个 1",
 		"【销售方】",
 		"备 注",
 	}
@@ -85,6 +87,18 @@ func TestFixInvoiceZonesForPretty_PlaceNonPasswordPasswordZoneIntoSellerWhenKnow
 	}
 	if !strings.Contains(pretty[sellerIdx:], "北京易行出行旅游有限公司") {
 		t.Fatalf("expected seller zone to include company line, got:\n%s", pretty)
+	}
+	if strings.Contains(pretty[sellerIdx:], "税率/征收率") {
+		t.Fatalf("expected tax columns to be moved to 明细, got seller zone:\n%s", pretty[sellerIdx:])
+	}
+
+	// 明细 should contain the tax/amount column line.
+	detailIdx := strings.Index(pretty, "【明细】")
+	if detailIdx == -1 {
+		t.Fatalf("expected detail zone, got:\n%s", pretty)
+	}
+	if !strings.Contains(pretty[detailIdx:], "税率/征收率") {
+		t.Fatalf("expected detail zone to include tax columns, got:\n%s", pretty[detailIdx:])
 	}
 
 	// Buyer zone should not contain the seller tax-id line anymore.

@@ -4770,9 +4770,10 @@ func fixInvoiceZonesForPretty(lines []string, data *InvoiceExtractedData) []stri
 			continue
 		}
 
-		// Find the nearest buyer/seller segment within the same page.
+		// Find the nearest buyer/seller/detail segment within the same page.
 		buyerIdx := -1
 		sellerIdx := -1
+		detailIdx := -1
 		for j := i - 1; j >= 0; j-- {
 			if isPageHeader(segs[j].header) {
 				break
@@ -4791,34 +4792,59 @@ func fixInvoiceZonesForPretty(lines []string, data *InvoiceExtractedData) []stri
 				break
 			}
 		}
+		for j := i + 1; j < len(segs); j++ {
+			if isPageHeader(segs[j].header) {
+				break
+			}
+			if strings.TrimSpace(segs[j].header) == "【明细】" {
+				detailIdx = j
+				break
+			}
+		}
 		if buyerIdx == -1 {
 			continue
 		}
 
-		// Decide destination: if we already extracted buyer/seller, try to place the block accordingly.
-		dest := buyerIdx
-		if sellerIdx != -1 && data != nil {
-			buyerName := ptrToString(data.BuyerName)
-			sellerName := ptrToString(data.SellerName)
-			joined := strings.TrimSpace(strings.Join(segs[i].content, " "))
-			// If buyer is "个人" and seller is a company, tax-id lines in this block are very likely seller-side.
-			if buyerName == "个人" && sellerName != "" && sellerName != "个人" {
+		// Distribute lines instead of moving the whole block:
+		// - company+taxid -> seller
+		// - unit price / amount / tax columns -> detail
+		// - others -> buyer
+		buyerName := ""
+		sellerName := ""
+		if data != nil {
+			buyerName = ptrToString(data.BuyerName)
+			sellerName = ptrToString(data.SellerName)
+		}
+		for _, line := range segs[i].content {
+			l := strings.TrimSpace(line)
+			if l == "" {
+				continue
+			}
+
+			target := buyerIdx
+
+			// Table numeric columns should belong to "明细" rather than "销售方".
+			if detailIdx != -1 && (strings.Contains(l, "单价") || strings.Contains(l, "金额") || strings.Contains(l, "税率") || strings.Contains(l, "征收率") || strings.Contains(l, "税额")) {
+				target = detailIdx
+			}
+
+			// Tax-id/company lines should belong to seller when we have a company seller (common when buyer is "个人").
+			if sellerIdx != -1 && sellerName != "" && sellerName != "个人" {
+				joined := l
 				if strings.Contains(joined, sellerName) || extractCompanyNameNearTaxID(joined) == sellerName {
-					dest = sellerIdx
+					target = sellerIdx
 				} else if taxIDRegex.MatchString(joined) && regexp.MustCompile(`(?:有限责任公司|有限公司|公司|集团|商店|企业|中心|厂|店|行|社|院|局)`).MatchString(joined) {
-					dest = sellerIdx
+					target = sellerIdx
 				}
 			}
-			// If a side's name appears in this block, prefer that side.
-			if buyerName != "" && strings.Contains(joined, buyerName) {
-				dest = buyerIdx
-			}
-			if sellerName != "" && strings.Contains(joined, sellerName) {
-				dest = sellerIdx
-			}
-		}
 
-		segs[dest].content = append(segs[dest].content, segs[i].content...)
+			// If buyer name appears, keep it in buyer zone.
+			if buyerName != "" && strings.Contains(l, buyerName) {
+				target = buyerIdx
+			}
+
+			segs[target].content = append(segs[target].content, l)
+		}
 		segs[i].removed = true
 	}
 
