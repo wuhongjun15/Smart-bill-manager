@@ -38,6 +38,115 @@ const (
 	emailParseMaxPageBytes = 2 * 1024 * 1024
 )
 
+type emailHeaderLike interface {
+	ContentDisposition() (disp string, params map[string]string, err error)
+	ContentType() (t string, params map[string]string, err error)
+}
+
+func extractFilenameFromEmailHeader(h emailHeaderLike) string {
+	if h == nil {
+		return ""
+	}
+	// Try Content-Disposition filename=...
+	if disp, params, err := h.ContentDisposition(); err == nil && strings.TrimSpace(disp) != "" {
+		if v := strings.TrimSpace(params["filename"]); v != "" {
+			return v
+		}
+	}
+	// Try Content-Type name=...
+	if _, params, err := h.ContentType(); err == nil {
+		if v := strings.TrimSpace(params["name"]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func isPDFEmailHeader(h emailHeaderLike) (isPDF bool, filename string) {
+	if h == nil {
+		return false, ""
+	}
+	ct, _, _ := h.ContentType()
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	filename = strings.TrimSpace(extractFilenameFromEmailHeader(h))
+	filenameLower := strings.ToLower(filename)
+	// Prefer MIME type; some providers omit a proper filename or extension.
+	if ct == "application/pdf" {
+		return true, filename
+	}
+	if strings.HasSuffix(filenameLower, ".pdf") || strings.Contains(filenameLower, ".pdf?") {
+		return true, filename
+	}
+	return false, filename
+}
+
+func extractInvoicePDFAndBodyTextFromEmail(mr *mail.Reader) (pdfFilename string, pdfBytes []byte, bodyText string, err error) {
+	if mr == nil {
+		return "", nil, "", fmt.Errorf("nil mail reader")
+	}
+
+	textParts := make([]string, 0, 8)
+
+	for {
+		part, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return "", nil, "", err
+		}
+
+		switch h := part.Header.(type) {
+		case *mail.AttachmentHeader:
+			filename, _ := h.Filename()
+			if ok, hinted := isPDFEmailHeader(h); ok && pdfBytes == nil {
+				if strings.TrimSpace(filename) == "" {
+					filename = hinted
+				}
+				b, err := readWithLimit(part.Body, emailParseMaxPDFBytes)
+				if err != nil {
+					return "", nil, "", err
+				}
+				pdfFilename = filename
+				pdfBytes = b
+			}
+		case *mail.InlineHeader:
+			// Some providers mark PDF attachments as inline (Content-Disposition: inline),
+			// which `go-message/mail` surfaces as InlineHeader instead of AttachmentHeader.
+			if ok, filename := isPDFEmailHeader(h); ok && pdfBytes == nil {
+				b, err := readWithLimit(part.Body, emailParseMaxPDFBytes)
+				if err != nil {
+					return "", nil, "", err
+				}
+				pdfFilename = filename
+				pdfBytes = b
+				break
+			}
+			// Otherwise treat as inline body text for link parsing.
+			if len(textParts) < 12 {
+				if b, err := readWithLimit(part.Body, emailParseMaxTextBytes); err == nil {
+					s := strings.TrimSpace(string(b))
+					if s != "" {
+						textParts = append(textParts, s)
+					}
+				}
+			}
+		default:
+			// Inline + other body parts: collect for link parsing (xml/pdf download URLs).
+			if len(textParts) < 12 {
+				if b, err := readWithLimit(part.Body, emailParseMaxTextBytes); err == nil {
+					s := strings.TrimSpace(string(b))
+					if s != "" {
+						textParts = append(textParts, s)
+					}
+				}
+			}
+		}
+	}
+
+	return pdfFilename, pdfBytes, strings.Join(textParts, "\n"), nil
+}
+
 func (s *EmailService) ParseEmailLog(ownerUserID string, logID string) (*models.Invoice, error) {
 	return s.ParseEmailLogCtx(context.Background(), ownerUserID, logID)
 }
@@ -185,52 +294,17 @@ func (s *EmailService) ParseEmailLogCtx(ctx context.Context, ownerUserID string,
 	var (
 		pdfFilename string
 		pdfBytes    []byte
-		textParts   []string
 	)
 
-	for {
-		part, err := mr.NextPart()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			_ = s.repo.UpdateLog(logID, map[string]interface{}{
-				"status":      "error",
-				"parse_error": fmt.Sprintf("read email part failed: %v", err),
-			})
-			return nil, err
-		}
-
-		switch h := part.Header.(type) {
-		case *mail.AttachmentHeader:
-			filename, _ := h.Filename()
-			low := strings.ToLower(strings.TrimSpace(filename))
-			if pdfBytes == nil && strings.HasSuffix(low, ".pdf") {
-				b, err := readWithLimit(part.Body, emailParseMaxPDFBytes)
-				if err != nil {
-					_ = s.repo.UpdateLog(logID, map[string]interface{}{
-						"status":      "error",
-						"parse_error": fmt.Sprintf("read pdf attachment failed: %v", err),
-					})
-					return nil, err
-				}
-				pdfFilename = filename
-				pdfBytes = b
-			}
-		default:
-			// Inline + other body parts: collect for link parsing (xml/pdf download URLs).
-			if len(textParts) < 12 {
-				if b, err := readWithLimit(part.Body, emailParseMaxTextBytes); err == nil {
-					s := strings.TrimSpace(string(b))
-					if s != "" {
-						textParts = append(textParts, s)
-					}
-				}
-			}
-		}
+	pdfFilename, pdfBytes, bodyText, err := extractInvoicePDFAndBodyTextFromEmail(mr)
+	if err != nil {
+		_ = s.repo.UpdateLog(logID, map[string]interface{}{
+			"status":      "error",
+			"parse_error": fmt.Sprintf("read email part failed: %v", err),
+		})
+		return nil, err
 	}
 
-	bodyText := strings.Join(textParts, "\n")
 	xmlURL := logRow.InvoiceXMLURL
 	pdfURL := logRow.InvoicePDFURL
 

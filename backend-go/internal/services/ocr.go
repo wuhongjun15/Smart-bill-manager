@@ -4722,6 +4722,33 @@ func fixInvoiceZonesForPretty(lines []string, data *InvoiceExtractedData) []stri
 		dsRatio := float64(digitOrSym) / float64(total)
 		return dsRatio >= 0.45 && hanRatio <= 0.15
 	}
+	shouldMergeFakePasswordBlock := func(block []string) bool {
+		if len(block) == 0 {
+			return false
+		}
+		s := strings.TrimSpace(strings.Join(block, " "))
+		if s == "" {
+			return false
+		}
+		// Only merge when we are confident the "【密码区】" block is actually a mis-split buyer/seller/table area.
+		// Some invoice templates (or PDFs extracted by zones) can place seller/company lines or numeric columns
+		// near the password region; merging those away makes the pretty text misleading.
+		if data != nil {
+			if buyerName := ptrToString(data.BuyerName); buyerName != "" && strings.Contains(s, buyerName) {
+				return true
+			}
+		}
+		for _, hint := range []string{
+			"购买方", "买方", "购方", "购买方信息", "销售方信息",
+			"货物或应税劳务", "项目名称", "规格型号", "单位", "数量",
+			"地址", "电话", "开户行", "账号",
+		} {
+			if strings.Contains(s, hint) {
+				return true
+			}
+		}
+		return false
+	}
 
 	type seg struct {
 		header  string
@@ -4767,6 +4794,9 @@ func fixInvoiceZonesForPretty(lines []string, data *InvoiceExtractedData) []stri
 			continue
 		}
 		if isLikelyPasswordBlock(segs[i].content) {
+			continue
+		}
+		if !shouldMergeFakePasswordBlock(segs[i].content) {
 			continue
 		}
 
