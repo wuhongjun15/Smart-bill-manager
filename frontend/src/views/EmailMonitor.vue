@@ -586,7 +586,6 @@ const handleParseLog = async (id: string) => {
     if (res.data.success && res.data.data) {
       toast.add({ severity: 'success', summary: '解析成功', life: 2200 })
       notifications.add({ severity: 'success', title: '邮件已解析为发票', detail: res.data.data.id })
-      await loadLogs()
     } else {
       toast.add({ severity: 'error', summary: res.data.message || '解析失败', life: 3500 })
     }
@@ -595,6 +594,7 @@ const handleParseLog = async (id: string) => {
     toast.add({ severity: 'error', summary: err.response?.data?.message || '解析失败', life: 3500 })
   } finally {
     parseLoading.value = null
+    await loadLogs()
   }
 }
 

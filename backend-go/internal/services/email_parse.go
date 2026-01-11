@@ -264,6 +264,16 @@ func (s *EmailService) ParseEmailLog(ownerUserID string, logID string) (*models.
 	return s.ParseEmailLogCtx(context.Background(), ownerUserID, logID)
 }
 
+func shouldShortCircuitEmailLogParse(status string, parsedInvoiceID *string) bool {
+	if !strings.EqualFold(strings.TrimSpace(status), "parsed") {
+		return false
+	}
+	if parsedInvoiceID == nil {
+		return false
+	}
+	return strings.TrimSpace(*parsedInvoiceID) != ""
+}
+
 func (s *EmailService) ParseEmailLogCtx(ctx context.Context, ownerUserID string, logID string) (*models.Invoice, error) {
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	if ownerUserID == "" {
@@ -288,7 +298,9 @@ func (s *EmailService) ParseEmailLogCtx(ctx context.Context, ownerUserID string,
 		return nil, gorm.ErrRecordNotFound
 	}
 
-	if logRow.ParsedInvoiceID != nil && strings.TrimSpace(*logRow.ParsedInvoiceID) != "" {
+	// Only short-circuit when the log is already successfully parsed.
+	// Some older records may have inconsistent status/id, and users should still be able to retry.
+	if shouldShortCircuitEmailLogParse(logRow.Status, logRow.ParsedInvoiceID) {
 		inv, err := s.invoiceService.GetByID(strings.TrimSpace(logRow.OwnerUserID), strings.TrimSpace(*logRow.ParsedInvoiceID))
 		if err == nil {
 			return inv, nil
