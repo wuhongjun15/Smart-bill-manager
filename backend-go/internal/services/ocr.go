@@ -8020,6 +8020,30 @@ func (s *OCRService) ParseInvoiceDataWithMeta(text string, meta *PDFTextCLIRespo
 			if val == "个人" && old != "个人" {
 				shouldOverride = true
 			}
+			// Upgrade generic "个人" to a more specific personal name found in the buyer block,
+			// e.g. "邬先生（个人）".
+			if !shouldOverride && old == "个人" && val != "个人" {
+				looksPersonal := func(s string) bool {
+					s = strings.TrimSpace(s)
+					if s == "" || s == "个人" {
+						return false
+					}
+					if strings.Contains(s, "先生") || strings.Contains(s, "女士") {
+						return true
+					}
+					if strings.Contains(s, "（个人") || strings.Contains(s, "(个人") {
+						return true
+					}
+					// A short Han-only name is likely a person; don't allow long/complex strings.
+					if len([]rune(s)) >= 2 && len([]rune(s)) <= 12 && regexp.MustCompile(`^[\p{Han}·（）()]{2,}$`).MatchString(s) {
+						return true
+					}
+					return false
+				}
+				if looksPersonal(val) {
+					shouldOverride = true
+				}
+			}
 			if data.BuyerName == nil || strings.TrimSpace(old) == "" || isGarbagePartyName(old) || isBadPartyNameCandidate(old) {
 				shouldOverride = true
 			}
