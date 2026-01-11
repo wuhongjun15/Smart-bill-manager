@@ -22,6 +22,30 @@ import (
 	"smart-bill-manager/internal/utils"
 )
 
+func formatIMAPLoginError(imapHost string, err error) string {
+	base := ""
+	if err != nil {
+		base = err.Error()
+	}
+	host := strings.ToLower(strings.TrimSpace(imapHost))
+	if host == "" {
+		return base
+	}
+
+	// QQ Mail commonly requires enabling IMAP/SMTP and using an authorization code (not the login password).
+	if strings.Contains(host, "qq.com") {
+		lower := strings.ToLower(base)
+		if strings.Contains(lower, "login fail") || strings.Contains(lower, "authentication failed") || strings.Contains(lower, "auth") {
+			return fmt.Sprintf(
+				"%s\n\n提示：QQ邮箱需要在网页版「设置 -> 账户」开启 IMAP/SMTP 服务，并使用生成的“授权码”（不是QQ登录密码）。如果提示登录频率限制/账号异常，建议稍后重试或先网页登录确认账号状态。",
+				base,
+			)
+		}
+	}
+
+	return base
+}
+
 type EmailService struct {
 	repo              *repository.EmailRepository
 	invoiceService    *InvoiceService
@@ -299,7 +323,7 @@ func (s *EmailService) TestConnection(email, imapHost string, imapPort int, pass
 	defer c.Logout()
 
 	if err := c.Login(email, password); err != nil {
-		return false, fmt.Sprintf("登录失败: %v", err)
+		return false, fmt.Sprintf("登录失败: %s", formatIMAPLoginError(imapHost, err))
 	}
 
 	return true, "连接成功！"
@@ -776,7 +800,7 @@ func (s *EmailService) ManualCheck(ownerUserID string, configID string, full boo
 	defer c.Logout()
 
 	if err := c.Login(config.Email, config.Password); err != nil {
-		return false, fmt.Sprintf("登录失败: %v", err), 0
+		return false, fmt.Sprintf("登录失败: %s", formatIMAPLoginError(config.IMAPHost, err)), 0
 	}
 
 	_, err = c.Select("INBOX", false)
