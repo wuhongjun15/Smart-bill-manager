@@ -355,9 +355,13 @@ func (s *EmailService) monitorInbox(configID string, ownerUserID string, fullSyn
 
 	// On first run (no last_check), do a one-time historical sync.
 	if fullSync {
-		s.fetchEmails(ownerUserID, configID, c, true)
+		if _, err := s.fetchEmails(ownerUserID, configID, c, true); err != nil {
+			log.Printf("[Email Monitor] Full sync error: %v", err)
+		}
 	} else {
-		s.fetchEmails(ownerUserID, configID, c, false)
+		if _, err := s.fetchEmails(ownerUserID, configID, c, false); err != nil {
+			log.Printf("[Email Monitor] Fetch error: %v", err)
+		}
 	}
 
 	// Set up IDLE for real-time notifications
@@ -374,7 +378,9 @@ func (s *EmailService) monitorInbox(configID string, ownerUserID string, fullSyn
 				switch update.(type) {
 				case *client.MailboxUpdate:
 					log.Println("[Email Monitor] New mail received!")
-					s.fetchEmails(ownerUserID, configID, c, false)
+					if _, err := s.fetchEmails(ownerUserID, configID, c, false); err != nil {
+						log.Printf("[Email Monitor] Fetch error: %v", err)
+					}
 				}
 			case <-stop:
 				return
@@ -398,20 +404,38 @@ func (s *EmailService) monitorInbox(configID string, ownerUserID string, fullSyn
 	s.mu.Unlock()
 }
 
-func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *client.Client, full bool) int {
+func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *client.Client, full bool) (int, error) {
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	configID = strings.TrimSpace(configID)
 	if ownerUserID == "" || configID == "" || c == nil {
-		return 0
+		return 0, fmt.Errorf("missing fields")
 	}
 
-	textSection := &imap.BodySectionName{
-		BodyPartName: imap.BodyPartName{Specifier: imap.TextSpecifier},
-		Peek:         true,
-	}
-	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, imap.FetchBodyStructure, textSection.FetchItem()}
+	// Only fetch metadata. The detailed email body is read later during "解析" to avoid
+	// slow/fragile full-sync behavior on some IMAP servers.
+	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, imap.FetchBodyStructure}
 
 	newLogs := 0
+	fetchChunk := func(seqSet *imap.SeqSet) error {
+		if seqSet == nil {
+			return fmt.Errorf("nil seqSet")
+		}
+		messages := make(chan *imap.Message, 32)
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- c.UidFetch(seqSet, items, messages)
+			close(messages)
+		}()
+		for msg := range messages {
+			if s.processMessage(ownerUserID, configID, msg, nil) {
+				newLogs++
+			}
+			if !full && msg != nil {
+				s.markSeenByUID(c, msg.Uid)
+			}
+		}
+		return <-errCh
+	}
 
 	if full {
 		// Some IMAP servers behave unexpectedly with "UID FETCH 1:*" for large mailboxes.
@@ -422,22 +446,13 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 			log.Printf("[Email Monitor] Full sync UidSearch error: %v (falling back to UID FETCH 1:*)", err)
 			seqSet := new(imap.SeqSet)
 			seqSet.AddRange(1, 0) // 1:* (all UIDs)
-
-			messages := make(chan *imap.Message, 32)
-			go func() {
-				if err := c.UidFetch(seqSet, items, messages); err != nil {
-					log.Printf("[Email Monitor] UidFetch error: %v", err)
-				}
-			}()
-
-			for msg := range messages {
-				if s.processMessage(ownerUserID, configID, msg, textSection) {
-					newLogs++
-				}
+			if err := fetchChunk(seqSet); err != nil {
+				log.Printf("[Email Monitor] UidFetch error: %v", err)
+				return newLogs, err
 			}
 		} else {
 			if len(uids) == 0 {
-				return 0
+				return 0, nil
 			}
 			log.Printf("[Email Monitor] Full sync: %d messages (uid list size=%d)", len(uids), len(uids))
 
@@ -449,17 +464,9 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 				}
 				seqSet := new(imap.SeqSet)
 				seqSet.AddNum(uids[i:end]...)
-
-				messages := make(chan *imap.Message, 32)
-				go func() {
-					if err := c.UidFetch(seqSet, items, messages); err != nil {
-						log.Printf("[Email Monitor] UidFetch error: %v", err)
-					}
-				}()
-				for msg := range messages {
-					if s.processMessage(ownerUserID, configID, msg, textSection) {
-						newLogs++
-					}
+				if err := fetchChunk(seqSet); err != nil {
+					log.Printf("[Email Monitor] UidFetch error: %v", err)
+					return newLogs, err
 				}
 			}
 		}
@@ -470,10 +477,10 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 		uids, err := c.UidSearch(criteria)
 		if err != nil {
 			log.Printf("[Email Monitor] Search error: %v", err)
-			return 0
+			return 0, err
 		}
 		if len(uids) == 0 {
-			return 0
+			return 0, nil
 		}
 
 		const chunkSize = 50
@@ -484,24 +491,16 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 			}
 			seqSet := new(imap.SeqSet)
 			seqSet.AddNum(uids[i:end]...)
-			messages := make(chan *imap.Message, 32)
-			go func() {
-				if err := c.UidFetch(seqSet, items, messages); err != nil {
-					log.Printf("[Email Monitor] UidFetch error: %v", err)
-				}
-			}()
-			for msg := range messages {
-				if s.processMessage(ownerUserID, configID, msg, textSection) {
-					newLogs++
-				}
-				s.markSeenByUID(c, msg.Uid)
+			if err := fetchChunk(seqSet); err != nil {
+				log.Printf("[Email Monitor] UidFetch error: %v", err)
+				return newLogs, err
 			}
 		}
 	}
 
 	now := time.Now().Format(time.RFC3339)
 	_ = s.repo.UpdateLastCheckForOwner(ownerUserID, configID, now)
-	return newLogs
+	return newLogs, nil
 }
 
 func (s *EmailService) markSeenByUID(c *client.Client, uid uint32) {
@@ -786,7 +785,13 @@ func (s *EmailService) ManualCheck(ownerUserID string, configID string, full boo
 		return false, fmt.Sprintf("打开收件箱失败: %v", err), 0
 	}
 
-	count := s.fetchEmails(ownerUserID, configID, c, full)
+	count, fetchErr := s.fetchEmails(ownerUserID, configID, c, full)
+	if fetchErr != nil {
+		if full {
+			return false, fmt.Sprintf("全量同步失败: %v", fetchErr), 0
+		}
+		return false, fmt.Sprintf("同步失败: %v", fetchErr), 0
+	}
 
 	// Update last check time
 	now := time.Now().Format(time.RFC3339)
