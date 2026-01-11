@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/emersion/go-message/mail"
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 func TestExtractInvoiceArtifactsFromEmail_InlinePDF(t *testing.T) {
@@ -198,5 +199,59 @@ func TestExtractInvoiceArtifactsFromEmail_MessageRfc822NestedPDF(t *testing.T) {
 	}
 	if string(b) != string(pdfRaw) {
 		t.Fatalf("expected nested pdf bytes, got %q", string(b))
+	}
+}
+
+func TestExtractInvoiceArtifactsFromEmail_GB18030BodyDoesNotFail(t *testing.T) {
+	bodyUTF8 := "这里有个链接 https://example.com/invoice"
+	gb, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte(bodyUTF8))
+	if err != nil {
+		t.Fatalf("encode gb18030: %v", err)
+	}
+	bodyB64 := base64.StdEncoding.EncodeToString(gb)
+
+	pdfRaw := []byte("%PDF-1.4\n%test\n")
+	pdfB64 := base64.StdEncoding.EncodeToString(pdfRaw)
+
+	raw := strings.Join([]string{
+		"From: test@example.com",
+		"To: you@example.com",
+		"Subject: test",
+		"MIME-Version: 1.0",
+		"Content-Type: multipart/mixed; boundary=\"gb\"",
+		"",
+		"--gb",
+		"Content-Type: text/plain; charset=gb18030",
+		"Content-Transfer-Encoding: base64",
+		"",
+		bodyB64,
+		"",
+		"--gb",
+		"Content-Type: application/pdf",
+		"Content-Disposition: attachment; filename=\"invoice.pdf\"",
+		"Content-Transfer-Encoding: base64",
+		"",
+		pdfB64,
+		"--gb--",
+		"",
+	}, "\r\n")
+
+	mr, err := mail.CreateReader(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("CreateReader: %v", err)
+	}
+
+	name, b, _, _, body, err := extractInvoiceArtifactsFromEmail(mr)
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if strings.TrimSpace(name) != "invoice.pdf" {
+		t.Fatalf("expected filename invoice.pdf, got %q", name)
+	}
+	if len(b) == 0 || !strings.HasPrefix(string(b), "%PDF-") {
+		t.Fatalf("expected pdf bytes, got len=%d head=%q", len(b), string(b))
+	}
+	if !strings.Contains(body, "https://example.com/invoice") {
+		t.Fatalf("expected body text collected, got:\n%s", body)
 	}
 }

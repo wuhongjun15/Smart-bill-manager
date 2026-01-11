@@ -23,6 +23,7 @@ import (
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
+	"github.com/emersion/go-message"
 	"github.com/emersion/go-message/mail"
 	"golang.org/x/net/html/charset"
 
@@ -30,6 +31,11 @@ import (
 
 	"gorm.io/gorm"
 )
+
+func init() {
+	// Enable decoding of common Chinese email charsets (e.g. gb18030) in go-message mail parsing.
+	message.CharsetReader = charset.NewReaderLabel
+}
 
 const (
 	emailParseMaxPDFBytes  = 20 * 1024 * 1024
