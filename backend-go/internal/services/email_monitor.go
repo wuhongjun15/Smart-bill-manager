@@ -424,7 +424,6 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 		errCh := make(chan error, 1)
 		go func() {
 			errCh <- c.UidFetch(seqSet, items, messages)
-			close(messages)
 		}()
 		for msg := range messages {
 			if s.processMessage(ownerUserID, configID, msg, nil) {
