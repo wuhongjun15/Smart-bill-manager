@@ -114,6 +114,39 @@ func TestExtractInvoiceTotalsFromPDFZones_PicksXiaoxieAndTax(t *testing.T) {
 	}
 }
 
+func TestExtractInvoiceTotalsFromPDFZones_MultiAmountsAfterXiaoxiePrefersMax(t *testing.T) {
+	pages := []PDFTextZonesPage{
+		{
+			Page:   1,
+			Width:  1000,
+			Height: 1000,
+			Rows: []PDFTextZonesRow{
+				{
+					Region: "items",
+					Y0:     820,
+					Y1:     850,
+					Text:   "价税合计（大写） 合计捌拾捌圆整 （小写） 83.01 88.00 4.99",
+					Spans: []PDFTextZonesSpan{
+						{X0: 120, Y0: 820, X1: 200, Y1: 850, T: "价税合计"},
+						{X0: 380, Y0: 820, X1: 430, Y1: 850, T: "小写"},
+						{X0: 440, Y0: 820, X1: 520, Y1: 850, T: "83.01"},
+						{X0: 560, Y0: 820, X1: 640, Y1: 850, T: "88.00"},
+						{X0: 760, Y0: 820, X1: 830, Y1: 850, T: "4.99"},
+					},
+				},
+			},
+		},
+	}
+
+	total, src, _, tax, _, _ := extractInvoiceTotalsFromPDFZones(pages)
+	if total == nil || *total != 88.00 {
+		t.Fatalf("expected total=88.00 got %+v (src=%s)", total, src)
+	}
+	if tax == nil || *tax != 4.99 {
+		t.Fatalf("expected tax=4.99 got %+v", tax)
+	}
+}
+
 func TestExtractInvoiceLineItemsFromPDFZones_SplitsColumns(t *testing.T) {
 	pages := []PDFTextZonesPage{
 		{
@@ -164,5 +197,100 @@ func TestExtractInvoiceLineItemsFromPDFZones_SplitsColumns(t *testing.T) {
 	}
 	if items[0].Quantity == nil || *items[0].Quantity != 2 {
 		t.Fatalf("expected qty 2, got %+v", items[0].Quantity)
+	}
+}
+
+func TestExtractInvoiceLineItemsFromPDFZones_DiscountRowsNotMerged(t *testing.T) {
+	pages := []PDFTextZonesPage{
+		{
+			Page:   1,
+			Width:  595,
+			Height: 400,
+			Rows: []PDFTextZonesRow{
+				{
+					Region: "items",
+					Y0:     140,
+					Y1:     155,
+					Text:   "项目名称 规格型号 单位 数量",
+					Spans: []PDFTextZonesSpan{
+						{X0: 50, Y0: 140, X1: 110, Y1: 155, T: "项目名称"},
+						{X0: 160, Y0: 140, X1: 220, Y1: 155, T: "规格型号"},
+						{X0: 240, Y0: 140, X1: 270, Y1: 155, T: "单位"},
+						{X0: 290, Y0: 140, X1: 320, Y1: 155, T: "数量"},
+					},
+				},
+				// Row 1: normal item (qty=1)
+				{
+					Region: "items",
+					Y0:     160,
+					Y1:     170,
+					Text:   "*餐饮服务*餐饮服务 1 109.43 6%",
+					Spans: []PDFTextZonesSpan{
+						{X0: 20, Y0: 160, X1: 140, Y1: 170, T: "*餐饮服务*餐饮服务"},
+						{X0: 286, Y0: 160, X1: 292, Y1: 170, T: "1"},
+						{X0: 340, Y0: 160, X1: 380, Y1: 170, T: "109.43"},
+						{X0: 480, Y0: 160, X1: 500, Y1: 170, T: "6%"},
+						{X0: 560, Y0: 160, X1: 590, Y1: 170, T: "6.57"},
+					},
+				},
+				// Row 2: discount/adjustment line (no qty, has money)
+				{
+					Region: "items",
+					Y0:     172,
+					Y1:     182,
+					Text:   "*餐饮服务*餐饮服务 -28.30 6% -1.70",
+					Spans: []PDFTextZonesSpan{
+						{X0: 20, Y0: 172, X1: 140, Y1: 182, T: "*餐饮服务*餐饮服务"},
+						{X0: 420, Y0: 172, X1: 460, Y1: 182, T: "-28.30"},
+						{X0: 480, Y0: 172, X1: 500, Y1: 182, T: "6%"},
+						{X0: 560, Y0: 172, X1: 590, Y1: 182, T: "-1.70"},
+					},
+				},
+				// Row 3: normal item (qty=1)
+				{
+					Region: "items",
+					Y0:     184,
+					Y1:     194,
+					Text:   "*物流辅助服务*配送相关费用 1 9.43 6% 0.57",
+					Spans: []PDFTextZonesSpan{
+						{X0: 20, Y0: 184, X1: 200, Y1: 194, T: "*物流辅助服务*配送相关费用"},
+						{X0: 286, Y0: 184, X1: 292, Y1: 194, T: "1"},
+						{X0: 360, Y0: 184, X1: 390, Y1: 194, T: "9.43"},
+						{X0: 480, Y0: 184, X1: 500, Y1: 194, T: "6%"},
+						{X0: 560, Y0: 184, X1: 590, Y1: 194, T: "0.57"},
+					},
+				},
+				// Row 4: discount/adjustment line (no qty, has money)
+				{
+					Region: "items",
+					Y0:     196,
+					Y1:     206,
+					Text:   "*物流辅助服务*配送相关费用 -7.55 6% -0.45",
+					Spans: []PDFTextZonesSpan{
+						{X0: 20, Y0: 196, X1: 200, Y1: 206, T: "*物流辅助服务*配送相关费用"},
+						{X0: 420, Y0: 196, X1: 450, Y1: 206, T: "-7.55"},
+						{X0: 480, Y0: 196, X1: 500, Y1: 206, T: "6%"},
+						{X0: 560, Y0: 196, X1: 590, Y1: 206, T: "-0.45"},
+					},
+				},
+			},
+		},
+	}
+
+	items := extractInvoiceLineItemsFromPDFZones(pages)
+	if len(items) != 4 {
+		t.Fatalf("expected 4 items, got %+v", items)
+	}
+	if items[0].Quantity == nil || *items[0].Quantity != 1 {
+		t.Fatalf("expected first qty=1 got %+v", items[0].Quantity)
+	}
+	if items[1].Quantity != nil {
+		t.Fatalf("expected discount row qty nil got %+v", items[1].Quantity)
+	}
+	if items[2].Quantity == nil || *items[2].Quantity != 1 {
+		t.Fatalf("expected third qty=1 got %+v", items[2].Quantity)
+	}
+	if items[3].Quantity != nil {
+		t.Fatalf("expected discount row qty nil got %+v", items[3].Quantity)
 	}
 }

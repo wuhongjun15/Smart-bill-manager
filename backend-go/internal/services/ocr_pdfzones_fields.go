@@ -389,17 +389,23 @@ func extractInvoiceTotalsFromPDFZones(pages []PDFTextZonesPage) (total *float64,
 					}
 				}
 				if xiaoxieX >= 0 {
+					// Some PDFs merge the net amount (合计) and total amount (价税合计小写) on the same row,
+					// resulting in multiple numbers to the right of "小写". Prefer the largest value to avoid
+					// accidentally picking the net amount (e.g. "83.01 88.00 4.99").
+					best := -1.0
 					for _, c := range cands {
-						if c.x > xiaoxieX {
-							v := c.v
-							score := 120 + regionBoost
-							if score > bestTotalScore {
-								total = &v
-								totalSrc = "pymupdf_zones_total_xiaoxie"
-								totalConf = 0.95
-								bestTotalScore = score
-							}
-							break
+						if c.x > xiaoxieX && c.v > best {
+							best = c.v
+						}
+					}
+					if best > 0 {
+						v := best
+						score := 120 + regionBoost
+						if score > bestTotalScore {
+							total = &v
+							totalSrc = "pymupdf_zones_total_xiaoxie"
+							totalConf = 0.95
+							bestTotalScore = score
 						}
 					}
 				} else {

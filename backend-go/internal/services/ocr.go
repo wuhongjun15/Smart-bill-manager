@@ -4886,35 +4886,38 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 			medianH = (hs[mid-1] + hs[mid]) / 2.0
 		}
 	}
-	rowTol := math.Max(3.0, medianH*0.45)
+	// Use a tolerance on y-center (not y0/y1 overlap). Some invoices have very tight line spacing where
+	// bounding boxes can overlap; using y-overlap merges multiple rows into one.
+	rowTol := math.Max(2.0, medianH*0.55)
 
 	sort.Slice(spans, func(i, j int) bool {
-		if spans[i].Y0 == spans[j].Y0 {
+		if spans[i].yc == spans[j].yc {
 			return spans[i].X0 < spans[j].X0
 		}
-		return spans[i].Y0 < spans[j].Y0
+		return spans[i].yc < spans[j].yc
 	})
 
 	rows := make([][]spanItem, 0, 32)
 	var cur []spanItem
-	curMaxY := 0.0
+	curYC := 0.0
+	curCount := 0.0
 	for _, s := range spans {
 		if len(cur) == 0 {
 			cur = []spanItem{s}
-			curMaxY = s.Y1
+			curYC = s.yc
+			curCount = 1
 			continue
 		}
-		// Start a new row when the next span is clearly below the current row.
-		if s.Y0 <= curMaxY+rowTol {
+		if math.Abs(s.yc-curYC) <= rowTol {
 			cur = append(cur, s)
-			if s.Y1 > curMaxY {
-				curMaxY = s.Y1
-			}
+			curCount++
+			curYC = curYC + (s.yc-curYC)/curCount
 			continue
 		}
 		rows = append(rows, cur)
 		cur = []spanItem{s}
-		curMaxY = s.Y1
+		curYC = s.yc
+		curCount = 1
 	}
 	if len(cur) > 0 {
 		rows = append(rows, cur)
@@ -5085,6 +5088,9 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 		}
 		return false
 	}
+
+	moneyRe := regexp.MustCompile(`-?\d+(?:,\d{3})*\.\d{1,2}`)
+	rateRe := regexp.MustCompile(`\d{1,2}%`)
 
 	looksLikeItemRow := func(r []spanItem) bool {
 		qtyRe := regexp.MustCompile(`^\d+(?:\.\d+)?$`)
@@ -5282,7 +5288,20 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 		}
 
 		// Handle continuation rows: no numeric columns, just a wrapped name/spec line.
-		if len(out) > 0 && qty == nil && strings.TrimSpace(unit) == "" {
+		// IMPORTANT: Discount/adjustment lines often omit qty/unit but do include money/tax columns; do not merge them.
+		rowHasMoneyOrRate := false
+		for _, sp := range ordered {
+			t := strings.TrimSpace(sp.T)
+			if t == "" {
+				continue
+			}
+			if moneyRe.MatchString(t) || rateRe.MatchString(t) {
+				rowHasMoneyOrRate = true
+				break
+			}
+		}
+
+		if len(out) > 0 && qty == nil && strings.TrimSpace(unit) == "" && !rowHasMoneyOrRate {
 			// If spec is empty and this looks like a model code, treat as spec.
 			if out[len(out)-1].Spec == "" && regexp.MustCompile(`(?i)[A-Z]{1,3}[-/A-Z0-9]{3,}`).MatchString(name) {
 				out[len(out)-1].Spec = name
