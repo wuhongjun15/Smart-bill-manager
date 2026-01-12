@@ -230,30 +230,32 @@ func extractInvoiceArtifactsFromEmail(mr *mail.Reader) (pdfFilename string, pdfB
 			ct string
 		)
 		ct = contentTypeLowerFromHeader(part.Header)
-		if hl, ok := part.Header.(emailHeaderLike); ok {
 
-			// Some providers embed the actual invoice email as a forwarded message/rfc822 part.
-			if ct == "message/rfc822" {
-				if inner, err := mail.CreateReader(part.Body); err == nil {
-					name2, pdf2, xml2, itins2, text2, err2 := extractInvoiceArtifactsFromEmail(inner)
-					if err2 != nil {
-						return "", nil, nil, nil, "", err2
-					}
-					if pdf2 != nil {
-						pdfParts = append(pdfParts, emailBinaryAttachment{Filename: name2, Bytes: pdf2})
-					}
-					if xmlBytes == nil && xml2 != nil {
-						xmlBytes = xml2
-					}
-					if len(itins2) > 0 {
-						itineraryPDFs = append(itineraryPDFs, itins2...)
-					}
-					if strings.TrimSpace(text2) != "" && len(textParts) < 12 {
-						textParts = append(textParts, text2)
-					}
+		// Some providers embed the actual invoice email as a forwarded message/rfc822 part.
+		// Do not depend on header types; use parsed Content-Type.
+		if ct == "message/rfc822" {
+			if inner, err := mail.CreateReader(part.Body); err == nil {
+				name2, pdf2, xml2, itins2, text2, err2 := extractInvoiceArtifactsFromEmail(inner)
+				if err2 != nil {
+					return "", nil, nil, nil, "", err2
 				}
-				continue
+				if pdf2 != nil {
+					pdfParts = append(pdfParts, emailBinaryAttachment{Filename: name2, Bytes: pdf2})
+				}
+				if xmlBytes == nil && xml2 != nil {
+					xmlBytes = xml2
+				}
+				if len(itins2) > 0 {
+					itineraryPDFs = append(itineraryPDFs, itins2...)
+				}
+				if strings.TrimSpace(text2) != "" && len(textParts) < 12 {
+					textParts = append(textParts, text2)
+				}
 			}
+			continue
+		}
+
+		if hl, ok := part.Header.(emailHeaderLike); ok {
 
 			// Detect PDFs/XMLs regardless of disposition; some servers omit Content-Disposition.
 			if ok, hinted := isPDFEmailHeader(hl); ok {
