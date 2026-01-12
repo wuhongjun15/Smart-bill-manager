@@ -313,6 +313,21 @@ func extractInvoiceArtifactsFromEmail(mr *mail.Reader) (pdfFilename string, pdfB
 					xmlBytes = b
 					continue
 				}
+				// Some providers (e.g. Starbucks / some e-invoice platforms) ship XML inside a zip attachment.
+				// Extract the embedded XML with strict compressed/uncompressed limits to avoid zip bombs.
+				filename := bestEmailPartFilename(part.Header, "")
+				fl := strings.ToLower(strings.TrimSpace(filename))
+				isZipCT := strings.Contains(ct, "zip")
+				if isZipCT || strings.HasSuffix(fl, ".zip") {
+					b, err := readWithLimit(part.Body, emailParseMaxXMLArchiveBytes)
+					if err != nil {
+						return "", nil, nil, nil, "", err
+					}
+					if normalized, _, err2 := normalizeInvoiceXMLBytes(b); err2 == nil && len(normalized) > 0 {
+						xmlBytes = normalized
+						continue
+					}
+				}
 			}
 		}
 
@@ -922,10 +937,22 @@ func normalizeInvoiceXMLBytes(payload []byte) ([]byte, string, error) {
 		}
 		if strings.HasSuffix(nl, ".xml") {
 			// Guard against zip bombs.
-			if f.UncompressedSize64 == 0 || f.UncompressedSize64 > uint64(emailParseMaxXMLBytes) {
+			// Some zips omit sizes; we still cap the read below.
+			if f.UncompressedSize64 > 0 && f.UncompressedSize64 > uint64(emailParseMaxXMLBytes) {
 				continue
 			}
-			cands = append(cands, cand{name: name, size: f.UncompressedSize64})
+			// Compression ratio guard: extremely high ratios are a zip-bomb signal.
+			if f.UncompressedSize64 > 0 && f.CompressedSize64 > 0 {
+				if f.UncompressedSize64/f.CompressedSize64 > 200 {
+					continue
+				}
+			}
+			size := f.UncompressedSize64
+			if size == 0 {
+				// Unknown size; still consider but rank lower than known-size entries.
+				size = 1
+			}
+			cands = append(cands, cand{name: name, size: size})
 		}
 	}
 	if len(cands) == 0 {
