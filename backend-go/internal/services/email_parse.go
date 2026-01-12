@@ -168,6 +168,47 @@ func contentTypeLowerFromHeader(h interface{}) string {
 	return ""
 }
 
+func looksLikeTextBytes(b []byte) bool {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 {
+		return false
+	}
+
+	sample := b
+	if len(sample) > 4096 {
+		sample = sample[:4096]
+	}
+
+	// NUL bytes are a strong indicator of binary payload (images, compressed, etc.).
+	for _, c := range sample {
+		if c == 0x00 {
+			return false
+		}
+	}
+
+	lower := bytes.ToLower(sample)
+	if bytes.Contains(lower, []byte("<html")) ||
+		bytes.Contains(lower, []byte("<body")) ||
+		bytes.Contains(lower, []byte("<div")) ||
+		bytes.Contains(lower, []byte("<a ")) ||
+		bytes.Contains(lower, []byte("href=")) {
+		return true
+	}
+
+	nonText := 0
+	for _, c := range sample {
+		switch {
+		case c == 9 || c == 10 || c == 13:
+		case c >= 32 && c <= 126:
+		case c >= 0x80:
+		default:
+			nonText++
+		}
+	}
+	// Allow a small amount of control bytes; treat the rest as text-ish.
+	return nonText*100/len(sample) < 2
+}
+
 func extractInvoiceArtifactsFromEmail(mr *mail.Reader) (pdfFilename string, pdfBytes []byte, xmlBytes []byte, itineraryPDFs []emailBinaryAttachment, bodyText string, err error) {
 	if mr == nil {
 		return "", nil, nil, nil, "", fmt.Errorf("nil mail reader")
@@ -239,11 +280,18 @@ func extractInvoiceArtifactsFromEmail(mr *mail.Reader) (pdfFilename string, pdfB
 		}
 
 		// Collect body text for link parsing (xml/pdf download URLs).
-		if len(textParts) < 12 && strings.HasPrefix(ct, "text/") {
-			if b, err := readWithLimit(part.Body, emailParseMaxTextBytes); err == nil {
-				s := strings.TrimSpace(string(b))
-				if s != "" {
-					textParts = append(textParts, s)
+		if len(textParts) < 12 {
+			isTextCT := strings.HasPrefix(ct, "text/") || ct == "application/xhtml+xml"
+			isUnknownCT := strings.TrimSpace(ct) == ""
+			if isTextCT || isUnknownCT {
+				if b, err := readWithLimit(part.Body, emailParseMaxTextBytes); err == nil {
+					// Some providers omit/obfuscate Content-Type; sniff to avoid treating binary parts (e.g. tracking pixels) as text.
+					if isTextCT || looksLikeTextBytes(b) {
+						s := strings.TrimSpace(string(b))
+						if s != "" {
+							textParts = append(textParts, s)
+						}
+					}
 				}
 			}
 		}
@@ -597,6 +645,9 @@ func (s *EmailService) ParseEmailLogCtx(ctx context.Context, ownerUserID string,
 				"status":      "error",
 				"parse_error": func() string {
 					if previewResolveErr == "" {
+						if strings.TrimSpace(bodyText) == "" {
+							return "no pdf attachment and no pdf download url found (no email body text found)"
+						}
 						return "no pdf attachment and no pdf download url found"
 					}
 					return "no pdf attachment and no pdf download url found; preview link resolve failed: " + previewResolveErr
