@@ -1093,7 +1093,7 @@ func firstURLFromText(body string) string {
 	if body == "" {
 		return ""
 	}
-	urlRe := regexp.MustCompile(`https?://[^\s<>"'()]+`)
+	urlRe := regexp.MustCompile(`(?i)(https?://[^\s<>"'()]+|//[^\s<>"'()]+)`)
 	all := urlRe.FindAllString(body, -1)
 	if len(all) == 0 {
 		return ""
@@ -1105,8 +1105,23 @@ func firstURLFromText(body string) string {
 	}
 	for _, raw := range all {
 		u := clean(raw)
+		if strings.HasPrefix(u, "//") {
+			u = "https:" + u
+		}
 		if u == "" {
 			continue
+		}
+		pu, err := url.Parse(u)
+		if err == nil && pu != nil {
+			if v := strings.TrimSpace(pu.Query().Get("content")); v != "" {
+				v = strings.TrimSpace(strings.TrimRight(v, ">)].,;\"'"))
+				if strings.HasPrefix(v, "//") {
+					v = "https:" + v
+				}
+				if strings.HasPrefix(strings.ToLower(v), "http://") || strings.HasPrefix(strings.ToLower(v), "https://") {
+					return v
+				}
+			}
 		}
 		return u
 	}
@@ -1119,7 +1134,7 @@ func bestPreviewURLFromText(body string) string {
 		return ""
 	}
 
-	urlRe := regexp.MustCompile(`https?://[^\s<>"'()]+`)
+	urlRe := regexp.MustCompile(`(?i)(https?://[^\s<>"'()]+|//[^\s<>"'()]+)`)
 	all := urlRe.FindAllString(body, -1)
 	if len(all) == 0 {
 		return ""
@@ -1150,6 +1165,57 @@ func bestPreviewURLFromText(body string) string {
 		}
 	}
 
+	expandEmbeddedURLs := func(rawURLs []string) []string {
+		seen := map[string]struct{}{}
+		out := make([]string, 0, len(rawURLs))
+		add := func(s string) {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				return
+			}
+			if strings.HasPrefix(s, "//") {
+				s = "https:" + s
+			}
+			if _, ok := seen[strings.ToLower(s)]; ok {
+				return
+			}
+			seen[strings.ToLower(s)] = struct{}{}
+			out = append(out, s)
+		}
+
+		for _, raw := range rawURLs {
+			uRaw := clean(raw)
+			if uRaw == "" {
+				continue
+			}
+			add(uRaw)
+
+			u := uRaw
+			if strings.HasPrefix(u, "//") {
+				u = "https:" + u
+			}
+			pu, err := url.Parse(u)
+			if err != nil || pu == nil {
+				continue
+			}
+
+			// Some providers embed the actual invoice link inside a query parameter (e.g. QR code images with ?content=https://...).
+			q := pu.Query()
+			for _, key := range []string{"content", "url", "redirect", "target"} {
+				v := strings.TrimSpace(q.Get(key))
+				if v == "" {
+					continue
+				}
+				v = strings.TrimSpace(strings.TrimRight(v, ">)].,;\"'"))
+				add(v)
+			}
+		}
+
+		return out
+	}
+
+	all = expandEmbeddedURLs(all)
+
 	best := ""
 	bestScore := -1 << 30
 
@@ -1157,6 +1223,9 @@ func bestPreviewURLFromText(body string) string {
 		uRaw := clean(raw)
 		if uRaw == "" {
 			continue
+		}
+		if strings.HasPrefix(uRaw, "//") {
+			uRaw = "https:" + uRaw
 		}
 		u, err := url.Parse(uRaw)
 		if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -1182,6 +1251,8 @@ func bestPreviewURLFromText(body string) string {
 			score += 400
 		case "of1.cn":
 			score += 390
+		case "fp.nuonuo.com":
+			score += 300
 		}
 
 		// Prefer provider-specific preview pages.
@@ -1190,6 +1261,19 @@ func bestPreviewURLFromText(body string) string {
 		}
 		if strings.Contains(l, "/scan-invoice/printqrcode") && strings.Contains(l, "paramlist=") {
 			score += 250
+		}
+		if host == "fp.nuonuo.com" {
+			fragLower := strings.ToLower(strings.TrimSpace(u.Fragment))
+			if fragLower == "" || fragLower == "/" {
+				// Generic Nuonuo portal link, typically not resolvable.
+				score -= 600
+			}
+			if strings.Contains(fragLower, "paramlist=") {
+				score += 250
+			}
+			if strings.Contains(fragLower, "printqrcode") {
+				score += 250
+			}
 		}
 
 		// Prefer direct links.
@@ -1290,8 +1374,30 @@ func isBadEmailPreviewURL(u string) bool {
 	if host == "nnfp.jss.com.cn" && strings.HasPrefix(pathLower, "/scan-invoice/invoiceshow") {
 		return true
 	}
+	if isNuonuoPortalRootURL(pu) {
+		return true
+	}
 
 	return false
+}
+
+func isNuonuoPortalRootURL(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if host != "fp.nuonuo.com" {
+		return false
+	}
+	if strings.TrimSpace(u.RawQuery) != "" {
+		return false
+	}
+	path := strings.TrimSpace(u.Path)
+	if path != "" && path != "/" {
+		return false
+	}
+	frag := strings.TrimSpace(u.Fragment)
+	return frag == "" || frag == "/"
 }
 
 type fetchedURL struct {
@@ -1451,6 +1557,10 @@ func resolveInvoiceDownloadLinksFromPreviewURLCtx(ctx context.Context, previewUR
 	previewURL = strings.TrimSpace(previewURL)
 	if previewURL == "" {
 		return nil, nil, fmt.Errorf("empty preview url")
+	}
+
+	if u, err2 := url.Parse(previewURL); err2 == nil && isNuonuoPortalRootURL(u) {
+		return nil, nil, fmt.Errorf("nuonuo link is a generic portal page (missing invoice token)")
 	}
 
 	// Provider-specific fast path (e.g. Baiwang preview pages have deterministic download endpoints).
@@ -1613,6 +1723,40 @@ func resolveKnownProviderInvoiceLinksCtx(ctx context.Context, previewURL string)
 		}
 
 		x, p, err := resolveNuonuoDirectInvoiceLinksFromPrintURLCtx(ctx, finalURL)
+		if err == nil && (x != nil || p != nil) {
+			return x, p, true
+		}
+		return nil, nil, false
+	}
+
+	// NuoNuo portal links sometimes embed the scan page in the URL fragment, e.g.:
+	// https://fp.nuonuo.com/#/scan-invoice/printQrcode?paramList=...
+	// We can extract paramList from the fragment and call the nnfp API directly.
+	if host == "fp.nuonuo.com" {
+		paramList := strings.TrimSpace(u.Query().Get("paramList"))
+		fragmentQuery := url.Values{}
+		frag := strings.TrimSpace(u.Fragment)
+		if idx := strings.Index(frag, "?"); idx >= 0 && idx+1 < len(frag) {
+			if v, err := url.ParseQuery(frag[idx+1:]); err == nil {
+				fragmentQuery = v
+				if paramList == "" {
+					paramList = strings.TrimSpace(v.Get("paramList"))
+				}
+			}
+		}
+		if paramList == "" {
+			return nil, nil, false
+		}
+
+		q := url.Values{}
+		q.Set("paramList", paramList)
+		for _, k := range []string{"code", "aliView", "shortLinkSource", "isOuterPageReq"} {
+			if v := strings.TrimSpace(fragmentQuery.Get(k)); v != "" {
+				q.Set(k, v)
+			}
+		}
+		printURL := (&url.URL{Scheme: "https", Host: "nnfp.jss.com.cn", Path: "/scan-invoice/printQrcode", RawQuery: q.Encode()}).String()
+		x, p, err := resolveNuonuoDirectInvoiceLinksFromPrintURLCtx(ctx, printURL)
 		if err == nil && (x != nil || p != nil) {
 			return x, p, true
 		}

@@ -176,7 +176,7 @@ func readIMAPBodyWithLimit(r io.Reader, maxBytes int64) (string, error) {
 	return string(b), nil
 }
 
-var urlRegex = regexp.MustCompile(`https?://[^\s"'<>]+`)
+var urlRegex = regexp.MustCompile(`(?i)(https?://[^\s"'<>]+|//[^\s"'<>]+)`)
 
 func extractInvoiceLinksFromText(body string) (xmlURL *string, pdfURL *string) {
 	body = strings.TrimSpace(body)
@@ -195,6 +195,9 @@ func extractInvoiceLinksFromText(body string) (xmlURL *string, pdfURL *string) {
 	cleanURL := func(s string) string {
 		s = strings.TrimSpace(s)
 		s = strings.TrimRight(s, ">)].,;\"'")
+		if strings.HasPrefix(s, "//") {
+			s = "https:" + s
+		}
 		return s
 	}
 

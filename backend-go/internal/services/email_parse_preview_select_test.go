@@ -1,6 +1,9 @@
 package services
 
-import "testing"
+import (
+	"net/url"
+	"testing"
+)
 
 func TestBestPreviewURLFromText_PrefersKnownProviderOverAssetsAndGenericPages(t *testing.T) {
 	body := `
@@ -12,6 +15,33 @@ Baiwang short link: http://u.baiwang.com/k5pE5SNf1ld
 
 	got := bestPreviewURLFromText(body)
 	if got != "http://u.baiwang.com/k5pE5SNf1ld" {
+		t.Fatalf("unexpected best preview url: %q", got)
+	}
+}
+
+func TestBestPreviewURLFromText_NormalizesProtocolRelativeURL(t *testing.T) {
+	body := `Click: //of1.cn/abc123`
+	got := bestPreviewURLFromText(body)
+	if got != "https://of1.cn/abc123" {
+		t.Fatalf("unexpected best preview url: %q", got)
+	}
+}
+
+func TestBestPreviewURLFromText_ExtractsEmbeddedContentURL(t *testing.T) {
+	body := `QR: https://nnfp.jss.com.cn/allow/service/getEwmImg.do?content=https://nnfp.jss.com.cn/8_CszRwjaw-FBnv`
+	got := bestPreviewURLFromText(body)
+	if got != "https://nnfp.jss.com.cn/8_CszRwjaw-FBnv" {
+		t.Fatalf("unexpected best preview url: %q", got)
+	}
+}
+
+func TestBestPreviewURLFromText_PrefersNuonuoParamListOverPortalRoot(t *testing.T) {
+	body := `
+Portal: https://fp.nuonuo.com/#/
+Invoice: https://fp.nuonuo.com/#/scan-invoice/printQrcode?paramList=abc
+`
+	got := bestPreviewURLFromText(body)
+	if got != "https://fp.nuonuo.com/#/scan-invoice/printQrcode?paramList=abc" {
 		t.Fatalf("unexpected best preview url: %q", got)
 	}
 }
@@ -57,3 +87,20 @@ func TestIsDirectInvoicePDFURL(t *testing.T) {
 	}
 }
 
+func TestIsNuonuoPortalRootURL(t *testing.T) {
+	u, err := url.Parse("https://fp.nuonuo.com/#/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isNuonuoPortalRootURL(u) {
+		t.Fatalf("expected nuonuo portal root url")
+	}
+
+	u2, err := url.Parse("https://fp.nuonuo.com/#/scan-invoice/printQrcode?paramList=abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isNuonuoPortalRootURL(u2) {
+		t.Fatalf("unexpected portal root for invoice-specific url")
+	}
+}
