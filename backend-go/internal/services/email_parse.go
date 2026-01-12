@@ -44,6 +44,7 @@ const (
 	emailParseMaxXMLBytes  = 5 * 1024 * 1024
 	emailParseMaxTextBytes = 512 * 1024
 	emailParseMaxPageBytes = 2 * 1024 * 1024
+	emailParseMaxEMLBytes  = 2 * 1024 * 1024
 )
 
 type emailHeaderLike interface {
@@ -230,6 +231,37 @@ func extractInvoiceArtifactsFromEmail(mr *mail.Reader) (pdfFilename string, pdfB
 			ct string
 		)
 		ct = contentTypeLowerFromHeader(part.Header)
+
+		// Some providers attach a forwarded email as an .eml file (often with application/octet-stream).
+		// Best-effort: parse it as an embedded email and recurse.
+		if ct != "message/rfc822" {
+			filename := bestEmailPartFilename(part.Header, "")
+			if strings.HasSuffix(strings.ToLower(strings.TrimSpace(filename)), ".eml") {
+				if emlBytes, err2 := readWithLimit(part.Body, emailParseMaxEMLBytes); err2 == nil && len(emlBytes) > 0 {
+					if inner, err3 := mail.CreateReader(bytes.NewReader(emlBytes)); err3 == nil {
+						name2, pdf2, xml2, itins2, text2, err4 := extractInvoiceArtifactsFromEmail(inner)
+						if err4 != nil {
+							return "", nil, nil, nil, "", err4
+						}
+						if pdf2 != nil {
+							pdfParts = append(pdfParts, emailBinaryAttachment{Filename: name2, Bytes: pdf2})
+						}
+						if xmlBytes == nil && xml2 != nil {
+							xmlBytes = xml2
+						}
+						if len(itins2) > 0 {
+							itineraryPDFs = append(itineraryPDFs, itins2...)
+						}
+						if strings.TrimSpace(text2) != "" && len(textParts) < 12 {
+							textParts = append(textParts, text2)
+						}
+						continue
+					}
+				}
+				// If .eml parsing failed, do not fall through: we've already consumed the body stream.
+				continue
+			}
+		}
 
 		// Some providers embed the actual invoice email as a forwarded message/rfc822 part.
 		// Do not depend on header types; use parsed Content-Type.

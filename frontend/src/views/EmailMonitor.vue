@@ -182,7 +182,7 @@
               </div>
             </template>
           </Column>
-          <Column :header="'\u64CD\u4F5C'" :style="{ width: '160px' }">
+          <Column :header="'\u64CD\u4F5C'" :style="{ width: '240px' }">
             <template #body="{ data: row }">
               <div class="actions">
                 <Button
@@ -193,6 +193,20 @@
                   :loading="parseLoading === row.id"
                   :disabled="row.status === 'parsing' || row.status === 'parsed'"
                   @click="handleParseLog(row.id)"
+                />
+                <Button
+                  size="small"
+                  class="p-button-outlined"
+                  icon="pi pi-download"
+                  :title="'导出邮件 (.eml)'"
+                  @click="handleExportLog(row.id)"
+                />
+                <Button
+                  size="small"
+                  class="p-button-outlined"
+                  icon="pi pi-file"
+                  :title="'复制原始邮件（用于排查）'"
+                  @click="handleCopyRawEmail(row.id)"
                 />
                 <Button
                   v-if="row.parsed_invoice_id"
@@ -595,6 +609,49 @@ const handleParseLog = async (id: string) => {
   } finally {
     parseLoading.value = null
     await loadLogs()
+  }
+}
+
+const filenameFromDisposition = (disposition?: string): string | null => {
+  if (!disposition) return null
+  const match = disposition.match(/filename=\"?([^\";]+)\"?/i)
+  return match?.[1] || null
+}
+
+const handleExportLog = async (id: string) => {
+  try {
+    const res = await emailApi.exportLogEML(id, 'eml')
+    const contentType = (res.headers?.['content-type'] as string) || 'message/rfc822'
+    const disposition = res.headers?.['content-disposition'] as string | undefined
+    const filename = filenameFromDisposition(disposition) || `email_${id}.eml`
+    const blob = new Blob([res.data], { type: contentType })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    toast.add({ severity: 'success', summary: '邮件已导出', life: 2000 })
+  } catch (e) {
+    console.error('Export log failed:', e)
+    toast.add({ severity: 'error', summary: '导出失败', life: 3500 })
+  }
+}
+
+const handleCopyRawEmail = async (id: string) => {
+  try {
+    const res = await emailApi.exportLogEML(id, 'text')
+    const blob = res.data as Blob
+    const raw = await blob.text()
+    const maxChars = 400_000
+    const text = raw.length > maxChars ? raw.slice(0, maxChars) + '\n\n[TRUNCATED]' : raw
+    await navigator.clipboard.writeText(text)
+    toast.add({ severity: 'success', summary: raw.length > maxChars ? '已复制（已截断）' : '已复制', life: 2000 })
+  } catch (e) {
+    console.error('Copy raw email failed:', e)
+    toast.add({ severity: 'error', summary: '复制失败', life: 3500 })
   }
 }
 

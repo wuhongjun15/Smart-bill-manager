@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,7 @@ func (h *EmailHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.POST("/test", h.TestConnection)
 	r.GET("/logs", h.GetLogs)
 	r.POST("/logs/:id/parse", h.ParseLog)
+	r.GET("/logs/:id/export", h.ExportLogEML)
 	r.POST("/monitor/start/:id", h.StartMonitoring)
 	r.POST("/monitor/stop/:id", h.StopMonitoring)
 	r.GET("/monitor/status", h.GetMonitoringStatus)
@@ -162,6 +164,41 @@ func (h *EmailHandler) ParseLog(c *gin.Context) {
 		return
 	}
 	utils.Success(c, 200, "解析成功", invoice)
+}
+
+func (h *EmailHandler) ExportLogEML(c *gin.Context) {
+	id := c.Param("id")
+	ownerUserID := middleware.GetEffectiveUserID(c)
+
+	ctx, cancel := withReadTimeout(c)
+	defer cancel()
+
+	filename, emlBytes, err := h.emailService.ExportEmailLogEMLCtx(ctx, ownerUserID, id)
+	if err != nil {
+		if handleReadTimeoutError(c, err) {
+			return
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			utils.Error(c, 404, "邮件日志不存在", nil)
+			return
+		}
+		utils.Error(c, 500, "导出邮件失败", err)
+		return
+	}
+
+	format := c.Query("format")
+	if format == "text" {
+		c.Header("Content-Type", "text/plain; charset=utf-8")
+		c.Header("Content-Disposition", fmt.Sprintf("inline; filename=%q", filename))
+		c.Writer.WriteHeader(200)
+		_, _ = c.Writer.Write(emlBytes)
+		return
+	}
+
+	c.Header("Content-Type", "message/rfc822")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	c.Writer.WriteHeader(200)
+	_, _ = c.Writer.Write(emlBytes)
 }
 
 func (h *EmailHandler) StartMonitoring(c *gin.Context) {

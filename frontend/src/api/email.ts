@@ -23,6 +23,12 @@ export const emailApi = {
 
   parseLog: (id: string) =>
     api.post<ApiResponse<Invoice>>(`/email/logs/${id}/parse`),
+
+  exportLogEML: (id: string, format?: 'eml' | 'text') =>
+    api.get(`/email/logs/${id}/export`, {
+      params: format === 'text' ? { format: 'text' } : undefined,
+      responseType: 'blob',
+    }),
   
   startMonitoring: (id: string) =>
     api.post<ApiResponse<void>>(`/email/monitor/start/${id}`),
