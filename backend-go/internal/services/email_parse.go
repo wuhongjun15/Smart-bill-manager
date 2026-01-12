@@ -26,6 +26,7 @@ import (
 	"github.com/emersion/go-imap/client"
 	"github.com/emersion/go-message"
 	"github.com/emersion/go-message/mail"
+	"golang.org/x/net/html"
 	"golang.org/x/net/html/charset"
 
 	"smart-bill-manager/internal/models"
@@ -479,8 +480,9 @@ func (s *EmailService) ParseEmailLogCtx(ctx context.Context, ownerUserID string,
 				*candidates = append(*candidates, u)
 			}
 
-			var previewCandidates []string
+		var previewCandidates []string
 			// Always prefer picking from body text (it tends to be the "real" invoice link shown to users).
+			addCandidate(&previewCandidates, bestInvoicePreviewURLFromBody(bodyText))
 			addCandidate(&previewCandidates, bestPreviewURLFromText(bodyText))
 
 			// Include any persisted placeholder URLs as fallbacks.
@@ -1253,6 +1255,18 @@ func bestPreviewURLFromText(body string) string {
 			score += 390
 		case "fp.nuonuo.com":
 			score += 300
+		case "inv.jss.com.cn", "storage.nuonuo.com":
+			// Common direct download hosts returned by NuoNuo APIs.
+			score += 220
+		}
+
+		// Nuonuo has many unrelated product portals in email footers; strongly de-prioritize them.
+		if strings.HasSuffix(host, ".nuonuo.com") && host != "fp.nuonuo.com" {
+			score -= 700
+		}
+		switch host {
+		case "nst.nuonuo.com", "ntf.nuonuo.com", "bmjc.nuonuo.com", "baoxiao.nuonuo.com", "www.nuonuo.com":
+			score -= 900
 		}
 
 		// Prefer provider-specific preview pages.
@@ -1304,6 +1318,185 @@ func bestPreviewURLFromText(body string) string {
 	}
 
 	return best
+}
+
+func bestInvoicePreviewURLFromBody(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+
+	if strings.Contains(strings.ToLower(body), "<a") {
+		if u := bestInvoicePreviewURLFromHTML(body); u != "" {
+			return u
+		}
+	}
+
+	// Plain-text fallback: look for the URL that appears right after a CTA label.
+	labels := []string{
+		"点击链接查看发票",
+		"点击链接查看",
+		"下载发票",
+		"查看发票",
+		"领取发票",
+	}
+	for _, label := range labels {
+		if idx := strings.Index(body, label); idx >= 0 {
+			window := body[idx:]
+			if len(window) > 1200 {
+				window = window[:1200]
+			}
+			if u := firstURLFromText(window); u != "" {
+				return u
+			}
+		}
+	}
+
+	return ""
+}
+
+func bestInvoicePreviewURLFromHTML(body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return ""
+	}
+
+	ctx := &html.Node{Type: html.ElementNode, Data: "body"}
+	nodes, err := html.ParseFragment(strings.NewReader(body), ctx)
+	var root *html.Node
+	if err == nil && len(nodes) > 0 {
+		root = &html.Node{Type: html.ElementNode, Data: "body"}
+		for _, n := range nodes {
+			root.AppendChild(n)
+		}
+	} else {
+		// Best-effort fallback for malformed fragments.
+		doc, err2 := html.Parse(strings.NewReader("<html><body>" + body + "</body></html>"))
+		if err2 != nil {
+			return ""
+		}
+		root = doc
+	}
+
+	type token struct {
+		kind string // "text" | "a"
+		text string
+		href string
+	}
+	tokens := make([]token, 0, 256)
+
+	var nodeText func(n *html.Node) string
+	nodeText = func(n *html.Node) string {
+		if n == nil {
+			return ""
+		}
+		if n.Type == html.TextNode {
+			return n.Data
+		}
+		var b strings.Builder
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			b.WriteString(nodeText(c))
+		}
+		return b.String()
+	}
+
+	var walk func(n *html.Node)
+	walk = func(n *html.Node) {
+		if n == nil {
+			return
+		}
+		if n.Type == html.TextNode {
+			s := strings.TrimSpace(n.Data)
+			if s != "" {
+				tokens = append(tokens, token{kind: "text", text: s})
+			}
+		}
+		if n.Type == html.ElementNode && strings.EqualFold(n.Data, "a") {
+			href := ""
+			for _, a := range n.Attr {
+				if strings.EqualFold(strings.TrimSpace(a.Key), "href") {
+					href = strings.TrimSpace(a.Val)
+					break
+				}
+			}
+			anchorText := strings.TrimSpace(nodeText(n))
+			if href != "" || anchorText != "" {
+				tokens = append(tokens, token{kind: "a", text: anchorText, href: href})
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(root)
+
+	labels := []string{
+		"点击链接查看发票",
+		"点击链接查看",
+		"下载发票",
+		"查看发票",
+		"领取发票",
+	}
+	containsAny := func(s string, needles []string) bool {
+		for _, n := range needles {
+			if strings.Contains(s, n) {
+				return true
+			}
+		}
+		return false
+	}
+	cleanHref := func(href string) string {
+		href = strings.TrimSpace(href)
+		if href == "" {
+			return ""
+		}
+		if strings.HasPrefix(href, "//") {
+			href = "https:" + href
+		}
+		return href
+	}
+
+	// Prefer anchors whose own visible text is the CTA (e.g. "下载发票") or an URL.
+	for _, tok := range tokens {
+		if tok.kind != "a" {
+			continue
+		}
+		if containsAny(tok.text, labels) {
+			if u := cleanHref(tok.href); u != "" {
+				return u
+			}
+		}
+		if u := firstURLFromText(tok.text); u != "" {
+			return u
+		}
+	}
+
+	// Prefer the first <a href> that follows a CTA label in nearby text.
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].kind != "text" {
+			continue
+		}
+		if !containsAny(tokens[i].text, labels) {
+			continue
+		}
+		for j := i + 1; j < len(tokens) && j <= i+12; j++ {
+			if tokens[j].kind == "a" {
+				if u := cleanHref(tokens[j].href); u != "" {
+					return u
+				}
+				if u := firstURLFromText(tokens[j].text); u != "" {
+					return u
+				}
+			}
+			if tokens[j].kind == "text" {
+				if u := firstURLFromText(tokens[j].text); u != "" {
+					return u
+				}
+			}
+		}
+	}
+
+	return ""
 }
 
 func isDirectInvoicePDFURL(u string) bool {
@@ -1377,6 +1570,9 @@ func isBadEmailPreviewURL(u string) bool {
 	if isNuonuoPortalRootURL(pu) {
 		return true
 	}
+	if isNuonuoNonInvoicePortalRootURL(pu) {
+		return true
+	}
 
 	return false
 }
@@ -1387,6 +1583,29 @@ func isNuonuoPortalRootURL(u *url.URL) bool {
 	}
 	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
 	if host != "fp.nuonuo.com" {
+		return false
+	}
+	if strings.TrimSpace(u.RawQuery) != "" {
+		return false
+	}
+	path := strings.TrimSpace(u.Path)
+	if path != "" && path != "/" {
+		return false
+	}
+	frag := strings.TrimSpace(u.Fragment)
+	return frag == "" || frag == "/"
+}
+
+func isNuonuoNonInvoicePortalRootURL(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(u.Hostname()))
+	if !strings.HasSuffix(host, ".nuonuo.com") {
+		return false
+	}
+	// fp.nuonuo.com is handled separately (it can embed invoice params in the fragment).
+	if host == "fp.nuonuo.com" {
 		return false
 	}
 	if strings.TrimSpace(u.RawQuery) != "" {

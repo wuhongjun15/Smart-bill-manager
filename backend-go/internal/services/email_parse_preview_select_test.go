@@ -35,6 +35,20 @@ func TestBestPreviewURLFromText_ExtractsEmbeddedContentURL(t *testing.T) {
 	}
 }
 
+func TestBestInvoicePreviewURLFromBody_HTMLAnchorAfterLabel(t *testing.T) {
+	body := `
+<div>
+  <span>点击链接查看发票：</span>
+  <a href="https://nnfp.jss.com.cn/8_CszRwjaw-FBnv">https://nnfp.jss.com.cn/8_CszRwjaw-FBnv</a>
+  <a href="https://nst.nuonuo.com/#/">诺税通</a>
+</div>
+`
+	got := bestInvoicePreviewURLFromBody(body)
+	if got != "https://nnfp.jss.com.cn/8_CszRwjaw-FBnv" {
+		t.Fatalf("unexpected anchored preview url: %q", got)
+	}
+}
+
 func TestBestPreviewURLFromText_PrefersNuonuoParamListOverPortalRoot(t *testing.T) {
 	body := `
 Portal: https://fp.nuonuo.com/#/
@@ -102,5 +116,23 @@ func TestIsNuonuoPortalRootURL(t *testing.T) {
 	}
 	if isNuonuoPortalRootURL(u2) {
 		t.Fatalf("unexpected portal root for invoice-specific url")
+	}
+}
+
+func TestIsNuonuoNonInvoicePortalRootURL(t *testing.T) {
+	u, err := url.Parse("https://nst.nuonuo.com/#/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isNuonuoNonInvoicePortalRootURL(u) {
+		t.Fatalf("expected nuonuo non-invoice portal root url")
+	}
+
+	u2, err := url.Parse("https://nst.nuonuo.com/#/home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isNuonuoNonInvoicePortalRootURL(u2) {
+		t.Fatalf("unexpected portal root for non-root fragment")
 	}
 }
