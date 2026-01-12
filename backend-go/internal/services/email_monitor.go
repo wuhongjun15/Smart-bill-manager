@@ -209,6 +209,7 @@ func extractInvoiceLinksFromText(body string) (xmlURL *string, pdfURL *string) {
 			strings.Contains(l, ".jpeg"),
 			strings.Contains(l, ".gif"),
 			strings.Contains(l, ".webp"),
+			strings.Contains(l, ".bmp"),
 			strings.Contains(l, ".svg"),
 			strings.Contains(l, ".css"),
 			strings.Contains(l, ".js"):

@@ -63,6 +63,17 @@ func TestBestInvoicePreviewURLFromBody_PrefersNonTrackingLinkOverTrackingCTA(t *
 	}
 }
 
+func TestBestPreviewURLFromText_DoesNotPickLinktracePixel(t *testing.T) {
+	body := `
+Pixel: http://linktrace.triggerdelivery.com/u/o1/N132-XXX
+Invoice: https://nnfp.jss.com.cn/8_CszRwjaw-FBnv
+`
+	got := bestPreviewURLFromText(body)
+	if got != "https://nnfp.jss.com.cn/8_CszRwjaw-FBnv" {
+		t.Fatalf("unexpected preview url: %q", got)
+	}
+}
+
 func TestBestPreviewURLFromText_PrefersNuonuoParamListOverPortalRoot(t *testing.T) {
 	body := `
 Portal: https://fp.nuonuo.com/#/

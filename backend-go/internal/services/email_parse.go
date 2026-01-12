@@ -1155,6 +1155,7 @@ func bestPreviewURLFromText(body string) string {
 			strings.Contains(l, ".jpeg"),
 			strings.Contains(l, ".gif"),
 			strings.Contains(l, ".webp"),
+			strings.Contains(l, ".bmp"),
 			strings.Contains(l, ".svg"),
 			strings.Contains(l, ".css"),
 			strings.Contains(l, ".js"),
@@ -1258,6 +1259,10 @@ func bestPreviewURLFromText(body string) string {
 		case "inv.jss.com.cn", "storage.nuonuo.com":
 			// Common direct download hosts returned by NuoNuo APIs.
 			score += 220
+		}
+
+		if isTrackingRedirectHost(host) {
+			score -= 2000
 		}
 
 		// Nuonuo has many unrelated product portals in email footers; strongly de-prioritize them.
@@ -1591,6 +1596,9 @@ func isBadEmailPreviewURL(u string) bool {
 	pu, err := url.Parse(u)
 	if err != nil || pu == nil {
 		return false
+	}
+	if isTrackingRedirectHost(pu.Hostname()) {
+		return true
 	}
 	host := strings.ToLower(strings.TrimSpace(pu.Hostname()))
 	pathLower := strings.ToLower(strings.TrimSpace(pu.Path))
