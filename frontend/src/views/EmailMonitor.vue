@@ -521,11 +521,21 @@ const refreshAllLogs = async () => {
       return
     }
 
+    if (!Object.keys(monitorStatus.value || {}).length) {
+      await loadMonitorStatus()
+    }
+
     let ok = 0
     let totalNew = 0
     const failed: string[] = []
+    const skippedRunning: string[] = []
 
     for (const cfg of configs.value) {
+      if (monitorStatus.value?.[cfg.id] === 'running') {
+        skippedRunning.push(cfg.email || cfg.id)
+        ok++
+        continue
+      }
       try {
         const res = await emailApi.manualFullSync(cfg.id)
         if (res.data?.success) {
@@ -815,9 +825,18 @@ const handleManualCheck = async (id: string) => {
 
 const fullSyncLoading = ref<string | null>(null)
 
-const handleManualFullSync = async (id: string) => {
+const runManualFullSync = async (id: string, stopAndResume: boolean) => {
   fullSyncLoading.value = id
   try {
+    if (stopAndResume) {
+      try {
+        await emailApi.stopMonitoring(id)
+      } catch {
+        // ignore
+      }
+      await loadMonitorStatus()
+    }
+
     const res = await emailApi.manualFullSync(id)
     if (res.data.success) {
       toast.add({ severity: 'success', summary: res.data.message || '全量同步完成', life: 2500 })
@@ -837,8 +856,31 @@ const handleManualFullSync = async (id: string) => {
     toast.add({ severity: 'error', summary: '全量同步失败', life: 3500 })
     notifications.add({ severity: 'error', title: '邮箱全量同步失败', detail: id })
   } finally {
+    try {
+      if (stopAndResume) {
+        await emailApi.startMonitoring(id)
+        await loadMonitorStatus()
+      }
+    } catch {
+      // ignore
+    }
     fullSyncLoading.value = null
   }
+}
+
+const handleManualFullSync = async (id: string) => {
+  if (monitorStatus.value?.[id] === 'running') {
+    confirm.require({
+      message: '\u5F53\u524D\u90AE\u7BB1\u76D1\u63A7\u4E2D\uFF0C\u5168\u91CF\u540C\u6B65\u9700\u8981\u4E34\u65F6\u505C\u6B62\u76D1\u63A7\u5E76\u91CD\u8FDE\uFF0C\u662F\u5426\u7EE7\u7EED\uFF1F',
+      header: '\u5168\u91CF\u540C\u6B65\u786E\u8BA4',
+      icon: 'pi pi-exclamation-triangle',
+      acceptLabel: '\u7EE7\u7EED',
+      rejectLabel: '\u53D6\u6D88',
+      accept: () => void runManualFullSync(id, true),
+    })
+    return
+  }
+  await runManualFullSync(id, false)
 }
 
 const formatDateTime = (date: string) => dayjs(date).format('YYYY-MM-DD HH:mm')
