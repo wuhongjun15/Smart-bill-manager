@@ -184,7 +184,12 @@ func (r *EmailRepository) FindLogsCtx(ctx context.Context, ownerUserID string, c
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	var logs []models.EmailLog
 
-	query := database.GetDB().WithContext(ctx).Model(&models.EmailLog{}).Where("owner_user_id = ?", ownerUserID).Order("created_at DESC")
+	query := database.GetDB().
+		WithContext(ctx).
+		Model(&models.EmailLog{}).
+		Where("owner_user_id = ?", ownerUserID).
+		Where("status <> ?", "deleted").
+		Order("created_at DESC")
 
 	if configID != "" {
 		query = query.Where("email_config_id = ?", strings.TrimSpace(configID))
@@ -196,6 +201,61 @@ func (r *EmailRepository) FindLogsCtx(ctx context.Context, ownerUserID string, c
 
 	err := query.Find(&logs).Error
 	return logs, err
+}
+
+func (r *EmailRepository) FindLogsForMailboxReconcileCtx(ctx context.Context, ownerUserID string, configID string, mailbox string) ([]models.EmailLog, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	configID = strings.TrimSpace(configID)
+	mailbox = strings.TrimSpace(mailbox)
+	if mailbox == "" {
+		mailbox = "INBOX"
+	}
+	if ownerUserID == "" || configID == "" {
+		return []models.EmailLog{}, nil
+	}
+
+	var logs []models.EmailLog
+	err := database.GetDB().
+		WithContext(ctx).
+		Model(&models.EmailLog{}).
+		Select("id, message_uid, status").
+		Where("owner_user_id = ? AND email_config_id = ? AND mailbox = ?", ownerUserID, configID, mailbox).
+		Where("status <> ?", "deleted").
+		Find(&logs).Error
+	return logs, err
+}
+
+func (r *EmailRepository) MarkLogsDeletedByIDs(ids []string) (int64, error) {
+	var total int64
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	const chunkSize = 200
+	for i := 0; i < len(ids); i += chunkSize {
+		end := i + chunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[i:end]
+		if len(chunk) == 0 {
+			continue
+		}
+		res := database.GetDB().
+			Model(&models.EmailLog{}).
+			Where("id IN ?", chunk).
+			Where("status <> ?", "deleted").
+			Update("status", "deleted")
+		if res.Error != nil {
+			return total, res.Error
+		}
+		total += res.RowsAffected
+	}
+
+	return total, nil
 }
 
 func (r *EmailRepository) FindLogByID(id string) (*models.EmailLog, error) {
@@ -228,7 +288,7 @@ func (r *EmailRepository) FindLogByUIDCtx(ctx context.Context, ownerUserID strin
 	}
 	var logRow models.EmailLog
 	if err := database.GetDB().WithContext(ctx).
-		Select("id, owner_user_id, email_config_id, mailbox, message_uid, has_attachment, attachment_count, invoice_xml_url, invoice_pdf_url, status").
+		Select("id, owner_user_id, email_config_id, mailbox, message_uid, has_attachment, attachment_count, invoice_xml_url, invoice_pdf_url, parsed_invoice_id, status").
 		Where("owner_user_id = ? AND email_config_id = ? AND mailbox = ? AND message_uid = ?", ownerUserID, configID, mailbox, messageUID).
 		First(&logRow).Error; err != nil {
 		return nil, err

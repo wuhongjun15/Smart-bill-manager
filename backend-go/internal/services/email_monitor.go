@@ -559,22 +559,26 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 			}
 		} else {
 			if len(uids) == 0 {
-				return 0, nil
-			}
-			log.Printf("[Email Monitor] Full sync: %d messages (uid list size=%d)", len(uids), len(uids))
+				_ = s.reconcileDeletedLogs(ownerUserID, configID, "INBOX", uids)
+			} else {
+				log.Printf("[Email Monitor] Full sync: %d messages (uid list size=%d)", len(uids), len(uids))
 
-			const chunkSize = 50
-			for i := 0; i < len(uids); i += chunkSize {
-				end := i + chunkSize
-				if end > len(uids) {
-					end = len(uids)
+				const chunkSize = 50
+				for i := 0; i < len(uids); i += chunkSize {
+					end := i + chunkSize
+					if end > len(uids) {
+						end = len(uids)
+					}
+					seqSet := new(imap.SeqSet)
+					seqSet.AddNum(uids[i:end]...)
+					if err := fetchChunk(seqSet); err != nil {
+						log.Printf("[Email Monitor] UidFetch error: %v", err)
+						return newLogs, err
+					}
 				}
-				seqSet := new(imap.SeqSet)
-				seqSet.AddNum(uids[i:end]...)
-				if err := fetchChunk(seqSet); err != nil {
-					log.Printf("[Email Monitor] UidFetch error: %v", err)
-					return newLogs, err
-				}
+
+				// Reconcile deletions after a successful full-sync UID SEARCH ALL.
+				_ = s.reconcileDeletedLogs(ownerUserID, configID, "INBOX", uids)
 			}
 		}
 	} else {
@@ -585,9 +589,6 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 		if err != nil {
 			log.Printf("[Email Monitor] Search error: %v", err)
 			return 0, err
-		}
-		if len(uids) == 0 {
-			return 0, nil
 		}
 
 		const chunkSize = 50
@@ -610,11 +611,76 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 	return newLogs, nil
 }
 
+func (s *EmailService) reconcileDeletedLogs(ownerUserID string, configID string, mailbox string, serverUIDs []uint32) error {
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	configID = strings.TrimSpace(configID)
+	mailbox = strings.TrimSpace(mailbox)
+	if mailbox == "" {
+		mailbox = "INBOX"
+	}
+	if ownerUserID == "" || configID == "" {
+		return nil
+	}
+
+	serverSet := make(map[uint32]struct{}, len(serverUIDs))
+	for _, uid := range serverUIDs {
+		if uid == 0 {
+			continue
+		}
+		serverSet[uid] = struct{}{}
+	}
+
+	logs, err := s.repo.FindLogsForMailboxReconcileCtx(context.Background(), ownerUserID, configID, mailbox)
+	if err != nil {
+		return err
+	}
+	if len(logs) == 0 {
+		return nil
+	}
+
+	missingIDs := make([]string, 0, 32)
+	for _, row := range logs {
+		if row.MessageUID == 0 {
+			continue
+		}
+		if _, ok := serverSet[row.MessageUID]; ok {
+			continue
+		}
+		if strings.TrimSpace(row.ID) == "" {
+			continue
+		}
+		missingIDs = append(missingIDs, row.ID)
+	}
+
+	if len(missingIDs) == 0 {
+		return nil
+	}
+
+	affected, err := s.repo.MarkLogsDeletedByIDs(missingIDs)
+	if err != nil {
+		return err
+	}
+	if affected > 0 {
+		log.Printf("[Email Monitor] Reconciled deletions: %d logs marked deleted (config=%s mailbox=%s)", affected, configID, mailbox)
+	}
+	return nil
+}
+
 func computeEmailLogMetadataUpdates(existing *models.EmailLog, hasAttachment int, attachmentCount int, xmlURL *string, pdfURL *string, forceRefresh bool) map[string]interface{} {
 	if existing == nil {
 		return map[string]interface{}{}
 	}
 	updates := map[string]interface{}{}
+
+	// If an email previously got marked as deleted but re-appears in mailbox (e.g. transient sync issue),
+	// restore it so it becomes visible again.
+	if strings.TrimSpace(existing.Status) == "deleted" {
+		if existing.ParsedInvoiceID != nil && strings.TrimSpace(*existing.ParsedInvoiceID) != "" {
+			updates["status"] = "parsed"
+		} else {
+			updates["status"] = "received"
+		}
+	}
 
 	if forceRefresh {
 		if existing.HasAttachment != hasAttachment {
