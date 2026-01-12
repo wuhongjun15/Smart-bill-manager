@@ -171,6 +171,31 @@ type InvoiceLineItem struct {
 	Quantity *float64 `json:"quantity,omitempty"`
 }
 
+type ExtractionCandidate struct {
+	Value        string  `json:"value"`
+	Source       string  `json:"source"`
+	Confidence   float64 `json:"confidence,omitempty"`
+	Score        int     `json:"score,omitempty"`
+	Evidence     string  `json:"evidence,omitempty"`
+	RejectReason string  `json:"reject_reason,omitempty"`
+}
+
+type MoneyCandidate struct {
+	Value        float64 `json:"value"`
+	Source       string  `json:"source"`
+	Confidence   float64 `json:"confidence,omitempty"`
+	Score        int     `json:"score,omitempty"`
+	Evidence     string  `json:"evidence,omitempty"`
+	RejectReason string  `json:"reject_reason,omitempty"`
+}
+
+type InvoiceExtractionTrace struct {
+	BuyerCandidates  []ExtractionCandidate `json:"buyer_candidates,omitempty"`
+	SellerCandidates []ExtractionCandidate `json:"seller_candidates,omitempty"`
+	AmountCandidates []MoneyCandidate      `json:"amount_candidates,omitempty"`
+	TaxCandidates    []MoneyCandidate      `json:"tax_candidates,omitempty"`
+}
+
 // InvoiceExtractedData represents extracted invoice information
 type InvoiceExtractedData struct {
 	InvoiceNumber           *string           `json:"invoice_number"`
@@ -196,6 +221,7 @@ type InvoiceExtractedData struct {
 	RawTextSource           string            `json:"raw_text_source,omitempty"` // pymupdf/rapidocr
 	PrettyText              string            `json:"pretty_text,omitempty"`
 	PDFZones                []PDFTextZonesPage `json:"pdf_zones,omitempty"`
+	Trace                   *InvoiceExtractionTrace `json:"trace,omitempty"`
 }
 
 // OCRCLIResponse represents the response from the Python OCR CLI script.
@@ -4256,6 +4282,45 @@ func ptrToString(p *string) string {
 	return strings.TrimSpace(*p)
 }
 
+func truncateForEvidence(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	if s == "" || maxRunes <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return strings.TrimSpace(string(r[:maxRunes])) + "…"
+}
+
+func appendExtractionCandidate(dst *[]ExtractionCandidate, c ExtractionCandidate) {
+	c.Value = strings.TrimSpace(c.Value)
+	c.Source = strings.TrimSpace(c.Source)
+	if c.Value == "" || c.Source == "" {
+		return
+	}
+	for _, existing := range *dst {
+		if existing.Value == c.Value && existing.Source == c.Source {
+			return
+		}
+	}
+	*dst = append(*dst, c)
+}
+
+func appendMoneyCandidate(dst *[]MoneyCandidate, c MoneyCandidate) {
+	c.Source = strings.TrimSpace(c.Source)
+	if c.Source == "" {
+		return
+	}
+	for _, existing := range *dst {
+		if existing.Source == c.Source && math.Abs(existing.Value-c.Value) < 0.000001 {
+			return
+		}
+	}
+	*dst = append(*dst, c)
+}
+
 func cleanPartyNameFromInlineValue(val string) string {
 	val = strings.TrimSpace(val)
 	if val == "" {
@@ -4291,6 +4356,168 @@ func cleanPartyNameFromInlineValue(val string) string {
 		return ""
 	}
 	return val
+}
+
+func scorePartyCandidate(value, source string, conf float64, isSeller bool, otherParty string) (int, string) {
+	value = strings.TrimSpace(value)
+	source = strings.TrimSpace(source)
+	otherParty = strings.TrimSpace(otherParty)
+	if value == "" {
+		return 0, "empty"
+	}
+	if isSeller && value == "个人" {
+		return 0, "seller_cannot_be_personal"
+	}
+	if looksLikeTaxAuthorityHeader(value) {
+		return 0, "tax_authority_header"
+	}
+	if isGarbagePartyName(value) {
+		return 0, "garbage"
+	}
+	if isBadPartyNameCandidate(value) {
+		return 0, "bad_candidate"
+	}
+	if otherParty != "" && value == otherParty {
+		return 0, "equals_other_party"
+	}
+
+	score := int(conf * 100)
+	if score == 0 {
+		score = 50
+	}
+
+	src := strings.ToLower(source)
+	switch {
+	case src == "xml" || strings.Contains(src, "xml"):
+		score += 1000
+	case strings.HasPrefix(src, "pymupdf_zones"):
+		score += 450
+	case strings.Contains(src, "taxid"):
+		score += 240
+	case strings.Contains(src, "inline_block"):
+		score += 200
+	case strings.Contains(src, "label"):
+		score += 170
+	case strings.Contains(src, "section"):
+		score += 150
+	case strings.Contains(src, "position"):
+		score += 110
+	default:
+		score += 120
+	}
+
+	if value == "个人" {
+		score += 30
+	} else {
+		l := len([]rune(value))
+		if l > 30 {
+			l = 30
+		}
+		score += l
+	}
+	if strings.Contains(value, "（") || strings.Contains(value, "(") {
+		score += 10
+	}
+
+	return score, ""
+}
+
+func scoreMoneyCandidate(value float64, source string, conf float64, totalAmount *float64, isTax bool) (int, string) {
+	source = strings.TrimSpace(source)
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, "nan_or_inf"
+	}
+	if value < 0 {
+		return 0, "negative"
+	}
+	if !isTax && value < MinValidAmount {
+		return 0, "too_small"
+	}
+	if value > 1_000_000_000 {
+		return 0, "too_large"
+	}
+	if isTax && totalAmount != nil && *totalAmount > 0 && value > *totalAmount+0.01 {
+		return 0, "tax_gt_total"
+	}
+
+	score := int(conf * 100)
+	if score == 0 {
+		score = 40
+	}
+	src := strings.ToLower(source)
+	switch {
+	case strings.HasPrefix(src, "pymupdf_zones"):
+		score += 450
+	case strings.Contains(src, "xiaoxie") || strings.Contains(src, "total"):
+		score += 220
+	case strings.Contains(src, "tax_label"):
+		score += 200
+	case strings.Contains(src, "max_currency"):
+		score += 120
+	default:
+		score += 120
+	}
+	return score, ""
+}
+
+func extractBuyerNameFromInlineBuyerBlock(parsedText string) (string, string, string, float64) {
+	buyerText := parsedText
+	if loc := regexp.MustCompile(`(?m)^购买方\s*$`).FindStringIndex(parsedText); loc != nil {
+		start := loc[0] - 800
+		if start < 0 {
+			start = 0
+		}
+		buyerText = parsedText[start:]
+	}
+	cutFrom := 0
+	if idx := strings.Index(buyerText, "购买方"); idx >= 0 {
+		cutFrom = idx
+	}
+	for _, stop := range []string{"密码区", "明细", "销售方"} {
+		if idx := strings.Index(buyerText[cutFrom:], stop); idx > 0 {
+			buyerText = buyerText[:cutFrom+idx]
+		}
+	}
+
+	// Prefer "名称:".
+	if m := regexp.MustCompile(`名称\s*[:：]\s*([^\n\r]{1,80})`).FindStringSubmatch(buyerText); len(m) > 1 {
+		val := cleanPartyNameFromInlineValue(m[1])
+		if val != "" && !isBadPartyNameCandidate(val) {
+			return val, "buyer_name_inline_block", truncateForEvidence(m[0], 120), 0.9
+		}
+	}
+	// Fallback: phone field sometimes contains "个人".
+	if mm := regexp.MustCompile(`电话\s*[:：]\s*([^\s\n\r]{1,20})`).FindStringSubmatch(buyerText); len(mm) > 1 {
+		val := cleanPartyNameFromInlineValue(mm[1])
+		if val != "" && !isBadPartyNameCandidate(val) {
+			return val, "buyer_phone_inline_block", truncateForEvidence(mm[0], 120), 0.75
+		}
+	}
+	// Bank field sometimes carries a personal name.
+	if ms := regexp.MustCompile(`(?m)开户行及账号\s*[:：]\s*([^\n\r]{1,60})`).FindAllStringSubmatch(buyerText, -1); len(ms) > 0 {
+		val := cleanPartyNameFromInlineValue(ms[len(ms)-1][1])
+		if val != "" && !isBadPartyNameCandidate(val) {
+			return val, "buyer_bank_inline_block", truncateForEvidence(ms[len(ms)-1][0], 120), 0.78
+		}
+	}
+	// Merged-label buyer block: name appears after tax-id label.
+	for _, line := range strings.Split(buyerText, "\n") {
+		l := strings.TrimSpace(strings.TrimRight(line, "\r"))
+		if l == "" {
+			continue
+		}
+		if strings.Contains(l, "纳税人识别号") || strings.Contains(l, "统一社会信用代码") {
+			val := strings.TrimSpace(extractNameFromTaxIDLabelLine(l))
+			if val != "" && !isBadPartyNameCandidate(val) {
+				return val, "buyer_taxid_inline_block", truncateForEvidence(l, 120), 0.88
+			}
+		}
+	}
+	// Last resort: "个人".
+	if regexp.MustCompile(`(?s)购买方.{0,240}?电话\s*[:：]\s*个人`).MatchString(buyerText) {
+		return "个人", "buyer_personal_inline_block", "购买方…电话:个人", 0.7
+	}
+	return "", "", "", 0
 }
 
 func extractCompanyNameNearTaxID(text string) string {
@@ -4393,6 +4620,100 @@ func extractCompanyNameNearTaxID(text string) string {
 		}
 	}
 	return ""
+}
+
+func extractSellerNameLooseTaxID(parsedText string) (string, string, float64) {
+	companyTaxIDLoose := regexp.MustCompile(fmt.Sprintf(`([\p{Han}（）()·]{2,140}(?:有限责任公司|有限公司|公司|集团|银行|商店|企业|中心|厂|店|行|社|院|局)[\p{Han}（）()·]{0,40})\s*(%s)`, taxIDPattern))
+	sellerText := parsedText
+	if loc := regexp.MustCompile(`(?m)^销售方\s*$`).FindStringIndex(parsedText); loc != nil {
+		sellerText = parsedText[loc[0]:]
+	}
+
+	best := ""
+	bestEvidence := ""
+	bestLen := 0
+	for _, m := range companyTaxIDLoose.FindAllStringSubmatch(sellerText, -1) {
+		cand := cleanupName(strings.TrimSpace(m[1]))
+		if cand == "" || cand == "个人" || isBadPartyNameCandidate(cand) {
+			continue
+		}
+		l := len([]rune(cand))
+		if l > bestLen {
+			best = cand
+			bestEvidence = truncateForEvidence(m[0], 160)
+			bestLen = l
+		}
+	}
+
+	if best == "" {
+		if matches := companyTaxIDLoose.FindAllStringSubmatch(parsedText, -1); len(matches) > 0 {
+			last := matches[len(matches)-1]
+			cand := cleanupName(strings.TrimSpace(last[1]))
+			if cand != "" && cand != "个人" && !isBadPartyNameCandidate(cand) {
+				best = cand
+				bestEvidence = truncateForEvidence(last[0], 160)
+			}
+		}
+	}
+	if best == "" {
+		return "", "", 0
+	}
+	return best, bestEvidence, 0.9
+}
+
+func extractAmountCandidatesFromText(parsedText string) []MoneyCandidate {
+	out := make([]MoneyCandidate, 0, 6)
+
+	if m := regexp.MustCompile(`价税合计（小写）\s*[:：]?\s*(?:￥|¥)?\s*([\d,.]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
+		if amt := parseAmount(m[1]); amt != nil && *amt >= MinValidAmount {
+			appendMoneyCandidate(&out, MoneyCandidate{Value: *amt, Source: "total_xiaoxie", Confidence: 0.9, Evidence: truncateForEvidence(m[0], 140)})
+		}
+	}
+
+	if m := regexp.MustCompile(`(?m)^\s*合计\s*[￥¥]?\s*([\d,.]+)\s*$`).FindStringSubmatch(parsedText); len(m) > 1 {
+		if amt := parseAmount(m[1]); amt != nil && *amt >= MinValidAmount {
+			appendMoneyCandidate(&out, MoneyCandidate{Value: *amt, Source: "sum_total_line", Confidence: 0.75, Evidence: truncateForEvidence(m[0], 140)})
+		}
+	}
+
+	// Max currency value as weak fallback.
+	currencyAmountRegex := regexp.MustCompile(`[￥¥]\s*([\d]+(?:\.[\d]{1,2})?)`)
+	curMatches := currencyAmountRegex.FindAllStringSubmatch(parsedText, -1)
+	var maxAmt *float64
+	for _, m := range curMatches {
+		if len(m) < 2 {
+			continue
+		}
+		if a := parseAmount(m[1]); a != nil && *a >= MinValidAmount {
+			if maxAmt == nil || *a > *maxAmt {
+				maxAmt = a
+			}
+		}
+	}
+	if maxAmt != nil {
+		appendMoneyCandidate(&out, MoneyCandidate{Value: *maxAmt, Source: "max_currency", Confidence: 0.5})
+	}
+
+	return out
+}
+
+func extractTaxCandidatesFromText(parsedText string) []MoneyCandidate {
+	out := make([]MoneyCandidate, 0, 4)
+	for _, cfg := range []struct {
+		re   *regexp.Regexp
+		src  string
+		conf float64
+	}{
+		{regexp.MustCompile(`税额[:：]?\s*[￥¥]?([\d,.]+)`), "tax_label", 0.8},
+		{regexp.MustCompile(`税金[:：]?\s*[￥¥]?([\d,.]+)`), "tax_label_alt", 0.8},
+	} {
+		if m := cfg.re.FindStringSubmatch(parsedText); len(m) > 1 {
+			if tax := parseAmount(m[1]); tax != nil && *tax >= 0 {
+				appendMoneyCandidate(&out, MoneyCandidate{Value: *tax, Source: cfg.src, Confidence: cfg.conf, Evidence: truncateForEvidence(m[0], 140)})
+			}
+		}
+	}
+	return out
 }
 
 func extractNameFromTaxIDLabelLine(line string) string {
@@ -8620,6 +8941,231 @@ func (s *OCRService) ParseInvoiceDataWithMeta(text string, meta *PDFTextCLIRespo
 				data.SellerNameConfidence = cand.conf
 			}
 		}
+	}
+
+	// Final selection: build multi-source candidate pools (xml/zones/text) and pick the best values
+	// with consistent scoring + validation. This makes the behavior stable across templates and improves debuggability.
+	if !airTicketDetected && !railTicketDetected {
+		trace := &InvoiceExtractionTrace{}
+
+		// Seller candidates
+		{
+			sellerCands := make([]ExtractionCandidate, 0, 10)
+			if data.SellerName != nil && strings.TrimSpace(*data.SellerName) != "" {
+				appendExtractionCandidate(&sellerCands, ExtractionCandidate{
+					Value:      ptrToString(data.SellerName),
+					Source:     strings.TrimSpace(data.SellerNameSource),
+					Confidence: data.SellerNameConfidence,
+					Evidence:   "selected",
+				})
+			}
+			if meta != nil && len(meta.Zones) > 0 {
+				if cand, ok := extractSellerNameFromPDFZonesCandidate(meta.Zones); ok {
+					appendExtractionCandidate(&sellerCands, ExtractionCandidate{
+						Value:      cand.val,
+						Source:     cand.src,
+						Confidence: cand.conf,
+						Evidence:   truncateForEvidence(cand.evidence, 160),
+					})
+				}
+			}
+			// Label-based candidates
+			for _, re := range []*regexp.Regexp{
+				regexp.MustCompile(`销售方[：:]?\s*名称[：:]?\s*[\n\r]?\s*([^\n\r]+)`),
+				regexp.MustCompile(`销售方名称[：:]?\s*[\n\r]?\s*([^\n\r]+)`),
+				regexp.MustCompile(`出票方[：:]?\s*[\n\r]?\s*([^\n\r]+)`),
+			} {
+				if m := re.FindStringSubmatch(parsedText); len(m) > 1 {
+					val := cleanPartyNameFromInlineValue(m[1])
+					if val != "" {
+						appendExtractionCandidate(&sellerCands, ExtractionCandidate{Value: val, Source: "seller_label", Confidence: 0.8, Evidence: truncateForEvidence(m[0], 160)})
+					}
+				}
+			}
+			// Tax-id context candidates
+			if cand := extractCompanyNameNearTaxID(parsedText); cand != "" {
+				appendExtractionCandidate(&sellerCands, ExtractionCandidate{Value: cand, Source: "seller_company_taxid_context", Confidence: 0.9})
+			}
+			if cand, ev, conf := extractSellerNameLooseTaxID(parsedText); cand != "" {
+				appendExtractionCandidate(&sellerCands, ExtractionCandidate{Value: cand, Source: "seller_company_taxid_loose", Confidence: conf, Evidence: ev})
+			}
+			// Position-based candidate (weak)
+			if _, seller := s.extractBuyerAndSellerByPosition(parsedText); seller != nil && isLikelySellerName(*seller) {
+				appendExtractionCandidate(&sellerCands, ExtractionCandidate{Value: cleanupName(*seller), Source: "position", Confidence: 0.7})
+			}
+
+			other := ptrToString(data.BuyerName)
+			best := ExtractionCandidate{}
+			bestScore := -1
+			scored := make([]ExtractionCandidate, 0, len(sellerCands))
+			for _, c := range sellerCands {
+				score, reject := scorePartyCandidate(c.Value, c.Source, c.Confidence, true, other)
+				c.Score = score
+				c.RejectReason = reject
+				scored = append(scored, c)
+				if reject == "" && score > bestScore {
+					best = c
+					bestScore = score
+				}
+			}
+			trace.SellerCandidates = scored
+			if bestScore >= 0 {
+				// XML has the highest priority; the scorer already reflects this.
+				v := strings.TrimSpace(best.Value)
+				if v != "" && (data.SellerNameSource != "xml" || ptrToString(data.SellerName) == "") {
+					data.SellerName = &v
+					data.SellerNameSource = best.Source
+					data.SellerNameConfidence = best.Confidence
+				}
+			}
+		}
+
+		// Buyer candidates
+		{
+			buyerCands := make([]ExtractionCandidate, 0, 10)
+			if data.BuyerName != nil && strings.TrimSpace(*data.BuyerName) != "" {
+				appendExtractionCandidate(&buyerCands, ExtractionCandidate{
+					Value:      ptrToString(data.BuyerName),
+					Source:     strings.TrimSpace(data.BuyerNameSource),
+					Confidence: data.BuyerNameConfidence,
+					Evidence:   "selected",
+				})
+			}
+			if meta != nil && len(meta.Zones) > 0 {
+				if cand, ok := extractBuyerNameFromPDFZones(meta.Zones); ok {
+					appendExtractionCandidate(&buyerCands, ExtractionCandidate{
+						Value:      cand.val,
+						Source:     cand.src,
+						Confidence: cand.conf,
+					})
+				}
+			}
+			for _, re := range []*regexp.Regexp{
+				regexp.MustCompile(`购买方[：:]?\s*名称[：:]?\s*[\n\r]?\s*([^\n\r]+)`),
+				regexp.MustCompile(`购买方名称[：:]?\s*[\n\r]?\s*([^\n\r]+)`),
+				regexp.MustCompile(`购货方[：:]?\s*[\n\r]?\s*([^\n\r]+)`),
+			} {
+				if m := re.FindStringSubmatch(parsedText); len(m) > 1 {
+					val := cleanPartyNameFromInlineValue(m[1])
+					if val != "" {
+						appendExtractionCandidate(&buyerCands, ExtractionCandidate{Value: val, Source: "buyer_label", Confidence: 0.8, Evidence: truncateForEvidence(m[0], 160)})
+					}
+				}
+			}
+			if val, src, ev, conf := extractBuyerNameFromInlineBuyerBlock(parsedText); val != "" {
+				appendExtractionCandidate(&buyerCands, ExtractionCandidate{Value: val, Source: src, Confidence: conf, Evidence: ev})
+			}
+			if buyer, _ := s.extractBuyerAndSellerByPosition(parsedText); buyer != nil && isLikelyBuyerName(*buyer) {
+				appendExtractionCandidate(&buyerCands, ExtractionCandidate{Value: cleanupName(*buyer), Source: "position", Confidence: 0.7})
+			}
+			if strings.Contains(parsedText, "个人") {
+				appendExtractionCandidate(&buyerCands, ExtractionCandidate{Value: "个人", Source: "buyer_individual", Confidence: 0.6})
+			}
+
+			other := ptrToString(data.SellerName)
+			best := ExtractionCandidate{}
+			bestScore := -1
+			scored := make([]ExtractionCandidate, 0, len(buyerCands))
+			for _, c := range buyerCands {
+				score, reject := scorePartyCandidate(c.Value, c.Source, c.Confidence, false, other)
+				c.Score = score
+				c.RejectReason = reject
+				scored = append(scored, c)
+				if reject == "" && score > bestScore {
+					best = c
+					bestScore = score
+				}
+			}
+			trace.BuyerCandidates = scored
+			if bestScore >= 0 {
+				v := strings.TrimSpace(best.Value)
+				if v != "" && (data.BuyerNameSource != "xml" || ptrToString(data.BuyerName) == "") {
+					data.BuyerName = &v
+					data.BuyerNameSource = best.Source
+					data.BuyerNameConfidence = best.Confidence
+				}
+			}
+		}
+
+		// Amount/tax candidates (zones/text/current)
+		{
+			amountCands := make([]MoneyCandidate, 0, 8)
+			if data.Amount != nil && *data.Amount > 0 {
+				appendMoneyCandidate(&amountCands, MoneyCandidate{Value: *data.Amount, Source: data.AmountSource, Confidence: data.AmountConfidence, Evidence: "selected"})
+			}
+			if meta != nil && len(meta.Zones) > 0 {
+				total, totalSrc, totalConf, tax, taxSrc, taxConf := extractInvoiceTotalsFromPDFZones(meta.Zones)
+				if total != nil && *total > 0 {
+					appendMoneyCandidate(&amountCands, MoneyCandidate{Value: *total, Source: totalSrc, Confidence: totalConf})
+				}
+				if tax != nil && *tax >= 0 {
+					// tax candidates are handled below
+					_ = taxSrc
+					_ = taxConf
+				}
+			}
+			for _, c := range extractAmountCandidatesFromText(parsedText) {
+				appendMoneyCandidate(&amountCands, c)
+			}
+
+			best := MoneyCandidate{}
+			bestScore := -1
+			scored := make([]MoneyCandidate, 0, len(amountCands))
+			for _, c := range amountCands {
+				score, reject := scoreMoneyCandidate(c.Value, c.Source, c.Confidence, nil, false)
+				c.Score = score
+				c.RejectReason = reject
+				scored = append(scored, c)
+				if reject == "" && score > bestScore {
+					best = c
+					bestScore = score
+				}
+			}
+			trace.AmountCandidates = scored
+			if bestScore >= 0 {
+				v := best.Value
+				data.Amount = &v
+				data.AmountSource = best.Source
+				data.AmountConfidence = best.Confidence
+			}
+
+			taxCands := make([]MoneyCandidate, 0, 8)
+			if data.TaxAmount != nil && *data.TaxAmount >= 0 {
+				appendMoneyCandidate(&taxCands, MoneyCandidate{Value: *data.TaxAmount, Source: data.TaxAmountSource, Confidence: data.TaxAmountConfidence, Evidence: "selected"})
+			}
+			if meta != nil && len(meta.Zones) > 0 {
+				_, _, _, tax, taxSrc, taxConf := extractInvoiceTotalsFromPDFZones(meta.Zones)
+				if tax != nil && *tax >= 0 {
+					appendMoneyCandidate(&taxCands, MoneyCandidate{Value: *tax, Source: taxSrc, Confidence: taxConf})
+				}
+			}
+			for _, c := range extractTaxCandidatesFromText(parsedText) {
+				appendMoneyCandidate(&taxCands, c)
+			}
+
+			bestTax := MoneyCandidate{}
+			bestTaxScore := -1
+			scoredTax := make([]MoneyCandidate, 0, len(taxCands))
+			for _, c := range taxCands {
+				score, reject := scoreMoneyCandidate(c.Value, c.Source, c.Confidence, data.Amount, true)
+				c.Score = score
+				c.RejectReason = reject
+				scoredTax = append(scoredTax, c)
+				if reject == "" && score > bestTaxScore {
+					bestTax = c
+					bestTaxScore = score
+				}
+			}
+			trace.TaxCandidates = scoredTax
+			if bestTaxScore >= 0 {
+				v := bestTax.Value
+				data.TaxAmount = &v
+				data.TaxAmountSource = bestTax.Source
+				data.TaxAmountConfidence = bestTax.Confidence
+			}
+		}
+
+		data.Trace = trace
 	}
 
 	data.PrettyText = formatInvoicePrettyText(text, data)

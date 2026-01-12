@@ -10,9 +10,10 @@ import (
 )
 
 type pdfZonesCandidate struct {
-	val  string
-	src  string
-	conf float64
+	val      string
+	src      string
+	conf     float64
+	evidence string
 }
 
 func extractSellerNameFromPDFZonesCandidate(pages []PDFTextZonesPage) (pdfZonesCandidate, bool) {
@@ -40,14 +41,14 @@ func extractSellerNameFromPDFZonesCandidate(pages []PDFTextZonesPage) (pdfZonesC
 			// Strong signal: company name tied to a tax-id label line (often in "密码区" for PyMuPDF zoned extraction).
 			if taxIDRegex.MatchString(rowText) || strings.Contains(rowText, "\u7eb3\u7a0e\u4eba\u8bc6\u522b\u53f7") || strings.Contains(rowText, "\u7edf\u4e00\u793e\u4f1a\u4fe1\u7528\u4ee3\u7801") {
 				if v := extractCompanyNameNearTaxID(rowText); v != "" && !isBadPartyNameCandidate(v) {
-					cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_seller_taxid_context", conf: 0.92})
+					cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_seller_taxid_context", conf: 0.92, evidence: rowText})
 				}
 			}
 
 			// Some templates may contain the seller name in the same row without a tax-id match; accept only clear company-like strings.
 			if strings.Contains(rowText, "\u9500\u552e\u65b9") && strings.Contains(rowText, "\u540d\u79f0") {
 				if v := extractNameFromTaxIDLabelLine(rowText); v != "" && !isBadPartyNameCandidate(v) && v != "\u4e2a\u4eba" {
-					cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_seller_name_inline", conf: 0.86})
+					cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_seller_name_inline", conf: 0.86, evidence: rowText})
 				}
 			}
 
@@ -77,7 +78,7 @@ func extractSellerNameFromPDFZonesCandidate(pages []PDFTextZonesPage) (pdfZonesC
 					score += 55
 				}
 				if score > bestScore {
-					best = pdfZonesCandidate{val: v, src: cand.src, conf: cand.conf}
+					best = pdfZonesCandidate{val: v, src: cand.src, conf: cand.conf, evidence: cand.evidence}
 					bestScore = score
 				}
 			}
@@ -239,18 +240,18 @@ func extractBuyerNameFromPDFZones(pages []PDFTextZonesPage) (pdfZonesCandidate, 
 
 			// Strong patterns: explicit "购买方名称:".
 			if v := zonesExtractValueToRightOfLabel(row, "\u8d2d\u4e70\u65b9\u540d\u79f0", stopLabels); v != "" && !isBadPartyNameCandidate(v) {
-				cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_buyer_name_label", conf: 0.92})
+				cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_buyer_name_label", conf: 0.92, evidence: rowText})
 			}
 			// Common VAT table label: "名称:" in the buyer block.
 			if v := zonesExtractValueToRightOfLabel(row, "\u540d\u79f0", stopLabels); v != "" && !isBadPartyNameCandidate(v) {
-				cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_buyer_name", conf: 0.9})
+				cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_buyer_name", conf: 0.9, evidence: rowText})
 			}
 			// Some PDFs glue the buyer's name into the "开户行及账号" value; accept only person-like suffixes.
 			if v := zonesExtractValueToRightOfLabel(row, "\u5f00\u6237\u884c\u53ca\u8d26\u53f7", stopLabels); v != "" {
 				if strings.HasSuffix(v, "\u5148\u751f") || strings.HasSuffix(v, "\u5973\u58eb") {
 					v = zonesCleanupPartyName(v)
 					if v != "" && !isBadPartyNameCandidate(v) {
-						cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_buyer_bank_field_name", conf: 0.78})
+						cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_buyer_bank_field_name", conf: 0.78, evidence: rowText})
 					}
 				}
 			}
@@ -258,20 +259,20 @@ func extractBuyerNameFromPDFZones(pages []PDFTextZonesPage) (pdfZonesCandidate, 
 			// Company name near tax-id label (mostly for enterprise buyers).
 			if taxIDRegex.MatchString(rowText) {
 				if v := extractNameFromTaxIDLabelLine(rowText); v != "" && !isBadPartyNameCandidate(v) {
-					cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_buyer_taxid_label", conf: 0.85})
+					cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_buyer_taxid_label", conf: 0.85, evidence: rowText})
 				}
 			}
 			// Merged-label buyer block (personal buyers often have no tax ID):
 			// "名称：统一社会信用代码/纳税人识别号：个人（个人） 销售方信息名称：..."
 			if (region == "buyer" || region == "header_left") && (strings.Contains(rowText, "\u7eb3\u7a0e\u4eba\u8bc6\u522b\u53f7") || strings.Contains(rowText, "\u7edf\u4e00\u793e\u4f1a\u4fe1\u7528\u4ee3\u7801")) {
 				if v := extractNameFromTaxIDLabelLine(rowText); v != "" && !isBadPartyNameCandidate(v) && v != "\u4e2a\u4eba" {
-					cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_buyer_taxid_inline", conf: 0.88})
+					cands = append(cands, pdfZonesCandidate{val: v, src: "pymupdf_zones_buyer_taxid_inline", conf: 0.88, evidence: rowText})
 				}
 			}
 
 			// Fallback: preserve "个人" as a valid buyer name if it appears in the buyer block.
 			if strings.Contains(rowText, "\u4e2a\u4eba") {
-				cands = append(cands, pdfZonesCandidate{val: "\u4e2a\u4eba", src: "pymupdf_zones_buyer_personal", conf: 0.7})
+				cands = append(cands, pdfZonesCandidate{val: "\u4e2a\u4eba", src: "pymupdf_zones_buyer_personal", conf: 0.7, evidence: rowText})
 			}
 
 			for _, cand := range cands {
@@ -304,7 +305,7 @@ func extractBuyerNameFromPDFZones(pages []PDFTextZonesPage) (pdfZonesCandidate, 
 					score += 40
 				}
 				if score > bestScore {
-					best = pdfZonesCandidate{val: v, src: cand.src, conf: cand.conf}
+					best = pdfZonesCandidate{val: v, src: cand.src, conf: cand.conf, evidence: cand.evidence}
 					bestScore = score
 				}
 			}
