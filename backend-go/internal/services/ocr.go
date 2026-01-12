@@ -4983,7 +4983,7 @@ func peelTrailingUnitSpecTokensFromItemName(name, spec, unit string) (string, st
 	isUnitToken := func(s string) bool {
 		s = strings.TrimSpace(s)
 		switch s {
-		case "件", "个", "箱", "袋", "包", "瓶", "罐", "盒", "组", "台", "次", "张", "套", "份", "支", "双", "只", "项", "米", "公斤", "千克", "克":
+		case "件", "个", "箱", "袋", "包", "瓶", "罐", "盒", "组", "台", "次", "张", "套", "份", "支", "双", "只", "项", "項", "米", "公斤", "千克", "克":
 			return true
 		default:
 			return false
@@ -5068,7 +5068,7 @@ func peelTrailingUnitSpecTokensFromItemName(name, spec, unit string) (string, st
 
 	if unit == "" || spec == "" {
 		// Prefer longer tokens first (e.g. "公斤").
-		candidates := []string{"公斤", "千克", "克", "米", "件", "个", "箱", "袋", "包", "瓶", "罐", "盒", "组", "台", "次", "张", "套", "份", "支", "双", "只", "项"}
+		candidates := []string{"公斤", "千克", "克", "米", "件", "个", "箱", "袋", "包", "瓶", "罐", "盒", "组", "台", "次", "张", "套", "份", "支", "双", "只", "项", "項"}
 		if unit == "" {
 			for _, tok := range candidates {
 				if stripTrailingToken(tok) {
@@ -5993,7 +5993,7 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 		}
 		// Avoid treating common unit-like tokens as item names/continuations.
 		switch s {
-		case "件", "个", "箱", "袋", "包", "瓶", "罐", "盒", "组", "台", "次", "张", "套", "份", "支", "双", "只", "项", "米", "公斤", "千克", "克", "元":
+		case "件", "个", "箱", "袋", "包", "瓶", "罐", "盒", "组", "台", "次", "张", "套", "份", "支", "双", "只", "项", "項", "米", "公斤", "千克", "克", "元":
 			return true
 		default:
 			return false
@@ -6170,8 +6170,8 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 
 	// Some PDF text extractions merge unit+qty into the same token as the item name,
 	// e.g. "*电信服务*话费充值元1" or "... 元 1". Peel them off early so we don't lose them.
-	unitQtySuffixRe := regexp.MustCompile(`^(.*?)(元|件|个|箱|袋|包|瓶|罐|盒|组|台|次|张|套|份|支|双|只|项|米|公斤|千克|克)\s*(\d+(?:\.\d+)?)$`)
-	unitQtyInlineRe := regexp.MustCompile(`(元|件|个|箱|袋|包|瓶|罐|盒|组|台|次|张|套|份|支|双|只|项|米|公斤|千克|克)\s*(\d+(?:\.\d+)?)`)
+	unitQtySuffixRe := regexp.MustCompile(`^(.*?)(元|件|个|箱|袋|包|瓶|罐|盒|组|台|次|张|套|份|支|双|只|项|項|米|公斤|千克|克)\s*(\d+(?:\.\d+)?)$`)
+	unitQtyInlineRe := regexp.MustCompile(`(元|件|个|箱|袋|包|瓶|罐|盒|组|台|次|张|套|份|支|双|只|项|項|米|公斤|千克|克)\s*(\d+(?:\.\d+)?)`)
 	specInlineRe := regexp.MustCompile(`(?:\d+(?:\.\d+)?\s*°\s*(?:[×x\*])\s*\d+(?:\.\d+)?\s*(?:kg|ml|mm|cm|m|g|l)?|\d+(?:\.\d+)?\s*(?:kg|ml|mm|cm|m|g|l)\s*(?:[×x\*])\s*\d+(?:\.\d+)?)`)
 	categoryAnyRe := regexp.MustCompile(`\*[^*\n\r]{1,20}\*`)
 	longDecimalRe := regexp.MustCompile(`\d+\.\d{4,}`)
@@ -6310,7 +6310,7 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 
 		// Units: if a single unit repeats N times, assume it's for each row (common for invoices).
 		units := make([]string, 0, len(names))
-		for _, u := range []string{"瓶", "件", "个", "箱", "袋", "包", "罐", "盒", "组", "台", "次", "张", "套", "份", "支", "双", "只", "项", "米", "公斤", "千克", "克", "元"} {
+		for _, u := range []string{"瓶", "件", "个", "箱", "袋", "包", "罐", "盒", "组", "台", "次", "张", "套", "份", "支", "双", "只", "项", "項", "米", "公斤", "千克", "克", "元"} {
 			c := strings.Count(tailPart, u)
 			if c >= len(names) {
 				for i := 0; i < len(names); i++ {
@@ -6815,6 +6815,25 @@ func extractInvoiceLineItems(text string) []InvoiceLineItem {
 			return
 		}
 		name, currentSpec, currentUnit = peelTrailingUnitSpecTokensFromItemName(name, currentSpec, currentUnit)
+		// If unit/spec are still empty but the item line comes from a category-prefixed row (e.g. "*餐饮服务*..."),
+		// infer repeated 1-char Han tokens at the end (common for "项项" / "套套" etc. when PDF text merges columns).
+		if strings.Contains(currentName, "*") && strings.TrimSpace(currentSpec) == "" && strings.TrimSpace(currentUnit) == "" {
+			rs := []rune(strings.TrimSpace(name))
+			if len(rs) >= 4 {
+				last := rs[len(rs)-1]
+				prev := rs[len(rs)-2]
+				if last == prev && unicode.Is(unicode.Han, last) {
+					// Strip the two tokens from name and fill spec/unit.
+					base := strings.TrimSpace(string(rs[:len(rs)-2]))
+					if base != "" {
+						name = base
+						tok := string(last)
+						currentSpec = tok
+						currentUnit = tok
+					}
+				}
+			}
+		}
 		qty := currentQty
 		if qty == nil && currentSawMoney {
 			one := 1.0
@@ -8406,6 +8425,21 @@ func (s *OCRService) ParseInvoiceDataWithMeta(text string, meta *PDFTextCLIRespo
 
 	if len(data.Items) == 0 {
 		data.Items = extractInvoiceLineItems(parsedText)
+	}
+
+	// Final post-process for items: regardless of which extractor produced the item list (zones/text),
+	// try to recover spec/unit that were merged into the name (common when PDF text merges columns).
+	if len(data.Items) > 0 {
+		for i := range data.Items {
+			n := strings.TrimSpace(data.Items[i].Name)
+			if n == "" {
+				continue
+			}
+			n2, sp2, un2 := peelTrailingUnitSpecTokensFromItemName(n, data.Items[i].Spec, data.Items[i].Unit)
+			data.Items[i].Name = strings.TrimSpace(n2)
+			data.Items[i].Spec = strings.TrimSpace(sp2)
+			data.Items[i].Unit = strings.TrimSpace(un2)
+		}
 	}
 
 	// When PDF zones are available, prefer coordinate-based fixes for ambiguous party names and totals.

@@ -282,6 +282,8 @@ func main() {
 		c.JSON(200, gin.H{
 			"status":    "ok",
 			"timestamp": time.Now().Format(time.RFC3339),
+			// Bump this when shipping parsing fixes so deployments can be verified quickly.
+			"items_parser_rev": 3,
 		})
 	})
 

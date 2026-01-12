@@ -27,3 +27,19 @@ func TestExtractInvoiceLineItems_Text_PeelsTrailingUnitSpecTokens(t *testing.T) 
 	}
 }
 
+func TestExtractInvoiceLineItems_Text_PeelsTraditionalUnitToken(t *testing.T) {
+	text := `
+项目名称 规格型号 单位 数量
+明细
+*餐饮服务*餐饮服务項項1
+价税合计（小写） ￥ 2632.00
+`
+	items := extractInvoiceLineItems(text)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d: %+v", len(items), items)
+	}
+	it := items[0]
+	if it.Unit != "項" || it.Spec != "項" || it.Quantity == nil || *it.Quantity != 1 {
+		t.Fatalf("unexpected item parsed: %+v", it)
+	}
+}
