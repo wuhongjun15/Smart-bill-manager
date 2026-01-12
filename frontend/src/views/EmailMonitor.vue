@@ -770,6 +770,17 @@ const handleStopMonitor = async (id: string) => {
     notifications.add({ severity: 'info', title: '邮箱监控已停止', detail: id })
     await loadMonitorStatus()
   } catch {
+    // If the request timed out but the backend did stop monitoring, reflect final state.
+    try {
+      await loadMonitorStatus()
+      if (monitorStatus.value[id] !== 'running') {
+        toast.add({ severity: 'success', summary: '\u76D1\u63A7\u5DF2\u505C\u6B62', life: 2000 })
+        notifications.add({ severity: 'info', title: '邮箱监控已停止', detail: id })
+        return
+      }
+    } catch {
+      // ignore
+    }
     toast.add({ severity: 'error', summary: '\u505C\u6B62\u76D1\u63A7\u5931\u8D25', life: 3000 })
     notifications.add({ severity: 'error', title: '邮箱监控停止失败', detail: id })
   }

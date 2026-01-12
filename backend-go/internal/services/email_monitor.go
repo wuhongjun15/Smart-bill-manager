@@ -850,16 +850,27 @@ func sanitizeFilename(filename string) string {
 
 // StopMonitoring stops email monitoring for a config
 func (s *EmailService) StopMonitoring(configID string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	c, exists := s.activeConnections[configID]
-	if !exists {
+	configID = strings.TrimSpace(configID)
+	if configID == "" {
 		return false
 	}
 
-	c.Logout()
-	delete(s.activeConnections, configID)
+	s.mu.Lock()
+	c, exists := s.activeConnections[configID]
+	if exists {
+		delete(s.activeConnections, configID)
+	}
+	s.mu.Unlock()
+
+	if !exists || c == nil {
+		return false
+	}
+
+	// Return quickly to the API caller: Terminate closes the TCP connection immediately and
+	// unblocks any ongoing IDLE/FETCH calls; do not perform network I/O while holding locks.
+	if err := c.Terminate(); err != nil {
+		log.Printf("[Email Monitor] Terminate error for %s: %v", configID, err)
+	}
 	return true
 }
 
