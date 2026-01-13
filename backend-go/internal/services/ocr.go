@@ -198,29 +198,29 @@ type InvoiceExtractionTrace struct {
 
 // InvoiceExtractedData represents extracted invoice information
 type InvoiceExtractedData struct {
-	InvoiceNumber           *string           `json:"invoice_number"`
-	InvoiceNumberSource     string            `json:"invoice_number_source,omitempty"`
-	InvoiceNumberConfidence float64           `json:"invoice_number_confidence,omitempty"`
-	InvoiceDate             *string           `json:"invoice_date"`
-	InvoiceDateSource       string            `json:"invoice_date_source,omitempty"`
-	InvoiceDateConfidence   float64           `json:"invoice_date_confidence,omitempty"`
-	Amount                  *float64          `json:"amount"`
-	AmountSource            string            `json:"amount_source,omitempty"`
-	AmountConfidence        float64           `json:"amount_confidence,omitempty"`
-	TaxAmount               *float64          `json:"tax_amount"`
-	TaxAmountSource         string            `json:"tax_amount_source,omitempty"`
-	TaxAmountConfidence     float64           `json:"tax_amount_confidence,omitempty"`
-	SellerName              *string           `json:"seller_name"`
-	SellerNameSource        string            `json:"seller_name_source,omitempty"`
-	SellerNameConfidence    float64           `json:"seller_name_confidence,omitempty"`
-	BuyerName               *string           `json:"buyer_name"`
-	BuyerNameSource         string            `json:"buyer_name_source,omitempty"`
-	BuyerNameConfidence     float64           `json:"buyer_name_confidence,omitempty"`
-	Items                   []InvoiceLineItem `json:"items,omitempty"`
-	RawText                 string            `json:"raw_text"`
-	RawTextSource           string            `json:"raw_text_source,omitempty"` // pymupdf/rapidocr
-	PrettyText              string            `json:"pretty_text,omitempty"`
-	PDFZones                []PDFTextZonesPage `json:"pdf_zones,omitempty"`
+	InvoiceNumber           *string                 `json:"invoice_number"`
+	InvoiceNumberSource     string                  `json:"invoice_number_source,omitempty"`
+	InvoiceNumberConfidence float64                 `json:"invoice_number_confidence,omitempty"`
+	InvoiceDate             *string                 `json:"invoice_date"`
+	InvoiceDateSource       string                  `json:"invoice_date_source,omitempty"`
+	InvoiceDateConfidence   float64                 `json:"invoice_date_confidence,omitempty"`
+	Amount                  *float64                `json:"amount"`
+	AmountSource            string                  `json:"amount_source,omitempty"`
+	AmountConfidence        float64                 `json:"amount_confidence,omitempty"`
+	TaxAmount               *float64                `json:"tax_amount"`
+	TaxAmountSource         string                  `json:"tax_amount_source,omitempty"`
+	TaxAmountConfidence     float64                 `json:"tax_amount_confidence,omitempty"`
+	SellerName              *string                 `json:"seller_name"`
+	SellerNameSource        string                  `json:"seller_name_source,omitempty"`
+	SellerNameConfidence    float64                 `json:"seller_name_confidence,omitempty"`
+	BuyerName               *string                 `json:"buyer_name"`
+	BuyerNameSource         string                  `json:"buyer_name_source,omitempty"`
+	BuyerNameConfidence     float64                 `json:"buyer_name_confidence,omitempty"`
+	Items                   []InvoiceLineItem       `json:"items,omitempty"`
+	RawText                 string                  `json:"raw_text"`
+	RawTextSource           string                  `json:"raw_text_source,omitempty"` // pymupdf/rapidocr
+	PrettyText              string                  `json:"pretty_text,omitempty"`
+	PDFZones                []PDFTextZonesPage      `json:"pdf_zones,omitempty"`
 	Trace                   *InvoiceExtractionTrace `json:"trace,omitempty"`
 }
 
@@ -596,16 +596,16 @@ func (s *OCRService) isGarbledText(text string) bool {
 }
 
 type PDFTextCLIResponse struct {
-	Success   bool   `json:"success"`
-	Text      string `json:"text"`
-	RawText   string `json:"raw_text,omitempty"`
-	ZonedText string `json:"zoned_text,omitempty"`
+	Success   bool               `json:"success"`
+	Text      string             `json:"text"`
+	RawText   string             `json:"raw_text,omitempty"`
+	ZonedText string             `json:"zoned_text,omitempty"`
 	Zones     []PDFTextZonesPage `json:"zones,omitempty"`
-	Layout    string `json:"layout,omitempty"` // zones|ordered|raw
-	Ordered   bool   `json:"ordered,omitempty"`
-	PageCount int    `json:"page_count,omitempty"`
-	Extractor string `json:"extractor,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Layout    string             `json:"layout,omitempty"` // zones|ordered|raw
+	Ordered   bool               `json:"ordered,omitempty"`
+	PageCount int                `json:"page_count,omitempty"`
+	Extractor string             `json:"extractor,omitempty"`
+	Error     string             `json:"error,omitempty"`
 }
 
 type PDFTextZonesSpan struct {
@@ -617,17 +617,17 @@ type PDFTextZonesSpan struct {
 }
 
 type PDFTextZonesRow struct {
-	Region string            `json:"region"`
-	Y0     float64           `json:"y0"`
-	Y1     float64           `json:"y1"`
-	Text   string            `json:"text"`
+	Region string             `json:"region"`
+	Y0     float64            `json:"y0"`
+	Y1     float64            `json:"y1"`
+	Text   string             `json:"text"`
 	Spans  []PDFTextZonesSpan `json:"spans,omitempty"`
 }
 
 type PDFTextZonesPage struct {
-	Page   int             `json:"page"`
-	Width  float64         `json:"width"`
-	Height float64         `json:"height"`
+	Page   int               `json:"page"`
+	Width  float64           `json:"width"`
+	Height float64           `json:"height"`
 	Rows   []PDFTextZonesRow `json:"rows,omitempty"`
 }
 
@@ -4830,10 +4830,10 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 			if pageH <= 0 {
 				pageH = 1
 			}
+			itemsOut := make([]spanItem, 0, 128)
+			buyerOut := make([]spanItem, 0, 128)
 			for _, r := range p.Rows {
 				region := strings.ToLower(strings.TrimSpace(r.Region))
-				// Some templates place the first line item (or its prefix) close to the buyer block,
-				// so include both buyer+items and later filter by table/header detection.
 				if region != "items" && region != "buyer" {
 					continue
 				}
@@ -4848,13 +4848,24 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 						continue
 					}
 					h := sp.Y1 - sp.Y0
-					out = append(out, spanItem{
+					dst := &buyerOut
+					if region == "items" {
+						dst = &itemsOut
+					}
+					*dst = append(*dst, spanItem{
 						PDFTextZonesSpan: sp,
 						xc:               (sp.X0 + sp.X1) / 2.0,
 						yc:               (sp.Y0 + sp.Y1) / 2.0,
 						h:                h,
 					})
 				}
+			}
+			// Prefer explicit "items" region spans; only fall back to buyer spans when items are missing.
+			// Buyer blocks are noisy and can easily be mistaken as line items (e.g. Didi invoices).
+			if len(itemsOut) > 0 {
+				out = itemsOut
+			} else {
+				out = buyerOut
 			}
 			break
 		}
@@ -5094,6 +5105,7 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 
 	looksLikeItemRow := func(r []spanItem) bool {
 		qtyRe := regexp.MustCompile(`^\d+(?:\.\d+)?$`)
+		moneyTokRe := regexp.MustCompile(`^[¥￥]?-?\d+(?:,\d{3})*\.\d{1,2}$`)
 		isShortHanToken := func(s string) bool {
 			s = strings.TrimSpace(s)
 			if s == "" {
@@ -5112,6 +5124,8 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 		}
 		hasQty := false
 		hasUnit := false
+		hasMoney := false
+		hasNameLike := false
 		for _, sp := range r {
 			t := strings.TrimSpace(sp.T)
 			if t == "" {
@@ -5124,8 +5138,19 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 			if qtyRe.MatchString(t) && sp.X0 >= 0.62*pageW {
 				hasQty = true
 			}
+			if moneyTokRe.MatchString(t) {
+				hasMoney = true
+			}
+			if sp.X0 <= 0.55*pageW && !qtyRe.MatchString(t) && !moneyTokRe.MatchString(t) {
+				rs := []rune(t)
+				if len(rs) > 0 && (strings.ContainsAny(t, "*") || unicode.Is(unicode.Han, rs[0])) {
+					hasNameLike = true
+				}
+			}
 		}
-		return hasQty && hasUnit
+		// Some templates (e.g. Didi transportation service e-invoice) omit a unit column and look like
+		// "<name> <amount> <qty>"; accept qty+money as a fallback.
+		return hasQty && hasNameLike && (hasUnit || hasMoney)
 	}
 
 	start := 0
@@ -5276,6 +5301,27 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 		spec = normalizeCell(spec)
 		unit = normalizeCell(unit)
 
+		stripTrailingMoneyTokens := func(s string) string {
+			fields := strings.Fields(s)
+			if len(fields) == 0 {
+				return s
+			}
+			for len(fields) > 0 {
+				last := strings.TrimSpace(fields[len(fields)-1])
+				// Only strip decimal money-like tokens; do not touch integers (avoid damaging names like "iPhone 15").
+				if regexp.MustCompile(`^[¥￥]?-?\d+(?:,\d{3})*\.\d{1,2}$`).MatchString(last) {
+					fields = fields[:len(fields)-1]
+					continue
+				}
+				break
+			}
+			return strings.TrimSpace(strings.Join(fields, " "))
+		}
+		if qty != nil {
+			name = stripTrailingMoneyTokens(name)
+			spec = stripTrailingMoneyTokens(spec)
+		}
+
 		// Some PDFs render spec/unit as short tokens (e.g. "项") and OCR/zone splitting may leak them into the name column.
 		// Best-effort: peel trailing unit/spec tokens from the name when spec/unit columns were not captured.
 		name, spec, unit = peelTrailingUnitSpecTokensFromItemName(name, spec, unit)
@@ -5328,6 +5374,10 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 	for _, it := range out {
 		n := strings.TrimSpace(it.Name)
 		if n == "" || isStop(n) {
+			continue
+		}
+		compact := strings.Join(strings.Fields(n), "")
+		if strings.Contains(compact, "购买方") || strings.Contains(compact, "销售方") || strings.Contains(compact, "纳税人识别号") || strings.Contains(compact, "统一社会信用代码") {
 			continue
 		}
 		clean = append(clean, it)
@@ -8035,30 +8085,30 @@ func (s *OCRService) ParseInvoiceDataWithMeta(text string, meta *PDFTextCLIRespo
 		return false
 	}
 
-		railTicketDetected := isRailwayETicket(parsedText) || isRailwayETicket(text)
-		if railTicketDetected {
-			// Invoice date: 开票日期 / 章开票日期
-			if m := regexp.MustCompile(`(?:开票日期|章开票日期)[:：]?\s*(\d{4}年\d{1,2}月\d{1,2}日)`).FindStringSubmatch(parsedText); len(m) > 1 {
-				setStringWithSourceAndConfidence(&data.InvoiceDate, &data.InvoiceDateSource, &data.InvoiceDateConfidence, m[1], "rail_ticket_date", 0.9)
-			}
+	railTicketDetected := isRailwayETicket(parsedText) || isRailwayETicket(text)
+	if railTicketDetected {
+		// Invoice date: 开票日期 / 章开票日期
+		if m := regexp.MustCompile(`(?:开票日期|章开票日期)[:：]?\s*(\d{4}年\d{1,2}月\d{1,2}日)`).FindStringSubmatch(parsedText); len(m) > 1 {
+			setStringWithSourceAndConfidence(&data.InvoiceDate, &data.InvoiceDateSource, &data.InvoiceDateConfidence, m[1], "rail_ticket_date", 0.9)
+		}
 
-			// Buyer: 购买方名称
-			if m := regexp.MustCompile(`购买方名称[:：]?\s*([^\n\r]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
-				val := cleanupName(strings.TrimSpace(m[1]))
-				if val != "" && val != "\u4e2a\u4eba" && !isBadPartyNameCandidate(val) {
-					setStringWithSourceAndConfidence(&data.BuyerName, &data.BuyerNameSource, &data.BuyerNameConfidence, val, "rail_ticket_buyer", 0.9)
-				}
+		// Buyer: 购买方名称
+		if m := regexp.MustCompile(`购买方名称[:：]?\s*([^\n\r]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
+			val := cleanupName(strings.TrimSpace(m[1]))
+			if val != "" && val != "\u4e2a\u4eba" && !isBadPartyNameCandidate(val) {
+				setStringWithSourceAndConfidence(&data.BuyerName, &data.BuyerNameSource, &data.BuyerNameConfidence, val, "rail_ticket_buyer", 0.9)
+			}
 		}
 
 		// Seller: railway e-tickets are issued by China Railway; OCR may mistakenly pick tax-bureau headers as "seller".
 		setStringWithSourceAndConfidence(&data.SellerName, &data.SellerNameSource, &data.SellerNameConfidence, "\u4e2d\u56fd\u94c1\u8def", "rail_ticket_seller", 0.85)
 
-			// Amount: 票价
-			if m := regexp.MustCompile(`票价[:：]?\s*(?:￥|¥)?\s*([\d,.]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
-				if amt := parseAmount(m[1]); amt != nil {
-					setAmountWithSourceAndConfidence(&data.Amount, &data.AmountSource, &data.AmountConfidence, amt, "rail_ticket_price", 0.9)
-				}
+		// Amount: 票价
+		if m := regexp.MustCompile(`票价[:：]?\s*(?:￥|¥)?\s*([\d,.]+)`).FindStringSubmatch(parsedText); len(m) > 1 {
+			if amt := parseAmount(m[1]); amt != nil {
+				setAmountWithSourceAndConfidence(&data.Amount, &data.AmountSource, &data.AmountConfidence, amt, "rail_ticket_price", 0.9)
 			}
+		}
 
 		// Build a simple 1-line item (route + train + seat).
 		if len(data.Items) == 0 {
@@ -8160,6 +8210,10 @@ func (s *OCRService) ParseInvoiceDataWithMeta(text string, meta *PDFTextCLIRespo
 	}
 
 	invoiceNumRegexes := []*regexp.Regexp{
+		// Some OCR outputs merge headers into a single line like:
+		// "发票号码: 开票日期: <number> <date>".
+		regexp.MustCompile(`(?s)发票号码[：:]?.{0,40}?开票日期[：:]?.{0,40}?(\d{20,25})`),
+		regexp.MustCompile(`(?s)发票号码[：:]?.{0,80}?(\d{20,25})`),
 		regexp.MustCompile(`发票号码[：:]?\s*[\n\r]?\s*(\d{20,25}|\d{8})`),
 		regexp.MustCompile(`发票代码[：:]?\s*[\n\r]?\s*(\d{10,12})`),
 		regexp.MustCompile(`No[\.:]?\s*[\n\r]?\s*(\d+)`),
