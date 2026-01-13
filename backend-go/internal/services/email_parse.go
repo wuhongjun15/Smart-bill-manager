@@ -141,7 +141,7 @@ func isItineraryPDFName(name string) bool {
 		return false
 	}
 	// Common wording in Chinese invoice emails.
-	if strings.Contains(n, "行程单") || strings.Contains(n, "电子行程单") {
+	if strings.Contains(n, "行程单") || strings.Contains(n, "电子行程单") || strings.Contains(n, "行程报销单") {
 		return true
 	}
 	// Some providers use English.
@@ -149,6 +149,49 @@ func isItineraryPDFName(name string) bool {
 		return true
 	}
 	return false
+}
+
+// isAllowedInvoiceItineraryPDFName returns true when an itinerary-like PDF should be treated as an invoice.
+// Only whitelist formats we have explicit parsing support for (air ticket itinerary / railway e-ticket).
+func isAllowedInvoiceItineraryPDFName(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if n == "" {
+		return false
+	}
+	if !isItineraryPDFName(n) {
+		return false
+	}
+
+	// Airline itineraries.
+	if strings.Contains(n, "航空") ||
+		strings.Contains(n, "航班") ||
+		strings.Contains(n, "机票") ||
+		strings.Contains(n, "air") ||
+		strings.Contains(n, "flight") {
+		return true
+	}
+
+	// Railway related (high-speed rail / train).
+	if strings.Contains(n, "铁路") ||
+		strings.Contains(n, "高铁") ||
+		strings.Contains(n, "火车") ||
+		strings.Contains(n, "train") ||
+		strings.Contains(n, "rail") {
+		return true
+	}
+
+	return false
+}
+
+func shouldParseExtraPDFAsInvoice(filename string) bool {
+	n := strings.TrimSpace(filename)
+	if n == "" {
+		return false
+	}
+	if isItineraryPDFName(n) {
+		return isAllowedInvoiceItineraryPDFName(n)
+	}
+	return true
 }
 
 func contentTypeLowerFromHeader(h interface{}) string {
@@ -367,7 +410,13 @@ func extractInvoiceArtifactsFromEmail(mr *mail.Reader) (pdfFilename string, pdfB
 				score += 25
 			}
 			if isItineraryPDFName(n) {
-				score -= 80
+				if isAllowedInvoiceItineraryPDFName(n) {
+					// Keep airline/rail itineraries eligible as invoice PDFs, but still prefer VAT invoices when present.
+					score -= 20
+				} else {
+					// Most "itineraries" (e.g. ride-hailing trip tables) are not invoices; strongly de-prioritize.
+					score -= 80
+				}
 			}
 			if strings.HasSuffix(n, ".pdf") {
 				score += 1
@@ -817,6 +866,23 @@ func (s *EmailService) ParseEmailLogCtx(ctx context.Context, ownerUserID string,
 
 			saved, p, sz, sh, err2 := s.savePDFToUploads(strings.TrimSpace(logRow.OwnerUserID), name, a.Bytes)
 			if err2 != nil {
+				continue
+			}
+
+			// For itinerary-like PDFs, only parse as invoices when explicitly supported (air/rail).
+			// Other itinerary PDFs (e.g. Didi trip tables) should not become standalone invoices.
+			if !shouldParseExtraPDFAsInvoice(name) {
+				if inv != nil {
+					_, _ = s.invoiceService.CreateAttachmentCtx(ctx, strings.TrimSpace(logRow.OwnerUserID), inv.ID, CreateInvoiceAttachmentInput{
+						Kind:         "itinerary",
+						Filename:     saved,
+						OriginalName: name,
+						FilePath:     p,
+						FileSize:     &sz,
+						FileSHA256:   sh,
+						Source:       "email",
+					})
+				}
 				continue
 			}
 
