@@ -65,3 +65,41 @@ func TestExtractInvoiceLineItemsFromPDFZones_DidiStripsAmountAndSkipsBuyer(t *te
 		t.Fatalf("expected qty 1, got %+v", items[0].Quantity)
 	}
 }
+
+func TestExtractInvoiceLineItemsFromPDFZones_DidiInfersQtyWhenMiscolumned(t *testing.T) {
+	pages := []PDFTextZonesPage{
+		{
+			Page:   1,
+			Width:  1000,
+			Height: 1000,
+			Rows: []PDFTextZonesRow{
+				{
+					Region: "items",
+					Y0:     600,
+					Y1:     620,
+					Text:   "*运输服务*客运服务费68.34 1",
+					Spans: []PDFTextZonesSpan{
+						// Amount glued into the name span.
+						{X0: 80, Y0: 600, X1: 420, Y1: 620, T: "*运输服务*客运服务费68.34"},
+						// Qty token lands left of the qty column boundary (mis-columned).
+						{X0: 520, Y0: 600, X1: 535, Y1: 620, T: "1"},
+					},
+				},
+			},
+		},
+	}
+
+	items := extractInvoiceLineItemsFromPDFZones(pages)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %+v", items)
+	}
+	if items[0].Name != "*运输服务*客运服务费" {
+		t.Fatalf("expected name parsed, got %q", items[0].Name)
+	}
+	if items[0].Spec != "" {
+		t.Fatalf("expected empty spec, got %q", items[0].Spec)
+	}
+	if items[0].Quantity == nil || *items[0].Quantity != 1 {
+		t.Fatalf("expected qty 1, got %+v", items[0].Quantity)
+	}
+}

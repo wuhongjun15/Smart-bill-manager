@@ -5102,10 +5102,11 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 
 	moneyRe := regexp.MustCompile(`-?\d+(?:,\d{3})*\.\d{1,2}`)
 	rateRe := regexp.MustCompile(`\d{1,2}%`)
+	moneyTokRe := regexp.MustCompile(`^[¥￥]?-?\d+(?:,\d{3})*\.\d{1,2}$`)
+	qtyTokRe := regexp.MustCompile(`^\d+(?:\.\d+)?$`)
 
 	looksLikeItemRow := func(r []spanItem) bool {
-		qtyRe := regexp.MustCompile(`^\d+(?:\.\d+)?$`)
-		moneyTokRe := regexp.MustCompile(`^[¥￥]?-?\d+(?:,\d{3})*\.\d{1,2}$`)
+		qtyRe := qtyTokRe
 		isShortHanToken := func(s string) bool {
 			s = strings.TrimSpace(s)
 			if s == "" {
@@ -5202,6 +5203,57 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 		specParts := cells["spec"]
 		unitParts := cells["unit"]
 		qty := parseQty(strings.Join(cells["qty"], " "))
+
+		rowHasMoney := false
+		for _, sp := range ordered {
+			t := strings.TrimSpace(sp.T)
+			if t == "" {
+				continue
+			}
+			if moneyTokRe.MatchString(t) || moneyRe.MatchString(t) {
+				rowHasMoney = true
+				break
+			}
+		}
+		// Didi-like rows sometimes render as "<name><amount> <qty>" without a unit, and the qty token
+		// may end up left of the quantity column boundary. Infer qty from a right-side numeric token
+		// when we see money in the row.
+		if qty == nil && rowHasMoney {
+			bestX := -1.0
+			bestTok := ""
+			for _, sp := range ordered {
+				t := strings.TrimSpace(sp.T)
+				if t == "" || !qtyTokRe.MatchString(t) {
+					continue
+				}
+				// Avoid grabbing "1" from the name area; prefer the right half of the page.
+				if sp.X0 < 0.45*pageW {
+					continue
+				}
+				if sp.X0 > bestX {
+					bestX = sp.X0
+					bestTok = t
+				}
+			}
+			if bestTok != "" {
+				if f := parseQty(bestTok); f != nil && *f > 0 && *f <= 9999 {
+					qty = f
+					// If the inferred qty leaked into spec/unit columns, drop it.
+					filterTok := func(in []string, tok string) []string {
+						out := make([]string, 0, len(in))
+						for _, s := range in {
+							if strings.TrimSpace(s) == tok {
+								continue
+							}
+							out = append(out, s)
+						}
+						return out
+					}
+					specParts = filterTok(specParts, bestTok)
+					unitParts = filterTok(unitParts, bestTok)
+				}
+			}
+		}
 
 		isShortHanToken := func(s string) bool {
 			s = strings.TrimSpace(s)
@@ -5302,22 +5354,40 @@ func extractInvoiceLineItemsFromPDFZones(pages []PDFTextZonesPage) []InvoiceLine
 		unit = normalizeCell(unit)
 
 		stripTrailingMoneyTokens := func(s string) string {
-			fields := strings.Fields(s)
-			if len(fields) == 0 {
+			s = strings.TrimSpace(s)
+			if s == "" {
 				return s
 			}
+			fields := strings.Fields(s)
+			// Strip whitespace-delimited trailing prices.
 			for len(fields) > 0 {
 				last := strings.TrimSpace(fields[len(fields)-1])
 				// Only strip decimal money-like tokens; do not touch integers (avoid damaging names like "iPhone 15").
-				if regexp.MustCompile(`^[¥￥]?-?\d+(?:,\d{3})*\.\d{1,2}$`).MatchString(last) {
+				if moneyTokRe.MatchString(last) {
 					fields = fields[:len(fields)-1]
 					continue
 				}
 				break
 			}
-			return strings.TrimSpace(strings.Join(fields, " "))
+			s = strings.TrimSpace(strings.Join(fields, " "))
+			// Strip glued suffix prices like "客运服务费68.34".
+			if loc := regexp.MustCompile(`(?i)([¥￥]?-?\d+(?:,\d{3})*\.\d{1,2})$`).FindStringIndex(s); loc != nil && loc[0] > 0 {
+				prefix := strings.TrimSpace(s[:loc[0]])
+				// Only apply when the prefix has at least one Han rune (avoid stripping real specs like "3.5mm").
+				hasHan := false
+				for _, r := range prefix {
+					if unicode.Is(unicode.Han, r) {
+						hasHan = true
+						break
+					}
+				}
+				if hasHan {
+					s = prefix
+				}
+			}
+			return strings.TrimSpace(s)
 		}
-		if qty != nil {
+		if qty != nil || rowHasMoney {
 			name = stripTrailingMoneyTokens(name)
 			spec = stripTrailingMoneyTokens(spec)
 		}
