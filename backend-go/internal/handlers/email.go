@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -286,6 +287,12 @@ func (h *EmailHandler) ManualCheck(c *gin.Context) {
 
 	var fullOpts *services.FullSyncOptions
 	if full {
+		mode := strings.TrimSpace(c.Query("mode"))
+		if mode == "" {
+			mode = "latest"
+		}
+		fullOpts = &services.FullSyncOptions{Mode: mode}
+
 		limit := 0
 		if v := c.Query("limit"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil {
@@ -298,9 +305,8 @@ func (h *EmailHandler) ManualCheck(c *gin.Context) {
 				beforeUID = uint32(n)
 			}
 		}
-		if limit != 0 || beforeUID != 0 {
-			fullOpts = &services.FullSyncOptions{Limit: limit, BeforeUID: beforeUID}
-		}
+		fullOpts.Limit = limit
+		fullOpts.BeforeUID = beforeUID
 	}
 
 	success, message, newEmails := h.emailService.ManualCheckWithOptions(middleware.GetEffectiveUserID(c), id, full, fullOpts)

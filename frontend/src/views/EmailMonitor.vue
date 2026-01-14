@@ -101,7 +101,7 @@
                   size="small"
                   class="p-button-outlined"
                   icon="pi pi-download"
-                  :title="'全量同步'"
+                  :title="'同步最新邮件（最近500封）'"
                   :loading="fullSyncLoading === row.id"
                   @click="handleManualFullSync(row.id)"
                 />
@@ -547,7 +547,7 @@ const refreshAllLogs = async () => {
         continue
       }
       try {
-        const res = await emailApi.manualFullSync(cfg.id)
+        const res = await emailApi.manualFullSync(cfg.id, { mode: 'latest' })
         if (res.data?.success) {
           ok++
           totalNew += res.data.data?.newEmails || 0
@@ -855,7 +855,7 @@ const runManualFullSync = async (id: string, stopAndResume: boolean) => {
     }
 
     // Backend will auto-page older messages based on the oldest UID already logged.
-    const res = await emailApi.manualFullSync(id)
+    const res = await emailApi.manualFullSync(id, { mode: 'latest' })
     if (res.data.success) {
       toast.add({ severity: 'success', summary: res.data.message || '全量同步完成', life: 2500 })
       const newEmails = res.data.data?.newEmails || 0

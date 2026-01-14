@@ -582,6 +582,7 @@ func (s *EmailService) monitorInbox(configID string, ownerUserID string, fullSyn
 type FullSyncOptions struct {
 	Limit     int
 	BeforeUID uint32
+	Mode      string
 }
 
 func clampFullSyncLimit(v int) int {
@@ -730,18 +731,20 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 					diag("Y2024", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
 				}
 
-				// Default behavior (no limit passed) should be "sync all" from newest to oldest (rate-limited).
-				// Users can still pass `limit` to reduce scope for risk-control reasons.
+				mode := "latest"
 				limit := 0
 				var beforeUID uint32
 				if fullOpts != nil {
 					limit = fullOpts.Limit
 					beforeUID = fullOpts.BeforeUID
+					if v := strings.TrimSpace(fullOpts.Mode); v != "" {
+						mode = strings.ToLower(v)
+					}
 				}
-				unlimited := limit == 0
-				if !unlimited {
-					limit = clampFullSyncLimit(limit)
+				if mode != "all" && mode != "backfill" {
+					mode = "latest"
 				}
+				limit = clampFullSyncLimit(limit)
 
 				// If requested, only fetch UIDs older than beforeUID (paged full sync).
 				if beforeUID > 0 {
@@ -757,8 +760,11 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 					)
 				}
 
-				// Limit scope if requested, otherwise apply a hard safety cap for extremely large mailboxes.
-				if unlimited {
+				// Scope selection:
+				// - latest: only sync the newest `limit` messages (default 500) so one click gives "latest-first" UI.
+				// - all: sync everything (still rate-limited; with a safety cap).
+				// - backfill: typically used with beforeUID to sync older history in chunks.
+				if mode == "all" {
 					maxUIDs := getFullSyncSafetyMaxUIDs()
 					if len(uids) > maxUIDs {
 						log.Printf(
@@ -769,8 +775,10 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 						)
 						uids = uids[len(uids)-maxUIDs:]
 					}
-				} else if len(uids) > limit {
-					uids = uids[len(uids)-limit:]
+				} else {
+					if len(uids) > limit {
+						uids = uids[len(uids)-limit:]
+					}
 				}
 				if len(uids) == 0 {
 					log.Printf("[Email Monitor] Full sync: no UIDs to fetch after paging/limit (config=%s)", configID)
@@ -785,7 +793,8 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 				const jitter = 250 * time.Millisecond
 				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 				log.Printf(
-					"[Email Monitor] Full sync plan: fetchCount=%d uidMin=%d uidMax=%d beforeUID=%d batchSize=%d delay=%s jitter=%s newestFirst=true (config=%s)",
+					"[Email Monitor] Full sync plan: mode=%s fetchCount=%d uidMin=%d uidMax=%d beforeUID=%d batchSize=%d delay=%s jitter=%s newestFirst=true (config=%s)",
+					mode,
 					len(uids),
 					winMin,
 					winMax,
@@ -1311,10 +1320,10 @@ func (s *EmailService) ManualCheckWithOptions(ownerUserID string, configID strin
 	// Auto-paging for full sync: when the caller does not specify beforeUid, continue syncing older messages
 	// based on the oldest UID already logged in DB. This avoids relying on the UI's limited log window.
 	if full {
-		needsAutoBefore := fullOpts == nil
+		needsAutoBefore := fullOpts != nil && strings.EqualFold(strings.TrimSpace(fullOpts.Mode), "backfill") && fullOpts.BeforeUID == 0
 		if needsAutoBefore {
 			if minUID, err := s.repo.GetMinUIDForMailboxCtx(context.Background(), ownerUserID, configID, "INBOX"); err == nil && minUID > 0 {
-				fullOpts = &FullSyncOptions{BeforeUID: minUID}
+				fullOpts.BeforeUID = minUID
 				log.Printf("[Email Monitor] Full sync auto-beforeUID=%d (config=%s)", minUID, configID)
 			}
 		}
