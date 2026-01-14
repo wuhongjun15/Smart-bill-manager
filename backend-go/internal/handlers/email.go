@@ -283,7 +283,27 @@ func (h *EmailHandler) GetMonitoringStatus(c *gin.Context) {
 func (h *EmailHandler) ManualCheck(c *gin.Context) {
 	id := c.Param("id")
 	full := c.Query("full") == "1" || c.Query("full") == "true"
-	success, message, newEmails := h.emailService.ManualCheck(middleware.GetEffectiveUserID(c), id, full)
+
+	var fullOpts *services.FullSyncOptions
+	if full {
+		limit := 0
+		if v := c.Query("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				limit = n
+			}
+		}
+		var beforeUID uint32
+		if v := c.Query("beforeUid"); v != "" {
+			if n, err := strconv.ParseUint(v, 10, 32); err == nil {
+				beforeUID = uint32(n)
+			}
+		}
+		if limit != 0 || beforeUID != 0 {
+			fullOpts = &services.FullSyncOptions{Limit: limit, BeforeUID: beforeUID}
+		}
+	}
+
+	success, message, newEmails := h.emailService.ManualCheckWithOptions(middleware.GetEffectiveUserID(c), id, full, fullOpts)
 
 	c.JSON(200, gin.H{
 		"success": success,

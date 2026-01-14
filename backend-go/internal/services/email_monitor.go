@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -489,7 +490,7 @@ func (s *EmailService) monitorInbox(configID string, ownerUserID string, fullSyn
 	// On first run (no last_check), do NOT scan the whole mailbox (risk control on huge inboxes).
 	// Instead, fast-forward to the current UIDNEXT and only start logging new emails.
 	if fullSync {
-		if _, err := s.fetchEmails(ownerUserID, configID, c, true); err != nil {
+		if _, err := s.fetchEmails(ownerUserID, configID, c, true, nil); err != nil {
 			log.Printf("[Email Monitor] Full sync error: %v", err)
 		}
 	} else {
@@ -500,7 +501,7 @@ func (s *EmailService) monitorInbox(configID string, ownerUserID string, fullSyn
 				log.Printf("[Email Monitor] Initialized last_check=%s; skip historical scan (uidNext=%d)", now, mbox.UidNext)
 			}
 		}
-		if _, err := s.fetchEmails(ownerUserID, configID, c, false); err != nil {
+		if _, err := s.fetchEmails(ownerUserID, configID, c, false, nil); err != nil {
 			log.Printf("[Email Monitor] Fetch error: %v", err)
 		}
 	}
@@ -541,7 +542,7 @@ func (s *EmailService) monitorInbox(configID string, ownerUserID string, fullSyn
 			case <-timer.C:
 				if pending {
 					pending = false
-					if _, err := s.fetchEmails(ownerUserID, configID, c, false); err != nil {
+					if _, err := s.fetchEmails(ownerUserID, configID, c, false, nil); err != nil {
 						log.Printf("[Email Monitor] Fetch error: %v", err)
 					}
 				}
@@ -567,7 +568,24 @@ func (s *EmailService) monitorInbox(configID string, ownerUserID string, fullSyn
 	s.mu.Unlock()
 }
 
-func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *client.Client, full bool) (int, error) {
+type FullSyncOptions struct {
+	Limit     int
+	BeforeUID uint32
+}
+
+func clampFullSyncLimit(v int) int {
+	const defaultLimit = 500
+	const maxLimit = 5000
+	if v <= 0 {
+		return defaultLimit
+	}
+	if v > maxLimit {
+		return maxLimit
+	}
+	return v
+}
+
+func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *client.Client, full bool, fullOpts *FullSyncOptions) (int, error) {
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	configID = strings.TrimSpace(configID)
 	if ownerUserID == "" || configID == "" || c == nil {
@@ -617,10 +635,24 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 
 				uidsAll := uids
 
+				limit := 500
+				var beforeUID uint32
+				if fullOpts != nil {
+					limit = fullOpts.Limit
+					beforeUID = fullOpts.BeforeUID
+				}
+				limit = clampFullSyncLimit(limit)
+
+				// If requested, only fetch UIDs older than beforeUID (paged full sync).
+				if beforeUID > 0 {
+					// UIDs are ascending; find first >= beforeUID, keep everything before it.
+					cut := sort.Search(len(uids), func(i int) bool { return uids[i] >= beforeUID })
+					uids = uids[:cut]
+				}
+
 				// Safety limit for huge mailboxes (QQ risk control).
-				const maxUIDs = 500
-				if len(uids) > maxUIDs {
-					uids = uids[len(uids)-maxUIDs:]
+				if len(uids) > limit {
+					uids = uids[len(uids)-limit:]
 				}
 
 				// Rate-limited pipeline: fetch in small batches and sleep between batches to reduce IMAP bursts.
@@ -629,8 +661,9 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 				const jitter = 250 * time.Millisecond
 				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 				log.Printf(
-					"[Email Monitor] Full sync plan: limit=%d batchSize=%d delay=%s jitter=%s newestFirst=true",
+					"[Email Monitor] Full sync plan: limit=%d beforeUID=%d batchSize=%d delay=%s jitter=%s newestFirst=true",
 					len(uids),
+					beforeUID,
 					batchSize,
 					baseDelay,
 					jitter,
@@ -656,10 +689,11 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 					}
 				}
 
-				// Reconcile deletions after a successful full-sync UID SEARCH ALL.
-				// Use the full UID set returned by SEARCH ALL (do not use the safety-limited slice),
-				// otherwise older logs may be incorrectly marked as deleted.
-				_ = s.reconcileDeletedLogs(ownerUserID, configID, "INBOX", uidsAll)
+				// Reconcile deletions only when we effectively scanned the whole mailbox.
+				// Paged/limited syncs should not mark unseen older logs as deleted.
+				if beforeUID == 0 && len(uids) == len(uidsAll) {
+					_ = s.reconcileDeletedLogs(ownerUserID, configID, "INBOX", uidsAll)
+				}
 			}
 		}
 	} else {
@@ -1113,6 +1147,10 @@ func (s *EmailService) GetMonitoringStatusCtx(ctx context.Context, ownerUserID s
 
 // ManualCheck performs a manual email check
 func (s *EmailService) ManualCheck(ownerUserID string, configID string, full bool) (bool, string, int) {
+	return s.ManualCheckWithOptions(ownerUserID, configID, full, nil)
+}
+
+func (s *EmailService) ManualCheckWithOptions(ownerUserID string, configID string, full bool, fullOpts *FullSyncOptions) (bool, string, int) {
 	config, err := s.repo.FindConfigByIDForOwner(ownerUserID, configID)
 	if err != nil {
 		return false, "配置不存在", 0
@@ -1135,7 +1173,7 @@ func (s *EmailService) ManualCheck(ownerUserID string, configID string, full boo
 		return false, fmt.Sprintf("打开收件箱失败: %v", err), 0
 	}
 
-	count, fetchErr := s.fetchEmails(ownerUserID, configID, c, full)
+	count, fetchErr := s.fetchEmails(ownerUserID, configID, c, full, fullOpts)
 	if fetchErr != nil {
 		if full {
 			return false, fmt.Sprintf("全量同步失败: %v", fetchErr), 0
