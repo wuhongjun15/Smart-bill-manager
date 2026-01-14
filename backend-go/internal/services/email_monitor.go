@@ -628,6 +628,12 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 				return newLogs, err
 			}
 		} else {
+			// IMAP servers are not required to return UIDs in sorted order.
+			// We rely on ascending order for paging (beforeUID) and tail-slicing (newest window).
+			if len(uids) > 1 {
+				sort.Slice(uids, func(i, j int) bool { return uids[i] < uids[j] })
+			}
+
 			if len(uids) == 0 {
 				_ = s.reconcileDeletedLogs(ownerUserID, configID, "INBOX", uids)
 			} else {
