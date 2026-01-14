@@ -29,6 +29,11 @@ func shouldLogEachEmailInSync() bool {
 	return v == "1" || v == "true" || v == "yes" || v == "on"
 }
 
+func shouldEmailDiagSearch() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("SBM_EMAIL_DIAG_SEARCH")))
+	return v == "1" || v == "true" || v == "yes" || v == "on"
+}
+
 func formatIMAPLoginError(imapHost string, err error) string {
 	base := ""
 	if err != nil {
@@ -620,6 +625,20 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 	}
 
 	if full {
+		// Log mailbox stats to verify UID range and help diagnose "missing year" reports.
+		var inboxStatus *imap.MailboxStatus
+		if mbox, err := c.Select("INBOX", false); err == nil && mbox != nil {
+			inboxStatus = mbox
+			log.Printf(
+				"[Email Monitor] Full sync mailbox: messages=%d uidNext=%d (config=%s)",
+				mbox.Messages,
+				mbox.UidNext,
+				configID,
+			)
+		} else if err != nil {
+			log.Printf("[Email Monitor] Full sync Select INBOX error: %v (config=%s)", err, configID)
+		}
+
 		// Some IMAP servers behave unexpectedly with "UID FETCH 1:*" for large mailboxes.
 		// Use a two-step approach: UID SEARCH ALL -> chunked UID FETCH.
 		criteria := imap.NewSearchCriteria() // defaults to ALL
@@ -651,8 +670,49 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 					allMax,
 					configID,
 				)
+				if inboxStatus != nil && inboxStatus.UidNext > 0 && allMax != inboxStatus.UidNext-1 {
+					log.Printf(
+						"[Email Monitor] Full sync warning: uidMax=%d != uidNext-1=%d (server may hide mailboxes or truncate SEARCH) (config=%s)",
+						allMax,
+						inboxStatus.UidNext-1,
+						configID,
+					)
+				}
 
 				uidsAll := uids
+
+				if shouldEmailDiagSearch() {
+					// IMAP SINCE/BEFORE uses INTERNALDATE (server receive date).
+					diag := func(label string, since, before time.Time) {
+						crit := imap.NewSearchCriteria()
+						crit.Since = since
+						crit.Before = before
+						duids, derr := c.UidSearch(crit)
+						if derr != nil {
+							log.Printf("[Email Monitor] Full sync diag %s: UidSearch error: %v (config=%s)", label, derr, configID)
+							return
+						}
+						if len(duids) > 1 {
+							sort.Slice(duids, func(i, j int) bool { return duids[i] < duids[j] })
+						}
+						if len(duids) == 0 {
+							log.Printf("[Email Monitor] Full sync diag %s: count=0 (config=%s)", label, configID)
+							return
+						}
+						log.Printf(
+							"[Email Monitor] Full sync diag %s: count=%d uidMin=%d uidMax=%d (config=%s)",
+							label,
+							len(duids),
+							duids[0],
+							duids[len(duids)-1],
+							configID,
+						)
+					}
+
+					diag("Y2026", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))
+					diag("Y2025", time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+					diag("Y2024", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+				}
 
 				limit := 500
 				var beforeUID uint32
@@ -739,6 +799,18 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 					_ = s.reconcileDeletedLogs(ownerUserID, configID, "INBOX", uidsAll)
 				}
 			}
+		}
+		// Summary to confirm paging progress (helps diagnose "stuck" ranges).
+		minUID, minErr := s.repo.GetMinUIDForMailboxCtx(context.Background(), ownerUserID, configID, "INBOX")
+		maxUID, maxErr := s.repo.GetMaxUIDForMailboxCtx(context.Background(), ownerUserID, configID, "INBOX")
+		if minErr == nil && maxErr == nil {
+			log.Printf(
+				"[Email Monitor] Full sync done: newLogs=%d dbMinUID=%d dbMaxUID=%d (config=%s)",
+				newLogs,
+				minUID,
+				maxUID,
+				configID,
+			)
 		}
 	} else {
 		// Incremental sync: avoid "SEARCH UNSEEN" on large inboxes; it can match a huge backlog and trigger risk control.
