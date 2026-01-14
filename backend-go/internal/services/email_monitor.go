@@ -1314,10 +1314,7 @@ func (s *EmailService) ManualCheckWithOptions(ownerUserID string, configID strin
 		needsAutoBefore := fullOpts == nil
 		if needsAutoBefore {
 			if minUID, err := s.repo.GetMinUIDForMailboxCtx(context.Background(), ownerUserID, configID, "INBOX"); err == nil && minUID > 0 {
-				if fullOpts == nil {
-					fullOpts = &FullSyncOptions{}
-				}
-				fullOpts.BeforeUID = minUID
+				fullOpts = &FullSyncOptions{BeforeUID: minUID}
 				log.Printf("[Email Monitor] Full sync auto-beforeUID=%d (config=%s)", minUID, configID)
 			}
 		}
