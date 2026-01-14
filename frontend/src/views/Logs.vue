@@ -23,6 +23,16 @@
               class="sources"
               @change="handleSourcesChange"
             />
+            <MultiSelect
+              v-model="selectedCategories"
+              :options="categoryOptions"
+              optionLabel="label"
+              optionValue="name"
+              display="chip"
+              :placeholder="'\u9009\u62E9\u65E5\u5FD7\u7C7B\u522B'"
+              :maxSelectedLabels="2"
+              class="sources"
+            />
             <span class="p-input-icon-left">
               <i class="pi pi-filter" />
               <InputText v-model="filter" :placeholder="'\u8FC7\u6EE4\u5173\u952E\u8BCD'" />
@@ -62,13 +72,14 @@ import { useToast } from 'primevue/usetoast'
 import api from '@/api/auth'
 
 type LogSource = { name: string; available: boolean }
-type LogEvent = { type: 'log' | 'ping'; timestamp: string; source?: string; message?: string }
+type LogEvent = { type: 'log' | 'ping'; timestamp: string; source?: string; message?: string; category?: string }
 
 const toast = useToast()
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
 const sources = ref<LogSource[]>([])
 const selectedSources = ref<string[]>(['backend_out', 'backend_err'])
+const selectedCategories = ref<string[]>([])
 
 const logs = ref<LogEvent[]>([])
 const connected = ref(false)
@@ -88,10 +99,41 @@ const sourceOptions = computed(() =>
   })),
 )
 
+const inferCategory = (evt: LogEvent): string => {
+  const msg = String(evt.message || '')
+  // Prefer bracket tags that we already use in backend logs, e.g. "[Email Monitor] ..."
+  const m = msg.match(/\[([^\]]+)\]/)
+  if (m?.[1]) {
+    return m[1].trim().toLowerCase().replace(/\s+/g, '_')
+  }
+  // Fall back to broad source-based categories.
+  const src = String(evt.source || '').toLowerCase()
+  if (src.includes('nginx')) return 'nginx'
+  if (src.includes('backend')) return 'backend'
+  return 'other'
+}
+
+const categoryOptions = computed(() => {
+  const set = new Set<string>()
+  for (const l of logs.value) {
+    if (l.type !== 'log') continue
+    const cat = String(l.category || '').trim()
+    if (cat) set.add(cat)
+  }
+  return Array.from(set)
+    .sort()
+    .map((c) => ({ name: c, label: c }))
+})
+
 const filteredLogs = computed(() => {
   const q = filter.value.trim()
-  if (!q) return logs.value
-  return logs.value.filter((l) => (l.message || '').includes(q) || (l.source || '').includes(q))
+  const cats = selectedCategories.value
+  return logs.value.filter((l) => {
+    if (l.type !== 'log') return false
+    if (cats.length > 0 && !cats.includes(String(l.category || ''))) return false
+    if (!q) return true
+    return (l.message || '').includes(q) || (l.source || '').includes(q)
+  })
 })
 
 const formatTs = (ts: string) => {
@@ -117,6 +159,7 @@ const scrollToBottom = async () => {
 
 const appendLog = (evt: LogEvent) => {
   if (evt.type !== 'log') return
+  evt.category = inferCategory(evt)
   logs.value.push(evt)
   if (logs.value.length > 2000) {
     logs.value.splice(0, logs.value.length - 2000)
