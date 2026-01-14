@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -595,6 +596,21 @@ func clampFullSyncLimit(v int) int {
 	return v
 }
 
+func getFullSyncSafetyMaxUIDs() int {
+	// Hard cap to avoid accidentally trying to sync an extremely large mailbox in one request.
+	// Still rate-limited, but could otherwise run for hours and look "stuck" in UI.
+	const defaultMax = 50000
+	v := strings.TrimSpace(os.Getenv("SBM_EMAIL_FULLSYNC_MAX_UIDS"))
+	if v == "" {
+		return defaultMax
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return defaultMax
+	}
+	return n
+}
+
 func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *client.Client, full bool, fullOpts *FullSyncOptions) (int, error) {
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	configID = strings.TrimSpace(configID)
@@ -714,13 +730,18 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 					diag("Y2024", time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
 				}
 
-				limit := 500
+				// Default behavior (no limit passed) should be "sync all" from newest to oldest (rate-limited).
+				// Users can still pass `limit` to reduce scope for risk-control reasons.
+				limit := 0
 				var beforeUID uint32
 				if fullOpts != nil {
 					limit = fullOpts.Limit
 					beforeUID = fullOpts.BeforeUID
 				}
-				limit = clampFullSyncLimit(limit)
+				unlimited := limit == 0
+				if !unlimited {
+					limit = clampFullSyncLimit(limit)
+				}
 
 				// If requested, only fetch UIDs older than beforeUID (paged full sync).
 				if beforeUID > 0 {
@@ -736,8 +757,19 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 					)
 				}
 
-				// Safety limit for huge mailboxes (QQ risk control).
-				if len(uids) > limit {
+				// Limit scope if requested, otherwise apply a hard safety cap for extremely large mailboxes.
+				if unlimited {
+					maxUIDs := getFullSyncSafetyMaxUIDs()
+					if len(uids) > maxUIDs {
+						log.Printf(
+							"[Email Monitor] Full sync safety cap: uidCount=%d cap=%d (set SBM_EMAIL_FULLSYNC_MAX_UIDS to override) (config=%s)",
+							len(uids),
+							maxUIDs,
+							configID,
+						)
+						uids = uids[len(uids)-maxUIDs:]
+					}
+				} else if len(uids) > limit {
 					uids = uids[len(uids)-limit:]
 				}
 				if len(uids) == 0 {
@@ -1279,7 +1311,7 @@ func (s *EmailService) ManualCheckWithOptions(ownerUserID string, configID strin
 	// Auto-paging for full sync: when the caller does not specify beforeUid, continue syncing older messages
 	// based on the oldest UID already logged in DB. This avoids relying on the UI's limited log window.
 	if full {
-		needsAutoBefore := fullOpts == nil || fullOpts.BeforeUID == 0
+		needsAutoBefore := fullOpts == nil
 		if needsAutoBefore {
 			if minUID, err := s.repo.GetMinUIDForMailboxCtx(context.Background(), ownerUserID, configID, "INBOX"); err == nil && minUID > 0 {
 				if fullOpts == nil {
