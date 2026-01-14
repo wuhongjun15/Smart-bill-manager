@@ -443,9 +443,9 @@ func (s *EmailService) StartMonitoring(ownerUserID string, configID string) bool
 
 	log.Printf("[Email Monitor] Connected to %s", config.Email)
 
-	// Start monitoring in goroutine
-	needFullSync := config.LastCheck == nil || strings.TrimSpace(*config.LastCheck) == ""
-	go s.monitorInbox(configID, strings.TrimSpace(config.OwnerUserID), needFullSync, c)
+	// Start monitoring in goroutine.
+	// Do NOT auto-run a historical sync on first start; large inboxes easily trigger QQ risk control.
+	go s.monitorInbox(configID, strings.TrimSpace(config.OwnerUserID), false, c)
 
 	return true
 }
@@ -461,12 +461,20 @@ func (s *EmailService) monitorInbox(configID string, ownerUserID string, fullSyn
 
 	log.Printf("[Email Monitor] Inbox opened. %d total messages", mbox.Messages)
 
-	// On first run (no last_check), do a one-time historical sync.
+	// On first run (no last_check), do NOT scan the whole mailbox (risk control on huge inboxes).
+	// Instead, fast-forward to the current UIDNEXT and only start logging new emails.
 	if fullSync {
 		if _, err := s.fetchEmails(ownerUserID, configID, c, true); err != nil {
 			log.Printf("[Email Monitor] Full sync error: %v", err)
 		}
 	} else {
+		if cfg, err := s.repo.FindConfigByIDCtx(context.Background(), configID); err == nil && cfg != nil {
+			if cfg.LastCheck == nil || strings.TrimSpace(*cfg.LastCheck) == "" {
+				now := time.Now().Format(time.RFC3339)
+				_ = s.repo.UpdateLastCheckForOwner(ownerUserID, configID, now)
+				log.Printf("[Email Monitor] Initialized last_check=%s; skip historical scan (uidNext=%d)", now, mbox.UidNext)
+			}
+		}
 		if _, err := s.fetchEmails(ownerUserID, configID, c, false); err != nil {
 			log.Printf("[Email Monitor] Fetch error: %v", err)
 		}
@@ -479,13 +487,35 @@ func (s *EmailService) monitorInbox(configID string, ownerUserID string, fullSyn
 	done := make(chan error, 1)
 	stop := make(chan struct{})
 
+	// Debounce mailbox update bursts (common in high-volume inboxes) to avoid frequent IMAP commands.
 	go func() {
+		const debounce = 5 * time.Second
+		timer := time.NewTimer(debounce)
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		pending := false
 		for {
 			select {
 			case update := <-updates:
 				switch update.(type) {
 				case *client.MailboxUpdate:
 					log.Println("[Email Monitor] New mail received!")
+					pending = true
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					timer.Reset(debounce)
+				}
+			case <-timer.C:
+				if pending {
+					pending = false
 					if _, err := s.fetchEmails(ownerUserID, configID, c, false); err != nil {
 						log.Printf("[Email Monitor] Fetch error: %v", err)
 					}
@@ -537,9 +567,6 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 			if s.processMessage(ownerUserID, configID, msg, nil, full) {
 				newLogs++
 			}
-			if !full && msg != nil {
-				s.markSeenByUID(c, msg.Uid)
-			}
 		}
 		return <-errCh
 	}
@@ -563,6 +590,11 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 			} else {
 				log.Printf("[Email Monitor] Full sync: %d messages (uid list size=%d)", len(uids), len(uids))
 
+				// Safety limit for huge mailboxes (QQ risk control).
+				const maxUIDs = 500
+				if len(uids) > maxUIDs {
+					uids = uids[len(uids)-maxUIDs:]
+				}
 				const chunkSize = 50
 				for i := 0; i < len(uids); i += chunkSize {
 					end := i + chunkSize
@@ -582,27 +614,57 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 			}
 		}
 	} else {
-		criteria := imap.NewSearchCriteria()
-		criteria.WithoutFlags = []string{imap.SeenFlag}
-
-		uids, err := c.UidSearch(criteria)
+		// Incremental sync: avoid "SEARCH UNSEEN" on large inboxes; it can match a huge backlog and trigger risk control.
+		mbox, err := c.Select("INBOX", false)
 		if err != nil {
-			log.Printf("[Email Monitor] Search error: %v", err)
+			log.Printf("[Email Monitor] Select error: %v", err)
 			return 0, err
 		}
-
-		const chunkSize = 50
-		for i := 0; i < len(uids); i += chunkSize {
-			end := i + chunkSize
-			if end > len(uids) {
-				end = len(uids)
+		if mbox == nil || mbox.UidNext == 0 {
+			return 0, nil
+		}
+		uidNext := mbox.UidNext
+		lastUID, err := s.repo.GetMaxUIDForMailboxCtx(context.Background(), ownerUserID, configID, "INBOX")
+		if err != nil {
+			log.Printf("[Email Monitor] Max UID query error: %v", err)
+			return 0, err
+		}
+		// First-time bootstrap: store a hidden cursor log so we don't scan the entire mailbox.
+		// Use status="deleted" so it does not show up in UI lists, but still advances MAX(message_uid).
+		if lastUID == 0 {
+			if cfg, err := s.repo.FindConfigByIDCtx(context.Background(), configID); err == nil && cfg != nil {
+				if cfg.LastCheck == nil || strings.TrimSpace(*cfg.LastCheck) == "" {
+					baseline := uint32(0)
+					if uidNext > 0 {
+						baseline = uidNext - 1
+					}
+					if baseline > 0 {
+						_ = s.repo.CreateLog(&models.EmailLog{
+							ID:            utils.GenerateUUID(),
+							OwnerUserID:   strings.TrimSpace(ownerUserID),
+							EmailConfigID: configID,
+							Mailbox:       "INBOX",
+							MessageUID:    baseline,
+							HasAttachment: 0,
+							Status:        "deleted",
+						})
+					}
+					now := time.Now().Format(time.RFC3339)
+					_ = s.repo.UpdateLastCheckForOwner(ownerUserID, configID, now)
+					return 0, nil
+				}
 			}
-			seqSet := new(imap.SeqSet)
-			seqSet.AddNum(uids[i:end]...)
-			if err := fetchChunk(seqSet); err != nil {
-				log.Printf("[Email Monitor] UidFetch error: %v", err)
-				return newLogs, err
-			}
+		}
+		start := lastUID + 1
+		end := uidNext - 1
+		if start == 0 || end == 0 || start > end {
+			return 0, nil
+		}
+		seqSet := new(imap.SeqSet)
+		seqSet.AddRange(start, end)
+		if err := fetchChunk(seqSet); err != nil {
+			log.Printf("[Email Monitor] UidFetch error: %v", err)
+			return newLogs, err
 		}
 	}
 

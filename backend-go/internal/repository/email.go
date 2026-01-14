@@ -228,6 +228,34 @@ func (r *EmailRepository) FindLogsForMailboxReconcileCtx(ctx context.Context, ow
 	return logs, err
 }
 
+func (r *EmailRepository) GetMaxUIDForMailboxCtx(ctx context.Context, ownerUserID string, configID string, mailbox string) (maxUID uint32, err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	configID = strings.TrimSpace(configID)
+	mailbox = strings.TrimSpace(mailbox)
+	if mailbox == "" {
+		mailbox = "INBOX"
+	}
+	if ownerUserID == "" || configID == "" {
+		return 0, nil
+	}
+
+	var v *uint32
+	if err := database.GetDB().WithContext(ctx).
+		Model(&models.EmailLog{}).
+		Select("MAX(message_uid)").
+		Where("owner_user_id = ? AND email_config_id = ? AND mailbox = ?", ownerUserID, configID, mailbox).
+		Scan(&v).Error; err != nil {
+		return 0, err
+	}
+	if v == nil {
+		return 0, nil
+	}
+	return *v, nil
+}
+
 func (r *EmailRepository) MarkLogsDeletedByIDs(ids []string) (int64, error) {
 	var total int64
 	if len(ids) == 0 {
