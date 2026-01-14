@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -621,9 +622,22 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 				if len(uids) > maxUIDs {
 					uids = uids[len(uids)-maxUIDs:]
 				}
-				const chunkSize = 50
-				for end := len(uids); end > 0; end -= chunkSize {
-					start := end - chunkSize
+
+				// Rate-limited pipeline: fetch in small batches and sleep between batches to reduce IMAP bursts.
+				const batchSize = 20
+				const baseDelay = 350 * time.Millisecond
+				const jitter = 250 * time.Millisecond
+				rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+				log.Printf(
+					"[Email Monitor] Full sync plan: limit=%d batchSize=%d delay=%s jitter=%s newestFirst=true",
+					len(uids),
+					batchSize,
+					baseDelay,
+					jitter,
+				)
+
+				for end := len(uids); end > 0; end -= batchSize {
+					start := end - batchSize
 					if start < 0 {
 						start = 0
 					}
@@ -632,6 +646,13 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 					if err := fetchChunk(seqSet); err != nil {
 						log.Printf("[Email Monitor] UidFetch error: %v", err)
 						return newLogs, err
+					}
+					if start > 0 {
+						sleep := baseDelay
+						if jitter > 0 {
+							sleep += time.Duration(rng.Int63n(int64(jitter)))
+						}
+						time.Sleep(sleep)
 					}
 				}
 
