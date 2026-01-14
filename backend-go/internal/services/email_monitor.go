@@ -376,6 +376,30 @@ func (s *EmailService) DeleteConfig(ownerUserID string, id string) error {
 	return s.repo.DeleteConfigForOwnerCascade(ownerUserID, id)
 }
 
+func (s *EmailService) ClearLogs(ownerUserID string, configID string) (deleted int64, err error) {
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	configID = strings.TrimSpace(configID)
+	if ownerUserID == "" || configID == "" {
+		return 0, fmt.Errorf("missing fields")
+	}
+
+	// Stop monitoring to avoid concurrent writes while clearing.
+	s.StopMonitoring(configID)
+
+	if _, err := s.repo.FindConfigByIDForOwner(ownerUserID, configID); err != nil {
+		return 0, err
+	}
+
+	deleted, err = s.repo.DeleteLogsByConfigIDForOwner(ownerUserID, configID)
+	if err != nil {
+		return 0, err
+	}
+
+	// Reset last_check so the next sync can safely bootstrap.
+	_ = s.repo.UpdateLastCheckForOwner(ownerUserID, configID, "")
+	return deleted, nil
+}
+
 func (s *EmailService) GetLogs(ownerUserID string, configID string, limit int) ([]models.EmailLog, error) {
 	return s.GetLogsCtx(context.Background(), ownerUserID, configID, limit)
 }
@@ -590,19 +614,21 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 			} else {
 				log.Printf("[Email Monitor] Full sync: %d messages (uid list size=%d)", len(uids), len(uids))
 
+				uidsAll := uids
+
 				// Safety limit for huge mailboxes (QQ risk control).
 				const maxUIDs = 500
 				if len(uids) > maxUIDs {
 					uids = uids[len(uids)-maxUIDs:]
 				}
 				const chunkSize = 50
-				for i := 0; i < len(uids); i += chunkSize {
-					end := i + chunkSize
-					if end > len(uids) {
-						end = len(uids)
+				for end := len(uids); end > 0; end -= chunkSize {
+					start := end - chunkSize
+					if start < 0 {
+						start = 0
 					}
 					seqSet := new(imap.SeqSet)
-					seqSet.AddNum(uids[i:end]...)
+					seqSet.AddNum(uids[start:end]...)
 					if err := fetchChunk(seqSet); err != nil {
 						log.Printf("[Email Monitor] UidFetch error: %v", err)
 						return newLogs, err
@@ -610,7 +636,9 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 				}
 
 				// Reconcile deletions after a successful full-sync UID SEARCH ALL.
-				_ = s.reconcileDeletedLogs(ownerUserID, configID, "INBOX", uids)
+				// Use the full UID set returned by SEARCH ALL (do not use the safety-limited slice),
+				// otherwise older logs may be incorrectly marked as deleted.
+				_ = s.reconcileDeletedLogs(ownerUserID, configID, "INBOX", uidsAll)
 			}
 		}
 	} else {
@@ -629,31 +657,29 @@ func (s *EmailService) fetchEmails(ownerUserID string, configID string, c *clien
 			log.Printf("[Email Monitor] Max UID query error: %v", err)
 			return 0, err
 		}
-		// First-time bootstrap: store a hidden cursor log so we don't scan the entire mailbox.
+
+		// Bootstrap when we have no cursor/logs yet: fast-forward to current UIDNEXT and only log new emails.
 		// Use status="deleted" so it does not show up in UI lists, but still advances MAX(message_uid).
 		if lastUID == 0 {
-			if cfg, err := s.repo.FindConfigByIDCtx(context.Background(), configID); err == nil && cfg != nil {
-				if cfg.LastCheck == nil || strings.TrimSpace(*cfg.LastCheck) == "" {
-					baseline := uint32(0)
-					if uidNext > 0 {
-						baseline = uidNext - 1
-					}
-					if baseline > 0 {
-						_ = s.repo.CreateLog(&models.EmailLog{
-							ID:            utils.GenerateUUID(),
-							OwnerUserID:   strings.TrimSpace(ownerUserID),
-							EmailConfigID: configID,
-							Mailbox:       "INBOX",
-							MessageUID:    baseline,
-							HasAttachment: 0,
-							Status:        "deleted",
-						})
-					}
-					now := time.Now().Format(time.RFC3339)
-					_ = s.repo.UpdateLastCheckForOwner(ownerUserID, configID, now)
-					return 0, nil
-				}
+			baseline := uint32(0)
+			if uidNext > 0 {
+				baseline = uidNext - 1
 			}
+			if baseline > 0 {
+				_ = s.repo.CreateLog(&models.EmailLog{
+					ID:            utils.GenerateUUID(),
+					OwnerUserID:   strings.TrimSpace(ownerUserID),
+					EmailConfigID: configID,
+					Mailbox:       "INBOX",
+					MessageUID:    baseline,
+					HasAttachment: 0,
+					Status:        "deleted",
+				})
+			}
+			now := time.Now().Format(time.RFC3339)
+			_ = s.repo.UpdateLastCheckForOwner(ownerUserID, configID, now)
+			log.Printf("[Email Monitor] Baseline cursor set (uid=%d uidNext=%d); skip historical scan", baseline, uidNext)
+			return 0, nil
 		}
 		start := lastUID + 1
 		end := uidNext - 1
@@ -810,6 +836,28 @@ func (s *EmailService) processMessage(ownerUserID string, configID string, msg *
 		xmlURL, pdfURL := extractInvoiceLinksFromText(bodyText)
 
 		updates := computeEmailLogMetadataUpdates(existing, hasAttachment, attachmentCount, xmlURL, pdfURL, forceRefresh)
+		// Backfill basic metadata for cursor/older rows (e.g. baseline cursor log) when missing.
+		if envelope := msg.Envelope; envelope != nil {
+			subject := strings.TrimSpace(envelope.Subject)
+			if subject == "" {
+				subject = "(无主题)"
+			}
+			from := ""
+			if len(envelope.From) > 0 {
+				from = formatIMAPAddress(envelope.From[0])
+			}
+			dateStr := envelope.Date.Format(time.RFC3339)
+
+			if existing.Subject == nil || strings.TrimSpace(*existing.Subject) == "" {
+				updates["subject"] = subject
+			}
+			if existing.FromAddress == nil || strings.TrimSpace(*existing.FromAddress) == "" {
+				updates["from_address"] = from
+			}
+			if existing.ReceivedDate == nil || strings.TrimSpace(*existing.ReceivedDate) == "" {
+				updates["received_date"] = dateStr
+			}
+		}
 		if len(updates) > 0 {
 			_ = s.repo.UpdateLog(existing.ID, updates)
 		}

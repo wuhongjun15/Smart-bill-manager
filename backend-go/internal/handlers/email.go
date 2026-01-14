@@ -27,6 +27,7 @@ func (h *EmailHandler) RegisterRoutes(r *gin.RouterGroup) {
 	r.DELETE("/configs/:id", h.DeleteConfig)
 	r.POST("/test", h.TestConnection)
 	r.GET("/logs", h.GetLogs)
+	r.DELETE("/logs", h.ClearLogs)
 	r.POST("/logs/:id/parse", h.ParseLog)
 	r.GET("/logs/:id/export", h.ExportLogEML)
 	r.POST("/monitor/start/:id", h.StartMonitoring)
@@ -149,6 +150,26 @@ func (h *EmailHandler) GetLogs(c *gin.Context) {
 	}
 
 	utils.SuccessData(c, logs)
+}
+
+func (h *EmailHandler) ClearLogs(c *gin.Context) {
+	configID := c.Query("configId")
+	if configID == "" {
+		utils.Error(c, 400, "missing configId", nil)
+		return
+	}
+
+	deleted, err := h.emailService.ClearLogs(middleware.GetEffectiveUserID(c), configID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			utils.Error(c, 404, "email config not found", nil)
+			return
+		}
+		utils.Error(c, 500, "failed to clear logs", err)
+		return
+	}
+
+	utils.Success(c, 200, "logs cleared", gin.H{"deleted": deleted})
 }
 
 func (h *EmailHandler) ParseLog(c *gin.Context) {

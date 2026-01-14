@@ -21,6 +21,9 @@ export const emailApi = {
   getLogs: (configId?: string, limit?: number, config?: AxiosRequestConfig) =>
     api.get<ApiResponse<EmailLog[]>>('/email/logs', { params: { configId, limit }, ...(config || {}) }),
 
+  clearLogs: (configId: string) =>
+    api.delete<ApiResponse<{ deleted: number }>>('/email/logs', { params: { configId } }),
+
   parseLog: (id: string) =>
     api.post<ApiResponse<Invoice>>(`/email/logs/${id}/parse`),
 

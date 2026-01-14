@@ -118,6 +118,18 @@ func (r *EmailRepository) DeleteLogsByConfigID(configID string) (deleted int64, 
 	return res.RowsAffected, res.Error
 }
 
+func (r *EmailRepository) DeleteLogsByConfigIDForOwner(ownerUserID string, configID string) (deleted int64, err error) {
+	ownerUserID = strings.TrimSpace(ownerUserID)
+	configID = strings.TrimSpace(configID)
+	if ownerUserID == "" || configID == "" {
+		return 0, fmt.Errorf("missing fields")
+	}
+	res := database.GetDB().
+		Where("owner_user_id = ? AND email_config_id = ?", ownerUserID, configID).
+		Delete(&models.EmailLog{})
+	return res.RowsAffected, res.Error
+}
+
 func (r *EmailRepository) DeleteConfigForOwnerCascade(ownerUserID string, id string) error {
 	ownerUserID = strings.TrimSpace(ownerUserID)
 	id = strings.TrimSpace(id)
@@ -189,6 +201,7 @@ func (r *EmailRepository) FindLogsCtx(ctx context.Context, ownerUserID string, c
 		Model(&models.EmailLog{}).
 		Where("owner_user_id = ?", ownerUserID).
 		Where("status <> ?", "deleted").
+		Order("received_date DESC").
 		Order("created_at DESC")
 
 	if configID != "" {

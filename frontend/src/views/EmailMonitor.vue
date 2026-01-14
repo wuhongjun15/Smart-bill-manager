@@ -108,6 +108,16 @@
 
                 <Button
                   size="small"
+                  severity="warning"
+                  class="p-button-outlined"
+                  icon="pi pi-eraser"
+                  :title="'清空日志'"
+                  :loading="clearLogsLoading === row.id"
+                  @click="handleClearLogs(row.id)"
+                />
+
+                <Button
+                  size="small"
                   severity="danger"
                   class="p-button-text"
                   icon="pi pi-trash"
@@ -824,6 +834,7 @@ const handleManualCheck = async (id: string) => {
 }
 
 const fullSyncLoading = ref<string | null>(null)
+const clearLogsLoading = ref<string | null>(null)
 
 const runManualFullSync = async (id: string, stopAndResume: boolean) => {
   fullSyncLoading.value = id
@@ -881,6 +892,61 @@ const handleManualFullSync = async (id: string) => {
     return
   }
   await runManualFullSync(id, false)
+}
+
+const runClearLogs = async (id: string, stopAndResume: boolean) => {
+  clearLogsLoading.value = id
+  try {
+    if (stopAndResume) {
+      try {
+        await emailApi.stopMonitoring(id)
+      } catch {
+        // ignore
+      }
+      await loadMonitorStatus()
+    }
+
+    const res = await emailApi.clearLogs(id)
+    if (res.data?.success) {
+      const deleted = (res.data.data as any)?.deleted || 0
+      toast.add({ severity: 'success', summary: `日志已清空（${deleted}）`, life: 2400 })
+      notifications.add({ severity: 'info', title: '邮件日志已清空', detail: id })
+      setStoredTs(EMAIL_LOG_TS_KEY, 0)
+      await Promise.all([loadLogs(), loadConfigs(), loadMonitorStatus()])
+    } else {
+      toast.add({ severity: 'error', summary: res.data?.message || '清空日志失败', life: 3500 })
+      notifications.add({ severity: 'error', title: '清空日志失败', detail: res.data?.message || id })
+    }
+  } catch {
+    toast.add({ severity: 'error', summary: '清空日志失败', life: 3500 })
+    notifications.add({ severity: 'error', title: '清空日志失败', detail: id })
+  } finally {
+    try {
+      if (stopAndResume) {
+        await emailApi.startMonitoring(id)
+        await loadMonitorStatus()
+      }
+    } catch {
+      // ignore
+    }
+    clearLogsLoading.value = null
+  }
+}
+
+const handleClearLogs = async (id: string) => {
+  if (monitorStatus.value?.[id] === 'running') {
+    confirm.require({
+      message: '当前邮箱监控中，清空日志会临时停止监控并重连，是否继续？',
+      header: '清空日志确认',
+      icon: 'pi pi-exclamation-triangle',
+      acceptLabel: '继续',
+      rejectLabel: '取消',
+      acceptClass: 'p-button-warning',
+      accept: () => void runClearLogs(id, true),
+    })
+    return
+  }
+  await runClearLogs(id, false)
 }
 
 const formatDateTime = (date: string) => dayjs(date).format('YYYY-MM-DD HH:mm')
