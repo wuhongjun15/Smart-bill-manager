@@ -201,7 +201,9 @@ func (r *EmailRepository) FindLogsCtx(ctx context.Context, ownerUserID string, c
 		Model(&models.EmailLog{}).
 		Where("owner_user_id = ?", ownerUserID).
 		Where("status <> ?", "deleted").
-		Order("received_date DESC").
+		// received_date is stored as an ISO/RFC3339 string; use SQLite datetime() to sort correctly
+		// even when timezone offsets differ.
+		Order("datetime(received_date) DESC").
 		Order("created_at DESC")
 
 	if configID != "" {

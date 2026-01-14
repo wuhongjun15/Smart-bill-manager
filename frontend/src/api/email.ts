@@ -46,5 +46,9 @@ export const emailApi = {
     api.post<ApiResponse<{ newEmails: number }>>(`/email/check/${id}`),
 
   manualFullSync: (id: string) =>
-    api.post<ApiResponse<{ newEmails: number }>>(`/email/check/${id}`, null, { params: { full: 1 } }),
+    api.post<ApiResponse<{ newEmails: number }>>(`/email/check/${id}`, null, {
+      params: { full: 1 },
+      // Full sync is intentionally rate-limited to avoid IMAP risk control and can exceed the default 15s timeout.
+      timeout: 120_000,
+    }),
 }

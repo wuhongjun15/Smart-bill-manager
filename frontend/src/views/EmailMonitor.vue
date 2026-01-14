@@ -836,6 +836,12 @@ const handleManualCheck = async (id: string) => {
 const fullSyncLoading = ref<string | null>(null)
 const clearLogsLoading = ref<string | null>(null)
 
+const isRequestTimeout = (err: any): boolean => {
+  const code = String(err?.code || '')
+  const msg = String(err?.message || '').toLowerCase()
+  return code === 'ECONNABORTED' || code === 'ETIMEDOUT' || msg.includes('timeout')
+}
+
 const runManualFullSync = async (id: string, stopAndResume: boolean) => {
   fullSyncLoading.value = id
   try {
@@ -863,9 +869,14 @@ const runManualFullSync = async (id: string, stopAndResume: boolean) => {
       toast.add({ severity: 'error', summary: res.data.message || '全量同步失败', life: 3500 })
       notifications.add({ severity: 'error', title: '邮箱全量同步失败', detail: res.data.message || id })
     }
-  } catch {
-    toast.add({ severity: 'error', summary: '全量同步失败', life: 3500 })
-    notifications.add({ severity: 'error', title: '邮箱全量同步失败', detail: id })
+  } catch (e: any) {
+    if (isRequestTimeout(e)) {
+      toast.add({ severity: 'warn', summary: '全量同步请求超时：后台可能仍在继续，请稍后观察日志是否持续增加', life: 4500 })
+      notifications.add({ severity: 'info', title: '全量同步仍可能进行中', detail: id })
+    } else {
+      toast.add({ severity: 'error', summary: '全量同步失败', life: 3500 })
+      notifications.add({ severity: 'error', title: '邮箱全量同步失败', detail: id })
+    }
   } finally {
     try {
       if (stopAndResume) {
